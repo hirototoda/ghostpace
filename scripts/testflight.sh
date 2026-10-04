@@ -7,9 +7,9 @@
 # 送る前に scripts/test.sh all でユニットテストと UI テストを全件回し、失敗したら送らない（docs/verification/strategy.md）。
 # 順番待ちを含めて20〜40分かかるので、Claude はバックグラウンドで実行する。
 #
-# 認証は Xcode にサインイン済みの Apple ID を使う。
-# App Store Connect API キーを使う場合は ~/.appstoreconnect/ghostpace.env に
-#   ASC_KEY_PATH / ASC_KEY_ID / ASC_ISSUER_ID を書く（リポジトリには置かない）。
+# ふだんは GitHub Actions が main で実行する（.github/workflows/testflight.yml、ADR-0021）。この Mac から送るのは急ぎのときだけ。
+# 認証：環境変数 ASC_KEY_PATH / ASC_KEY_ID / ASC_ISSUER_ID があれば App Store Connect API キーを使う（CI）。
+# なければ ~/.appstoreconnect/ghostpace.env（同じ3つを書く。リポジトリには置かない）、それもなければ Xcode にサインイン済みの Apple ID。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -28,14 +28,16 @@ if $run_tests; then
 fi
 
 # ビルド番号は送るたびに増やす必要があるので、日時を使う（例: 202610011530）
-build_number=$(date +%Y%m%d%H%M)
+build_number=$(TZ=Asia/Tokyo date +%Y%m%d%H%M)
 out="${TMPDIR:-/tmp}/ghostpace-testflight/$build_number"
 mkdir -p "$out"
 
 auth=()
 env_file="$HOME/.appstoreconnect/ghostpace.env"
-if [[ -f "$env_file" ]]; then
+if [[ -z "${ASC_KEY_PATH:-}" && -f "$env_file" ]]; then
     source "$env_file"
+fi
+if [[ -n "${ASC_KEY_PATH:-}" ]]; then
     auth=(-authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 fi
 
@@ -45,18 +47,24 @@ if ! $upload; then
     sed 's#<string>upload</string>#<string>export</string>#' scripts/ExportOptions.plist > "$export_options"
 fi
 
+step() {  # $1: ログの名前, 残り: xcodebuild の引数。失敗したらエラーの行を出す
+    local log="$out/$1.log"; shift
+    xcodebuild "$@" > "$log" 2>&1 || { grep -E "error:|\*\* .* FAILED|Failed to|No profiles|Provisioning" "$log" | head -40; tail -20 "$log"; echo "失敗（ログ: $log）" >&2; return 1; }
+    tail -3 "$log"
+}
+
 xcodegen generate
-xcodebuild archive \
+step archive archive \
     -project FocusApp.xcodeproj -scheme FocusApp -configuration Release \
     -destination 'generic/platform=iOS' \
     -archivePath "$out/FocusApp.xcarchive" \
     -allowProvisioningUpdates "${auth[@]}" \
-    CURRENT_PROJECT_VERSION="$build_number" | tail -3
-xcodebuild -exportArchive \
+    CURRENT_PROJECT_VERSION="$build_number"
+step export -exportArchive \
     -archivePath "$out/FocusApp.xcarchive" \
     -exportOptionsPlist "$export_options" \
     -exportPath "$out/export" \
-    -allowProvisioningUpdates "${auth[@]}" | tail -3
+    -allowProvisioningUpdates "${auth[@]}"
 
 if $upload; then
     echo "TestFlight に送りました（ビルド番号 $build_number）。処理が終わると iPhone の TestFlight に届きます（10〜30分）"
