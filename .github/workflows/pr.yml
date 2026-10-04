@@ -1,0 +1,53 @@
+# PR ごとのテスト。「CI OK」が通ると、Claude が予約した自動マージ（gh pr merge --auto）が実行される。docs/decisions/0021-github-actions.md
+# docs・.claude・*.md だけの PR では Mac を使わない（「CI OK」はすぐ通る）。
+# 他人のフォークからの PR は、オーナーが承認するまで動かず、秘密の情報（TestFlight の鍵）も渡らない。
+name: PR
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.diff.outputs.app }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only "$BASE"..."$HEAD" > changed.txt
+          cat changed.txt
+          if grep -qvE '^(docs/|\.claude/)|\.md$' changed.txt; then app=true; else app=false; fi
+          echo "app=$app" | tee -a "$GITHUB_OUTPUT"
+
+  tests:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    uses: ./.github/workflows/tests.yml
+
+  ci-ok:
+    name: CI OK
+    needs: [changes, tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          TESTS: ${{ needs.tests.result }}
+        run: |
+          echo "changes=$CHANGES tests=$TESTS"
+          [[ "$CHANGES" == success && ( "$TESTS" == success || "$TESTS" == skipped ) ]]

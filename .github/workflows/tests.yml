@@ -1,0 +1,78 @@
+# ビルドを1回作り、テストを3つの Mac で同時に回す（PR 用と TestFlight 用の両方から呼ぶ）。docs/decisions/0021-github-actions.md
+# 塊1＝ユニットテスト全件＋UI テストの1/3、塊2・3＝UI テストの残り。標準の Mac（xcode-27）は公開リポジトリなら無料、同時に5つまで。
+name: Tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  SIM_DEVICE: iPhone 18 Pro
+  SIM_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-27-0
+  XCODEGEN_VERSION: 2.46.0
+
+jobs:
+  build:
+    name: Build
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install XcodeGen
+        run: scripts/ci/install-xcodegen.sh
+      - name: Generate project
+        run: xcodegen generate --quiet
+      - name: Build for testing
+        run: |
+          log="$RUNNER_TEMP/build.log"
+          start=$SECONDS
+          xcodebuild build-for-testing \
+            -project FocusApp.xcodeproj -scheme FocusApp \
+            -destination "platform=iOS Simulator,name=$SIM_DEVICE,OS=27.0" \
+            -derivedDataPath "$RUNNER_TEMP/dd" > "$log" 2>&1 || {
+              grep -E "error:|BUILD FAILED" "$log" | head -40
+              tail -40 "$log"
+              exit 1
+            }
+          echo "ビルド成功（$(( (SECONDS - start) / 60 ))分$(( (SECONDS - start) % 60 ))秒）"
+          grep -cE "warning:" "$log" | xargs -I{} echo "警告 {} 件"
+      - name: Pack build products
+        run: tar -C "$RUNNER_TEMP/dd/Build" -czf "$RUNNER_TEMP/products.tgz" Products
+      - uses: actions/upload-artifact@v7
+        with:
+          name: products
+          path: ${{ runner.temp }}/products.tgz
+          retention-days: 1
+          compression-level: 0
+
+  test:
+    name: Test ${{ matrix.shard }}/3
+    needs: build
+    runs-on: xcode-27
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: products
+          path: ${{ runner.temp }}
+      - name: Unpack build products
+        run: mkdir -p "$RUNNER_TEMP/dd/Build" && tar -C "$RUNNER_TEMP/dd/Build" -xzf "$RUNNER_TEMP/products.tgz"
+      - name: Prepare simulator (Japanese, Asia/Tokyo)
+        id: sim
+        run: echo "udid=$(scripts/ci/prepare-simulator.sh)" >> "$GITHUB_OUTPUT"
+      - name: Run tests
+        run: scripts/ci/run-tests.sh ${{ matrix.shard }} 3 "${{ steps.sim.outputs.udid }}" "$RUNNER_TEMP/dd" "$RUNNER_TEMP/results"
+      - name: Upload results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/results
+          retention-days: 7
