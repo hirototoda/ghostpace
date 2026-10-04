@@ -1,11 +1,11 @@
 #!/bin/zsh
-# テストを Mac 全体の順番待ちに並んで実行する。複数のチャットが同時にテストしても CPU が埋まらないようにする。
+# この Mac でテストを Mac 全体の順番待ちに並んで実行する（急ぎのときだけ。ふだんは GitHub Actions、ADR-0021）。複数のチャットが同時にテストしても CPU が埋まらないようにする。
 # 同時に走るのはビルドとテストを合わせて FOCUSAPP_TEST_SLOTS 個まで（既定 2）。UI テストは数件ずつの塊に分けて並ぶので、
 # 1つのチャットが長く占有せず、各チャットの塊が順番に流れる。docs/verification/strategy.md「テストの回し方」
 #
 #   scripts/test.sh                          ビルドとユニットテスト全件
 #   scripts/test.sh ui <対象...>             ユニットテスト全件と、指定した UI テスト（例: RecordingFlowUITests/testPauseResumeEnd OpenedTimeUITests）
-#   scripts/test.sh all                      ユニットテスト全件と UI テスト全件（TestFlight に送る前。scripts/testflight.sh が呼ぶ）
+#   scripts/test.sh all                      ユニットテスト全件と UI テスト全件
 #   scripts/test.sh tour <対象...>           撮影用の ScreenTourUITests を SCREEN_TOUR=1 で動かす（例: ScreenTourUITests/testSleep）
 #   scripts/test.sh status                   いま走っているもの・待っているものを見る
 #

@@ -9,7 +9,8 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 
 ## 0. 始める前に
 - `CLAUDE.md`、`docs/README.md`、関係する `docs/product/features/*.md`・`requirements.md`・`design/data-model.md` を読む
-- `git status` と `git worktree list` を見る。自分のものでない未コミットの変更があれば、別のセッションが作業中。触らずに `git worktree add -b <branch> ../focus-app-<名前> origin/main` で別の作業場所を作る
+- 作業は公開リポジトリ ghostpace（`~/Desktop/ghostpace`）で行う。報告と判断の表は非公開の focus-app（`~/Desktop/focus-app-private`）に書く（ADR-0021）
+- `git status` と `git worktree list` を見る。自分のものでない未コミットの変更があれば、別のセッションが作業中。触らずに `git worktree add -b <branch> ../ghostpace-<名前> origin/main` で別の作業場所を作る
 - 大きさを決める
 
   | 大きさ | 例 | 行う段階 |
@@ -43,7 +44,7 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 ## 4. テストを先に書いて実装する
 - Swift Testing でテストを先に書き、失敗を確かめてから実装する。テストを弱めて通すのは禁止
 - 守ること：現在時刻は `AppClock`（テストは `FixedClock`・`OffsetClock`）、日付の区切りは `DayBoundary`（朝4:00）、データは Repository 経由、`project.yml` を直して `xcodegen generate`
-- ビルドは XcodeBuildMCP を使う（最初に `session_show_defaults` を呼ぶ）。テストは `scripts/test.sh` で回す（順番待ち。バックグラウンドで実行。使い方は verify-ios の手順3）
+- ビルドは XcodeBuildMCP を使う（最初に `session_show_defaults` を呼ぶ）。テストは push して GitHub Actions で回す（ユニット全件＋UI 全件。使い方は verify-ios の手順3）。早く確かめたいテストだけ、この Mac の `scripts/test.sh` で回してよい
 - 主な操作の流れが変わるなら、UI テスト（FocusAppUITests）を1本足す
 
 ## 5. 動作確認
@@ -51,16 +52,19 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 - `docs/verification/acceptance/` の結果欄を更新する
 
 ## 6. 実装のレビュー（中以上）
-- `/review-3` を差分に1回（`.claude/rules/review-checklist.md` を渡す）。critical・major を直し、`scripts/test.sh ui <関係する UI テスト>` をもう一度通す
+- `/review-3` を差分に1回（`.claude/rules/review-checklist.md` を渡す）。critical・major を直して push し、CI をもう一度通す
 
 ## 7. 報告・PR・マージ
 - 非公開側に `~/Desktop/focus-app-private/docs/reports/YYYY-MM-DD-<内容>.md` を書く（テンプレートは非公開側の `docs/reports/README.md`）。決めたこと、スクショ、テストの件数、オーナーへのお願い
 - コミットと PR のタイトルに要件ID（例：TMR-07）を入れる
-- テストが通り、docs と報告がそろったら `gh pr merge <番号> --squash --delete-branch`（ADR-0010）。データの形が変わる PR はオーナーの確認を待つ
+- 報告・open-questions は非公開側の main に直接コミットして push する（`git pull --rebase` してから。PR は作らない）。報告の「PR:」に ghostpace の PR を書く
+- docs と報告がそろったら `gh pr merge <番号> --auto --squash --delete-branch` で自動マージを予約する。CI の「CI OK」が通ると GitHub がマージする（ADR-0010・0021）。データの形が変わる PR は予約せず、オーナーの確認を待つ
+- CI が失敗したら直して push する（予約はそのまま残る）。結果は `gh pr checks <番号>`
 - `.claude/state/session-notes.md` を更新する
 
 ## 8. iPhone に届ける（画面や動きが変わったとき）
-- main を最新にして `scripts/testflight.sh` をバックグラウンドで実行する（ADR-0011）。送る前に UI テストを全件回し、失敗したら送らない（ADR-0020）。失敗したら直す PR を出してから送り直す。送れたら、10〜30分で iPhone の TestFlight に届くと伝える
+- マージすると、GitHub Actions が main でテスト全件 → TestFlight に送る（ADR-0011・0021。docs だけの変更では送らない）。`gh run list -R hirototoda/ghostpace --workflow TestFlight` で結果を見て、送れたら「マージから40分〜1時間で iPhone の TestFlight に届く」と伝える。失敗したら直す PR を出す
+- CI が使えないときだけ、この Mac の main で `scripts/testflight.sh` をバックグラウンドで実行する
 - オーナーが急いでいるときは、CLAUDE.md の `devicectl` の手順で直接入れる。起動の指示が失敗したら（画面ロック中など）、「ホーム画面から開いてください」と伝える
 
 ## オーナーへの伝え方
