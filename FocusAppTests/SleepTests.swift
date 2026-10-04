@@ -396,3 +396,108 @@ struct SleepModelTests {
         #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00"))?.source == .manual)
     }
 }
+
+// MARK: 手で読み直す（2026-10-03）
+
+extension SleepModelTests {
+    /// 確定してヘルスケアの値で決まった日でも、押せばあとから入った値に置き換える
+    @Test func rereadReplacesConfirmedHealth() async throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let partial = DateInterval(start: jst("2026-10-19T00:10"), end: jst("2026-10-19T03:00"))
+        let source = NoSleepSource(isAvailable: true, intervals: [partial])
+        let m = model(t, source: source)
+        await confirm(m)
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00"))?.end == partial.end)
+        t.clock.set(jst("2026-10-19T15:00"))
+        source.intervals = [lastNight]
+        #expect(await m.rereadSleepFromHealth() == .replaced)
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00"))
+                == SleepLine(start: lastNight.start, end: lastNight.end, source: .health))
+        #expect(try t.store.sleep(dayKey: "2026-10-19")?.end == lastNight.end)
+        // 自動の読み直しの決まりは変わらない（このあとも置き換えない）
+        source.intervals = [DateInterval(start: jst("2026-10-19T00:10"), end: jst("2026-10-19T08:30"))]
+        await m.refreshSleep()
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00"))?.end == lastNight.end)
+    }
+
+    /// 手で直した日でも置き換え、直す前の時刻も消す。そのあと手で直すと、直す前は読み直した値になる
+    @Test func rereadReplacesManualAndClearsOriginal() async throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let source = NoSleepSource(isAvailable: true)
+        let m = model(t, source: source)
+        #expect(m.setSleepManually(start: jst("2026-10-18T23:00"), end: jst("2026-10-19T08:00")))
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00"))?.original != nil)
+        source.intervals = [lastNight]
+        #expect(await m.rereadSleepFromHealth() == .replaced)
+        let line = try #require(m.sleepLine(dayStart: jst("2026-10-19T04:00")))
+        #expect(line.source == .health)
+        #expect(line.original == nil)
+        #expect(line.extendedPart == nil)
+        #expect(m.setSleepManually(start: jst("2026-10-18T23:00"), end: jst("2026-10-19T08:00")))
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00"))?.original == lastNight)
+    }
+
+    /// 記録がなければ今のまま
+    @Test func rereadWithoutRecordKeepsCurrent() async throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let source = NoSleepSource(isAvailable: true)
+        let m = model(t, source: source)
+        #expect(m.setSleepManually(start: jst("2026-10-18T23:30"), end: jst("2026-10-19T06:30")))
+        let before = m.sleepLine(dayStart: jst("2026-10-19T04:00"))
+        // 昼寝だけ（探す範囲の外）でも記録なし
+        source.intervals = [DateInterval(start: jst("2026-10-19T14:30"), end: jst("2026-10-19T15:30"))]
+        #expect(await m.rereadSleepFromHealth() == .noRecord)
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00")) == before)
+        #expect(m.errorMessage == nil)
+    }
+
+    /// 許可をまだ聞いていなければ、聞いてから読む
+    @Test func rereadAsksPermissionFirst() async throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let source = NoSleepSource(isAvailable: true, needsRequest: true, intervals: [lastNight])
+        let m = model(t, source: source)
+        await m.refreshSleep()
+        #expect(m.healthNeedsRequest)
+        #expect(await m.rereadSleepFromHealth() == .replaced)
+        #expect(!source.needsRequest)
+        #expect(!m.healthNeedsRequest)
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00"))?.source == .health)
+    }
+
+    /// ヘルスケアのない端末では出さない
+    @Test func rereadHiddenWithoutHealth() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        #expect(!model(t, source: NoSleepSource(isAvailable: false)).canRereadHealth)
+        #expect(model(t, source: NoSleepSource(isAvailable: true)).canRereadHealth)
+    }
+
+    /// 0:00〜3:59 は前の日の睡眠を読み直す（4:00 の区切り）
+    @Test func rereadBeforeFourIsThePreviousDay() async throws {
+        let t = try TestStore(now: jst("2026-10-20T02:00"))
+        try t.seeded()
+        let source = NoSleepSource(isAvailable: true)
+        let m = model(t, source: source)
+        source.intervals = [lastNight, DateInterval(start: jst("2026-10-20T00:30"), end: jst("2026-10-20T01:50"))]
+        #expect(await m.rereadSleepFromHealth() == .replaced)
+        #expect(try t.store.sleep(dayKey: "2026-10-19")?.end == lastNight.end)
+        #expect(try t.store.sleep(dayKey: "2026-10-20") == nil)
+    }
+
+    /// 置き換えたらポイント（ホームの数字）もすぐ数え直す
+    @Test func rereadRecountsHome() async throws {
+        let t = try TestStore(now: jst("2026-10-19T10:00"))
+        try t.seeded()
+        let source = NoSleepSource(isAvailable: true)
+        let m = model(t, source: source)
+        await confirm(m)
+        let before = try #require(m.snapshot.goalDetox)
+        source.intervals = [DateInterval(start: jst("2026-10-18T22:00"), end: jst("2026-10-19T08:00"))]
+        #expect(await m.rereadSleepFromHealth() == .replaced)
+        #expect(m.snapshot.goalDetox != before)
+    }
+}

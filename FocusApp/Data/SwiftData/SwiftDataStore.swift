@@ -597,6 +597,11 @@ extension SwiftDataStore {
                     record.originalStartAt = record.startAt
                     record.originalEndAt = record.endAt
                 }
+                // ヘルスケアから読み直したら「直す前」も消す（次に手で直すときは読み直した値が直す前。2026-10-03）
+                if sleep.source == .health {
+                    record.originalStartAt = nil
+                    record.originalEndAt = nil
+                }
                 record.startAt = sleep.start
                 record.endAt = sleep.end
                 record.sourceRaw = sleep.source.rawValue

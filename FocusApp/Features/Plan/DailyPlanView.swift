@@ -347,7 +347,7 @@ struct DailyPlanView: View {
         .accessibilityIdentifier("sleepRow")
         .accessibilityHint("寝た時刻と起きた時刻を直します")
         .sheet(isPresented: $editsSleep) {
-            SleepEditSheet(line: sleep.line) { start, end in
+            SleepEditSheet(line: sleep.line, onReread: sleep.onReread) { start, end in
                 if sleep.onEdit(start, end) { editsSleep = false }
             }
         }
@@ -525,6 +525,8 @@ struct SleepRowModel {
     /// 寝た・起きた時刻を手で直す。直せたら true
     var onEdit: (Date, Date) -> Bool
     var onRequestHealth: () -> Void
+    /// ヘルスケアから読み直す。置き換えたら true（記録がなければ false）。ヘルスケアのない端末では nil（出さない）
+    var onReread: (() async -> Bool)? = nil
 }
 
 /// 寝た・起きた時刻を直す（DTX-02）。5分刻み。直すとヘルスケアで置き換えなくなる。
@@ -532,12 +534,16 @@ struct SleepEditSheet: View {
     @State var start: Date
     @State var end: Date
     let onSave: (Date, Date) -> Void
+    let onReread: (() async -> Bool)?
+    @State private var isRereading = false
+    @State private var showsNoRecord = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(line: SleepLine, onSave: @escaping (Date, Date) -> Void) {
+    init(line: SleepLine, onReread: (() async -> Bool)? = nil, onSave: @escaping (Date, Date) -> Void) {
         _start = State(initialValue: line.start)
         _end = State(initialValue: line.end)
+        self.onReread = onReread
         self.onSave = onSave
     }
 
@@ -547,22 +553,25 @@ struct SleepEditSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     row("寝た", $start, shownDate: SleepLine.normalizedStart(start, end: end))
                     row("起きた", $end, shownDate: end)
-                    Text("直すと、あとでヘルスケアに記録が入っても置き換えません。寝た時刻が起きた時刻より遅いときは、前の夜とみなします。")
+                    Text("直すと、あとでヘルスケアに記録が入っても置き換えません（「ヘルスケアから読み直す」を押したときは置き換えます）。寝た時刻が起きた時刻より遅いときは、前の夜とみなします。")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(20)
             }
             .safeAreaInset(edge: .bottom) {
-                Button {
-                    onSave(SleepLine.normalizedStart(start, end: end), end)
-                } label: {
-                    Text("保存").font(.headline).frame(maxWidth: .infinity)
+                VStack(spacing: 10) {
+                    if let onReread { rereadButton(onReread) }
+                    Button {
+                        onSave(SleepLine.normalizedStart(start, end: end), end)
+                    } label: {
+                        Text("保存").font(.headline).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.extraLarge)
+                    .accessibilityIdentifier("sleepSaveButton")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.extraLarge)
                 .padding(.horizontal, 20).padding(.bottom, 8)
-                .accessibilityIdentifier("sleepSaveButton")
             }
             .navigationTitle("睡眠")
             .navigationBarTitleDisplayMode(.inline)
@@ -574,6 +583,35 @@ struct SleepEditSheet: View {
         }
         .tint(Theme.focus)
         .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+    }
+
+    /// ヘルスケアから読み直す（2026-10-03）。読めたら閉じ、記録がなければひとこと出す
+    @ViewBuilder
+    private func rereadButton(_ reread: @escaping () async -> Bool) -> some View {
+        VStack(spacing: 4) {
+            Button {
+                isRereading = true
+                showsNoRecord = false
+                Task {
+                    let replaced = await reread()
+                    isRereading = false
+                    if replaced { dismiss() } else { showsNoRecord = true }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if isRereading { ProgressView().controlSize(.small) }
+                    Label("ヘルスケアから読み直す", systemImage: "arrow.clockwise.heart")
+                }
+                .font(.subheadline)
+            }
+            .disabled(isRereading)
+            .accessibilityIdentifier("sleepRereadButton")
+            if showsNoRecord {
+                Text("ヘルスケアに記録がありませんでした")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("sleepNoRecordText")
+            }
+        }
     }
 
     /// `shownDate`：前の夜に合わせたあとの日付（23:30 を選ぶと前の日になる）
