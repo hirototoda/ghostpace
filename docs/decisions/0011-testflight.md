@@ -17,3 +17,6 @@ date: 2026-09-30
 - TestFlight の版は Release ビルドなので、開発用の「見本 ▾」メニューや起動引数は使えない
 - ビルドの有効期限は90日。毎日使っていれば問題にならない
 - 公開前に App Store の審査用の情報（スクリーンショット・説明文など）を別に用意する必要がある（ADR-0008 で公開を決めたとき）
+
+## 追記（2026-10-04）
+送るのは GitHub Actions（main にアプリが変わるコミットが入るたび）、認証は App Store Connect の API キー（GitHub の環境「testflight」の秘密の設定）に変えた。この Mac の `scripts/testflight.sh` は CI が使えないときだけ（[ADR-0021](0021-github-actions.md)）。

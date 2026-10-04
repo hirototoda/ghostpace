@@ -1,0 +1,66 @@
+# main にアプリが変わるコミットが入ったら、テスト全件（ユニット＋UI）→ TestFlight に送る。docs/decisions/0021-github-actions.md
+# docs・.claude・*.md だけの変更では送らない。続けて入ったときは、走っている1つのあと最新の1つだけ送る（間の待ちは取り消される）。
+# App Store Connect の API キーは、main でしか使えない環境「testflight」の秘密の設定にだけ置く（PR やフォークからは使えない）。
+name: TestFlight
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '.claude/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  upload:
+    name: Upload to TestFlight
+    needs: tests
+    if: github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    environment: testflight
+    timeout-minutes: 60
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      XCODEGEN_VERSION: 2.46.0
+      TZ: Asia/Tokyo
+    steps:
+      - name: Check API key
+        id: key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [[ -z "$ASC_KEY_ID" || -z "$ASC_ISSUER_ID" || -z "$ASC_KEY_P8" ]]; then
+            echo "::warning title=TestFlight に送らなかった::App Store Connect の API キーが環境 testflight にない（ASC_KEY_ID・ASC_ISSUER_ID・ASC_KEY_P8）"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        if: steps.key.outputs.ready == 'true'
+      - name: Install XcodeGen
+        if: steps.key.outputs.ready == 'true'
+        run: scripts/ci/install-xcodegen.sh
+      - name: Archive and upload
+        if: steps.key.outputs.ready == 'true'
+        run: scripts/testflight.sh --skip-tests
+      - name: Revoke the development certificate made on this Mac
+        if: always() && steps.key.outputs.ready == 'true'
+        run: ruby scripts/ci/revoke-runner-dev-certs.rb
+      - name: Remove API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
