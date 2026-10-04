@@ -1,0 +1,200 @@
+name: FocusApp
+
+options:
+  bundleIdPrefix: com.hirototoda
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 83JPAMS427
+
+targets:
+  FocusApp:
+    type: application
+    platform: iOS
+    sources:
+      - FocusApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hirototoda.focusapp
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: GhostPace
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_NSSupportsLiveActivities: YES
+        # 睡眠の時刻をヘルスケアから読む（DTX-02）。書かない
+        INFOPLIST_KEY_NSHealthShareUsageDescription: 寝た時刻と起きた時刻をヘルスケアから読み、寝ている間のポイントを数えます。書き込みはしません。
+        # 書き込みはしないが、ヘルスケアの許可を持つアプリには必要（App Store の確認で求められた、2026-10-02）
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: GhostPace はヘルスケアにデータを書き込みません。睡眠の時刻を読むだけです。
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+      configs:
+        Debug:
+          # 本体だけヘルスケアの許可を持つ（拡張は Debug/Release.entitlements のまま）
+          CODE_SIGN_ENTITLEMENTS: Config/AppDebug.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG BLOCKING_ENTITLED
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Config/AppRelease.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: BLOCKING_ENTITLED
+    dependencies:
+      - target: BlockShield
+      - target: BlockShieldAction
+      - target: BlockMonitor
+      - target: TimerActivity
+
+  # アプリのブロックの拡張（docs/design/architecture.md）。Shared/Blocking などを本体と共有する
+  BlockShield:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/BlockShield
+      - path: FocusApp/Shared/Blocking
+      - path: FocusApp/Shared/AppClock.swift
+      - path: FocusApp/Shared/DurationFormat.swift
+      - path: FocusApp/Domain/DayBoundary.swift
+    info:
+      path: Extensions/BlockShield/Info.plist
+      properties:
+        CFBundleDisplayName: GhostPace シールド
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.ManagedSettingsUI.shield-configuration-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShieldConfigurationExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hirototoda.focusapp.BlockShield
+        TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Config/Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Config/Release.entitlements
+
+  BlockShieldAction:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/BlockShieldAction
+      - path: FocusApp/Shared/Blocking
+      - path: FocusApp/Shared/AppClock.swift
+      - path: FocusApp/Shared/DurationFormat.swift
+      - path: FocusApp/Domain/DayBoundary.swift
+    info:
+      path: Extensions/BlockShieldAction/Info.plist
+      properties:
+        CFBundleDisplayName: GhostPace シールドのボタン
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.ManagedSettings.shield-action-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShieldActionExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hirototoda.focusapp.BlockShieldAction
+        TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Config/Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Config/Release.entitlements
+
+  BlockMonitor:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/BlockMonitor
+      - path: FocusApp/Shared/Blocking
+      - path: FocusApp/Shared/AppClock.swift
+      - path: FocusApp/Shared/DurationFormat.swift
+      - path: FocusApp/Domain/DayBoundary.swift
+    info:
+      path: Extensions/BlockMonitor/Info.plist
+      properties:
+        CFBundleDisplayName: GhostPace 自動で戻す
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.deviceactivity.monitor-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).BlockMonitorExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hirototoda.focusapp.BlockMonitor
+        TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Config/Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Config/Release.entitlements
+
+  # ロック画面と画面上部のタイマー（Live Activity、TMR-06）。表示の部品は本体と共有する
+  TimerActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/TimerActivity
+      - path: FocusApp/Shared/LiveActivity
+      - path: FocusApp/Shared/Theme.swift
+      - path: FocusApp/Shared/DurationFormat.swift
+    info:
+      path: Extensions/TimerActivity/Info.plist
+      properties:
+        CFBundleDisplayName: GhostPace タイマー
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hirototoda.focusapp.TimerActivity
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) TIMER_WIDGET
+
+  FocusAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - FocusAppTests
+    dependencies:
+      - target: FocusApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hirototoda.focusapp.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  FocusAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - FocusAppUITests
+    dependencies:
+      - target: FocusApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hirototoda.focusapp.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: FocusApp
+
+schemes:
+  FocusApp:
+    build:
+      targets:
+        FocusApp: all
+        FocusAppTests: [test]
+        FocusAppUITests: [test]
+    test:
+      targets:
+        - FocusAppTests
+        - FocusAppUITests
+    run:
+      config: Debug
