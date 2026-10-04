@@ -58,6 +58,7 @@ struct TrackRunner: View, @MainActor Animatable {
     /// 吹き出し（ゴーストだけ）。値はアニメーションに合わせて数え上がる
     var bubbleTitle: String?
     var bubbleSeconds: Int = 0
+    @State private var bubbleSize = CGSize.zero
 
     var animatableData: Double {
         get { fraction }
@@ -75,7 +76,8 @@ struct TrackRunner: View, @MainActor Animatable {
                     let out = geometry.outward(at: at)
                     SpeechBubble(text: "\(bubbleTitle) \(DurationFormat.japanese(Int(Double(bubbleSeconds) * fraction)))")
                         .fixedSize()
-                        .position(x: point.x + out.dx * 44, y: point.y + out.dy * 34)
+                        .onGeometryChange(for: CGSize.self) { $0.size } action: { bubbleSize = $0 }
+                        .position(Self.bubbleCenter(point: point, outward: out, size: bubbleSize, bounds: proxy.size))
                 }
                 figure
                     .scaleEffect(x: flips ? -1 : 1)
@@ -83,6 +85,19 @@ struct TrackRunner: View, @MainActor Animatable {
             }
         }
         .accessibilityHidden(true)
+    }
+
+    /// 吹き出しが円の枠からはみ出してよい幅（画面の端までは届かない）
+    static let bubbleOverhang: CGFloat = 8
+
+    /// 吹き出しの中心。ふだんは走っている所から円の外側へずらす。
+    /// 円の左右の端で外にずらすと画面の外に切れるときは、横は収まる所まで戻し、おばけの真上に置く
+    static func bubbleCenter(point: CGPoint, outward: CGVector, size: CGSize, bounds: CGSize) -> CGPoint {
+        let ideal = CGPoint(x: point.x + outward.dx * 44, y: point.y + outward.dy * 34)
+        let minX = size.width / 2 - bubbleOverhang, maxX = bounds.width - size.width / 2 + bubbleOverhang
+        guard ideal.x < minX || ideal.x > maxX else { return ideal }
+        // おばけ（高さ28）の上に、少しあけて置く
+        return CGPoint(x: min(max(ideal.x, minX), maxX), y: point.y - 14 - size.height / 2 - 4)
     }
 
     @ViewBuilder

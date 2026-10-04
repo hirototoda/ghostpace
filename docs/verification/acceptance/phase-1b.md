@@ -10,7 +10,7 @@ status: draft
 | 1b-3 | 先週のデータがない日は「対戦相手なし」と表示される | GHO-03 | Claude | |
 | 1b-4 | 夜の振り返りに、先週の自分との勝ち負け（集中・デトックス・ポイント。2026-10-03 からデトックスの行は開けた時間＝BD-19）が出る。先週の記録がない日・デトックスの記録が丸1日分ない日の出し方（2026-10-02 オーナー決定で計画の割合はやめ、保存もしない） | GHO-04, REV-01 | Claude | テスト（ReviewVerdictTests：threeItemsAgainstLastWeek、noLastWeekMeansNoVerdicts、incompleteLastWeekDetoxIsNoRecord、comparesAtTheShownPrecision）と画面で確認（2026-10-02） |
 | 1b-5 | 実データで先週の自分と対戦できている | GHO-01 | オーナー（実機） | |
-| 1b-6 | アプリを開くたびに、自分とゴーストが円の一番上から今の地点まで時計回りに走ってくる。ゴーストの吹き出しに相手のこの時刻までの集中が出る | GHO-12 | Claude（シミュレーター）＋オーナー（実機） | シミュレーターで確認（2026-10-01、動画）。実機はオーナー待ち |
+| 1b-6 | アプリを開くたびに、自分とゴーストが円の一番上から今の地点まで時計回りに走ってくる。ゴーストの吹き出しに相手のこの時刻までの集中が出る | GHO-12 | Claude（シミュレーター）＋オーナー（実機） | シミュレーターで確認（2026-10-01、動画）。実機はオーナー待ち。円の左右の端で吹き出しが画面の外に切れず、ゴーストの上に出ることを SpeechBubbleTests と画面で確認（2026-10-03） |
 | 1b-7 | 円を押すと裏返ってポイントのグラフ（範囲は 1b-14〜17。自分と相手のポイント。2026-10-02 から時間の線はなし）。もう一度押すと表に戻る。相手の一覧ボタンは今までどおり開く | GHO-13 | Claude（UIテスト） | 済（2026-10-01、testRaceCardFlipsToChart） |
 | 1b-8 | ポイントが重み（集中10分1pt）と逓減（1回90分で×0.75・3時間で×0.5、1日8時間で×0.75・10時間で×0.5、低いほう・0.5より下げない、5分休めば戻る）どおりに計算される（2026-10-03 に続けたボーナスから変更、ADR-0019） | GHO-14 | Claude（テスト） | テスト（PointsRulesTests：ninetyMinutesIsFullValue、twoHoursInOneGoSlowsAfterNinety、fourHoursInOneGoHalvesAfterThree、fiveMinuteBreakStartsOver、shorterBreakContinuesTheSameRun、pauseOfFiveMinutesStartsOver、dailyTotalSlowsAfterEightAndTenHours、lowerFactorWinsButNeverBelowHalf ほか）で確認（2026-10-03） |
 | 1b-9 | 先週のデータも目標もない日、目標が相手の日でも崩れない。ダーク・文字サイズ最大でも崩れない | GHO-13, NFR-04 | Claude（シミュレーター） | 済（2026-10-01。目標が相手・先週のみ・ダーク・文字サイズ最大。先週も目標もない日はテスト） |
