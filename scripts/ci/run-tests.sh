@@ -9,7 +9,12 @@ shard="$1" shards="$2" sim="$3" dd="$4" out="$5"
 mkdir -p "$out"
 
 xctestrun=$(ls "$dd"/Build/Products/*.xctestrun | head -1)
-common=(test-without-building -xctestrun "$xctestrun" -destination "id=$sim" -collect-test-diagnostics never)
+# 言語と地域はこの Mac のシミュレーターと同じ日本語・日本にする
+common=(test-without-building -xctestrun "$xctestrun" -destination "id=$sim" -testLanguage ja -testRegion JP -collect-test-diagnostics never)
+
+start=$SECONDS
+xcrun simctl bootstatus "$sim" -b >/dev/null
+echo "シミュレーターの起動を待った（$(( SECONDS - start ))秒）"
 failed=()
 
 run() {  # $1: 名前, 残り: xcodebuild の引数

@@ -58,15 +58,15 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
+      - name: Start simulator (Asia/Tokyo)
+        id: sim
+        run: echo "udid=$(scripts/ci/prepare-simulator.sh)" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
           name: products
           path: ${{ runner.temp }}
       - name: Unpack build products
         run: mkdir -p "$RUNNER_TEMP/dd/Build" && tar -C "$RUNNER_TEMP/dd/Build" -xzf "$RUNNER_TEMP/products.tgz"
-      - name: Prepare simulator (Japanese, Asia/Tokyo)
-        id: sim
-        run: echo "udid=$(scripts/ci/prepare-simulator.sh)" >> "$GITHUB_OUTPUT"
       - name: Run tests
         run: scripts/ci/run-tests.sh ${{ matrix.shard }} 3 "${{ steps.sim.outputs.udid }}" "$RUNNER_TEMP/dd" "$RUNNER_TEMP/results"
       - name: Upload results
