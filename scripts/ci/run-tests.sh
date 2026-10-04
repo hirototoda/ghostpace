@@ -9,12 +9,16 @@ shard="$1" shards="$2" sim="$3" dd="$4" out="$5"
 mkdir -p "$out"
 
 xctestrun=$(ls "$dd"/Build/Products/*.xctestrun | head -1)
-# 言語と地域はこの Mac のシミュレーターと同じ日本語・日本にする
-common=(test-without-building -xctestrun "$xctestrun" -destination "id=$sim" -testLanguage ja -testRegion JP -collect-test-diagnostics never)
+common=(test-without-building -xctestrun "$xctestrun" -destination "id=$sim" -collect-test-diagnostics never)
 
 start=$SECONDS
 xcrun simctl bootstatus "$sim" -b >/dev/null
 echo "シミュレーターの起動を待った（$(( SECONDS - start ))秒）"
+# 言語と地域を、この Mac のシミュレーターと同じ日本語・日本にする。時刻の表示（24時間制）が地域で変わり、テストが確かめている。
+# xcodebuild の -testLanguage / -testRegion では12時間制のままだった。アプリは起動するたびに読むので、端末の起動し直しは要らない
+xcrun simctl spawn "$sim" defaults write -g AppleLanguages -array ja-JP en-JP
+xcrun simctl spawn "$sim" defaults write -g AppleLocale -string ja_JP
+echo "言語と地域: $(xcrun simctl spawn "$sim" defaults read -g AppleLocale)"
 failed=()
 
 run() {  # $1: 名前, 残り: xcodebuild の引数

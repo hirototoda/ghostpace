@@ -34,7 +34,7 @@ status: draft
 | main にアプリが変わるコミットが入る | ユニットテストと UI テストの全件 → TestFlight に送る | 自動（TestFlight 用の CI）。失敗したら送らない |
 | 失敗したテストを手元で直す・報告用の撮影 | 必要なものだけ | この Mac の `scripts/test.sh`（下） |
 
-- CI のシミュレーターは、この Mac と同じく iPhone 18 Pro・日本時間。テストは日本語・日本の設定で回す（xcodebuild の -testLanguage ja -testRegion JP）
+- CI のシミュレーターは、この Mac と同じく iPhone 18 Pro・日本時間・日本語・日本にしてから回す（地域で時刻の表示が12時間制に変わるため）
 - 塊1はユニットテスト全件と UI テストの1/3、塊2・3は UI テストの残り
 - UI テストは1回だけやり直す。やり直して通ったものは、CI の警告に名前が出る（不安定なテストとして直す）
 - docs・.claude・*.md だけの PR では Mac を使わない

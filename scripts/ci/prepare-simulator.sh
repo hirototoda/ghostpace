@@ -1,8 +1,7 @@
 #!/bin/zsh
 # GitHub Actions の Mac で、テスト用のシミュレーターの起動を始め、UDID を出す（起動を待たない。待つのは scripts/ci/run-tests.sh）。docs/decisions/0021
 # - 時刻は日本時間にする（シミュレーターは Mac のタイムゾーンを使う。テストは +09:00 の時刻と端末のタイムゾーンで表示を確かめる）
-# - 言語と地域（日本語・日本）は、テストを動かすときに xcodebuild の -testLanguage / -testRegion で指定する
-#   （端末の設定を書き換えると起動し直しが要り、2〜4分余計にかかったため）
+# - 言語と地域（日本語・日本）は、起動を待ったあと scripts/ci/run-tests.sh が端末に書く
 # 進み具合は標準エラーに、UDID だけを標準出力に出す。
 set -euo pipefail
 device="${SIM_DEVICE:-iPhone 18 Pro}"

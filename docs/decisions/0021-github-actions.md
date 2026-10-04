@@ -21,7 +21,7 @@ date: 2026-10-04
 
 ### テスト（PR ごと）
 - PR を出す・push すると、GitHub の Mac（`xcode-27`、Xcode 27.0・iPhone 18 Pro）でビルドを1回作り、3つの Mac で同時にテストする。塊1＝ユニットテスト全件＋UI テストの1/3、塊2・3＝UI テストの残り（PR 1本で Mac は最大3台）
-- CI のシミュレーターは、この Mac と同じく日本時間にし、テストは日本語・日本の設定で回す（xcodebuild の -testLanguage ja -testRegion JP）
+- CI のシミュレーターは、この Mac と同じく日本時間・日本語・日本にしてから回す（地域で時刻の表示が12時間制に変わり、テストが落ちるため）
 - UI テストは1回だけやり直す。やり直して通ったものは警告に名前を出す（不安定なテストを隠さない）
 - docs・.claude・*.md だけの PR では Mac を使わない
 - 「CI OK」が通ったら自動でマージする。Claude は報告を focus-app に入れたあと `gh pr merge <番号> --auto --squash --delete-branch` で予約する。main は「CI OK」を必須にしている
