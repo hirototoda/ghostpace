@@ -23,10 +23,12 @@ SwiftUI / SwiftData / XcodeGen。オーナーはコードを読まず、docs/ �
 ## コマンド
 - 生成: `xcodegen generate`
 - ビルド・シミュレーター操作: XcodeBuildMCP を使う（既定: iPhone 18 Pro シミュレーター、`.xcodebuildmcp/config.yaml`）
-- テスト: `scripts/test.sh` だけで回す（Mac 全体の順番待ち。同時に2つまで。バックグラウンドで実行）。PR では `scripts/test.sh ui <関係する UI テスト>`、UI テストの全件は `scripts/testflight.sh` が送る前に回す（ADR-0020）。`xcodebuild test` と `test_sim` はフックで止まる
+- テスト: **push すれば GitHub Actions が回す**（PR ごとにユニット全件＋UI 全件、約20〜30分、ADR-0021）。結果は `gh pr checks <番号> --watch` か `gh run view`。失敗したら Artifacts の test-results（ログと xcresult）を `gh run download` で見る
+- この Mac でテストを回すのは急ぎのときだけ（失敗したテストを手元で直す、撮影）。`scripts/test.sh` だけで回す（Mac 全体の順番待ち。同時に2つまで。バックグラウンドで、CPU の負荷を確かめてから。ADR-0020）。`xcodebuild test` と `test_sim` はフックで止まる
 - 実機（オーナーの iPhone）へ直接入れる手順と UDID は、非公開側の CLAUDE.md にある（下で読み込む）
 - 署名: project.yml の `DEVELOPMENT_TEAM` のチーム
-- TestFlight に送る: main で `scripts/testflight.sh`（ADR-0011。先に UI テストを全件回し、失敗したら送らない）。`--no-upload` で署名と書き出しだけ確認。画面や動きが変わる PR をマージしたら送る
+- マージ: 報告を非公開側に入れたら `gh pr merge <番号> --auto --squash --delete-branch` で予約する。「CI OK」が通ると GitHub がマージする（ADR-0010・0021）。保存データの形を変える PR は予約せずオーナーを待つ
+- TestFlight: main にアプリが変わるコミットが入ると、GitHub Actions がテスト全件 → TestFlight に送る（ADR-0011・0021）。結果は `gh run list --workflow TestFlight`。CI が使えないときだけ、この Mac の main で `scripts/testflight.sh`（`--no-upload` で署名と書き出しだけ確認）
 
 ## 詳細
 - 全体像: docs/README.md

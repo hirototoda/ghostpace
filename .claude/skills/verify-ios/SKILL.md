@@ -11,10 +11,10 @@ description: 実装後の動作確認と報告。機能を実装・修正した�
 1. `xcodegen generate` でプロジェクトを作り直す
 2. XcodeBuildMCP でビルドする（最初に `session_show_defaults`）。失敗したら直してからやり直す
    - 別の作業場所（git worktree）にいるときは、MCP の既定のプロジェクトが本体を指している。`xcodebuild build -project FocusApp.xcodeproj -scheme FocusApp -destination 'id=<シミュレーターのUDID>' -derivedDataPath <scratchpad>` を使う
-3. テストは **`scripts/test.sh` だけで回す**（Mac 全体の順番待ち。同時に2つまで。docs/verification/strategy.md「テストの回し方」）。待ちが出るので Bash の `run_in_background` で実行し、終わりの知らせを待つ。警告も読む
-   - PR の確認：`scripts/test.sh ui <触った画面の UI テスト...>`（ユニットテストは毎回全件が付く）。例 `scripts/test.sh ui RecordingFlowUITests/testPauseResumeEnd OpenedTimeUITests`。どれが関係するか迷ったら、そのクラスごと指定する
-   - UI テストの全件は `scripts/testflight.sh` が送る前に回すので、PR では要らない（自分で回すなら `scripts/test.sh all`）
-   - 別の作業場所では `--sim <自分用のシミュレーターのUDID>` を付ける
+3. テストは **push して GitHub Actions で回す**（docs/verification/strategy.md「テストの回し方」、ADR-0021）。PR を出す・push するたびに、ユニットテスト全件と UI テスト全件が回る（約20〜30分）
+   - 待つあいだは別の作業を進める。結果は `gh pr checks <番号> --watch`（Bash の `run_in_background` で）。件数は `gh run view <run> --log` の「成功」の行
+   - 失敗したら `gh run download <run> -n test-results-<塊>` でログと xcresult を取り、原因を直して push する。「やり直して通った UI テスト」の警告が出たら、報告に書く
+   - 急ぎのときだけ、この Mac で `scripts/test.sh` を使う（Mac 全体の順番待ち。同時に2つまで。始める前に `uptime` で負荷を確かめ、`run_in_background` で実行）。例 `scripts/test.sh ui RecordingFlowUITests/testPauseResumeEnd OpenedTimeUITests`。別の作業場所では `--sim <自分用のシミュレーターのUDID>` を付ける
    - `xcodebuild test` と XcodeBuildMCP の `test_sim` はフックで止まる（例外は下の実機の待ち時間テストだけ）
 4. 該当する受け入れ基準を docs/verification/acceptance/ から読む
 5. シミュレーターで確認する
@@ -42,7 +42,7 @@ description: 実装後の動作確認と報告。機能を実装・修正した�
 Screen Time API（ブロック、シールド、DeviceActivity）、通知の実際の届き方、実機の再起動をまたぐ挙動。
 アプリを完全に閉じてからの時間経過は、実機で `TEST_RUNNER_REAL_WAIT=1 xcodebuild test -destination 'id=<UDID>' -only-testing:FocusAppUITests/RecordingFlowUITests/testRunningTimerSurvivesRealWaitClosed` として Claude が確かめられる（待ちは画面の自動ロックより短くする）。
 これらは確認したふりをせず、報告の「オーナーにお願いしたいこと」に、iPhoneで行う具体的な操作手順と期待される結果を書く。
-iPhone への届け方は、マージ後に `scripts/testflight.sh`（TestFlight、ADR-0011）。急ぐときは CLAUDE.md の `devicectl` の手順。
+iPhone への届け方は、マージすると GitHub Actions が TestFlight に送る（ADR-0011・0021）。急ぐときは非公開側の CLAUDE.md の `devicectl` の手順。
 
 ## 失敗したとき
 直せない失敗は隠さず報告に書く。仕様の解釈に迷った場合は実装で決めず、非公開側の docs/owner/open-questions.md に追記する。
