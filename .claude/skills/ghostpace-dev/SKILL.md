@@ -9,7 +9,7 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 
 ## 0. 始める前に
 - `CLAUDE.md`、`docs/README.md`、関係する `docs/product/features/*.md`・`requirements.md`・`design/data-model.md` を読む
-- 作業は公開リポジトリ ghostpace（`~/Desktop/ghostpace`）で行う。報告と判断の表は非公開の focus-app（`~/Desktop/focus-app-private`）に書く（ADR-0021）
+- 作業は公開リポジトリ ghostpace（`~/Desktop/ghostpace`）で行う。報告と判断の表は非公開の focus-app に書く（ADR-0021）。`~/Desktop/focus-app-private` はオーナーが読む場所なので main のまま置き、書くときは自分用の作業場所を作る：`git -C ~/Desktop/focus-app-private worktree add ../focus-app-private-<名前> origin/main`
 - `git status` と `git worktree list` を見る。自分のものでない未コミットの変更があれば、別のセッションが作業中。触らずに `git worktree add -b <branch> ../ghostpace-<名前> origin/main` で別の作業場所を作る
 - 大きさを決める
 
@@ -64,7 +64,7 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 ## 7. 報告・PR・マージ
 - 非公開側に `~/Desktop/focus-app-private/docs/reports/YYYY-MM-DD-<内容>.md` を書く（テンプレートは非公開側の `docs/reports/README.md`）。決めたこと、スクショ、テストの件数、オーナーへのお願い
 - コミットと PR のタイトルに要件ID（例：TMR-07）を入れる
-- 報告・open-questions は非公開側の main に直接コミットして push する（`git pull --rebase` してから。PR は作らない）。報告の「PR:」に ghostpace の PR を書く
+- 報告・open-questions は、非公開側の自分用の作業場所から main に直接 push する（`git pull --rebase` してから `git push origin HEAD:main`。PR は作らない）。報告の「PR:」に ghostpace の PR を書く
 - docs と報告がそろったら `gh pr merge <番号> --auto --squash --delete-branch` で自動マージを予約する。CI の「CI OK」が通ると GitHub がマージする（ADR-0010・0021）。データの形が変わる PR は予約せず、オーナーの確認を待つ
 - CI が失敗したら直して push する（予約はそのまま残る）
 - CI の結果は `gh pr checks <番号> --watch` を Bash の `run_in_background` で1本だけ走らせて待つ。終われば知らせが来るので、`gh pr checks` を何度も打って様子を見ない。待つあいだは報告など別の作業を進める
