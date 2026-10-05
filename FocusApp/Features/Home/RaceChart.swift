@@ -20,6 +20,8 @@ struct RaceChart: View {
     let opponent: Opponent?
     /// 裏が見えているか（見えたときに動きを始める）
     var isShowing = true
+    /// 過ぎた日のグラフ（分析、ANA-05）：4:00〜翌4:00 の1日で始め、開いたときの動きはない。上の行の名前は「この日」
+    var isPastDay = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -92,7 +94,7 @@ struct RaceChart: View {
     private var header: some View {
         let theirs = opponent.flatMap { snapshot.opponentPoints($0, at: snapshot.now) }
         return HStack(spacing: 10) {
-            valueLabel(Text("今日"), Self.pointText(snapshot.points), Theme.focus)
+            valueLabel(isPastDay ? Text("この日") : Text("今日"), Self.pointText(snapshot.points), Theme.focus)
             if let opponent, let theirs, let gap = RaceChartLayout.gap(mine: snapshot.points, theirs: theirs) {
                 valueLabel(Text(verbatim: opponent.shortName), Self.pointText(theirs), Theme.ghost)
                 Spacer(minLength: 0)
@@ -206,7 +208,8 @@ struct RaceChart: View {
                         .symbolSize(piece.kind.isOpponent ? 40 : 60)
                 }
             }
-            if snapshot.now > snapshot.dayStart {
+            // 過ぎた日は「今」がないので線を引かない
+            if snapshot.now > snapshot.dayStart, !isPastDay {
                 RuleMark(x: .value("今", min(intro?.head ?? snapshot.now, motion?.now ?? snapshot.now)))
                     .foregroundStyle(Color.secondary.opacity(0.4))
                     .lineStyle(StrokeStyle(lineWidth: 1))
@@ -251,7 +254,7 @@ struct RaceChart: View {
         // 点（5分おき×2〜3本）を1つずつ読ませると数百になり VoiceOver でたどれないので、グラフは1つにまとめ、
         // 数字と差は上の行で読む（2026-10-04、Claude 補足）
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("今日たまったポイントのグラフ")
+        .accessibilityLabel(isPastDay ? Text("この日たまったポイントのグラフ") : Text("今日たまったポイントのグラフ"))
         .accessibilityValue(Self.rangeText(range))
     }
 
@@ -467,7 +470,7 @@ struct RaceChart: View {
         replayTask?.cancel()
         replayTask = nil
         dragAnchor = nil
-        showsWholeDay = false
+        showsWholeDay = isPastDay
         scrollStart = layout.homeWindow.lowerBound
         motion = nil
         motionProgress = 1

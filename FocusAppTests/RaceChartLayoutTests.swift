@@ -314,6 +314,13 @@ struct RaceChartLayoutTests {
         #expect(!RaceChartLayout.isAhead(-10))
     }
 
+    /// 分析の「先週より +4.1pt」と共有する符号つきの数字（ANA-04）
+    @Test func signedPointsSharesTheGapFormat() {
+        #expect(RaceChartLayout.signedPoints(4.1) == "+4.1pt")
+        #expect(RaceChartLayout.signedPoints(-0.34) == "−0.3pt")
+        #expect(RaceChartLayout.signedPoints(0.04) == "0.0pt")
+    }
+
     @Test func gapTextShowsSignAndOneDecimal() {
         #expect(RaceChartLayout.gapText(-10) == "差 −10.0pt")
         #expect(RaceChartLayout.gapText(3.25) == "差 +3.3pt")

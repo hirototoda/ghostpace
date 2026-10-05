@@ -1,56 +1,43 @@
 import SwiftUI
 
-/// タイムラインの画面。ホーム右上の入口から開く。
+/// タイムラインの画面。分析のタブの一覧から進む（NAV-01、2026-10-05 から。それまでは下のタブの1つ）
 struct TimelineScreen: View {
     @Bindable var model: AppModel
-    /// 下のタブに置くときは閉じるボタンを出さない
-    var showsCloseButton = true
     @State private var daysAgo = 0
     /// 終了時刻を早めている記録
     @State private var editing: FocusSession?
     /// 保存したら読み直す（タイムラインは開くたびに記録から作る）
     @State private var version = 0
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
-        NavigationStack {
-            Group {
-                let _ = version
-                if let day = model.timelineDay(daysAgo: daysAgo) {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            totals(day)
-                            content(day)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 24)
+        Group {
+            let _ = version
+            if let day = model.timelineDay(daysAgo: daysAgo) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        totals(day)
+                        content(day)
                     }
-                    .safeAreaInset(edge: .top) { dayPicker(day) }
-                } else {
-                    ContentUnavailableView("記録を読めませんでした", systemImage: "exclamationmark.triangle")
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 24)
                 }
-            }
-            .sheet(item: $editing) { session in
-                ShortenEndSheet(session: session,
-                                showsDate: model.crossesDate(from: session.startAt, to: session.endAt ?? session.startAt)) { newEnd in
-                    if model.shortenEnd(session, to: newEnd) {
-                        editing = nil
-                        version += 1
-                    }
-                }
-                .saveErrorAlert($model.errorMessage)
-            }
-            .saveErrorAlert($model.errorMessage, when: editing == nil)
-            .navigationTitle("タイムライン")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if showsCloseButton {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("閉じる", systemImage: "xmark") { dismiss() }
-                    }
-                }
+                .safeAreaInset(edge: .top) { dayPicker(day) }
+            } else {
+                ContentUnavailableView("記録を読めませんでした", systemImage: "exclamationmark.triangle")
             }
         }
+        .sheet(item: $editing) { session in
+            ShortenEndSheet(session: session,
+                            showsDate: model.crossesDate(from: session.startAt, to: session.endAt ?? session.startAt)) { newEnd in
+                if model.shortenEnd(session, to: newEnd) {
+                    editing = nil
+                    version += 1
+                }
+            }
+            .saveErrorAlert($model.errorMessage)
+        }
+        .saveErrorAlert($model.errorMessage, when: editing == nil)
+        .navigationTitle("タイムライン")
+        .navigationBarTitleDisplayMode(.inline)
         .tint(Theme.focus)
     }
 

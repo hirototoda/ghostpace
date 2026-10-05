@@ -85,11 +85,12 @@ extension HomeSnapshot {
     /// - reviewMinutes: 振り返りの通知の時刻（0:00 からの分、REV-02）。0:00〜3:59 ならその日の夜中（翌日の暦）
     /// - detox / lastWeekDetox: 今日と先週の同じ曜日のデトックス（DTX-01）。先週は丸1日分あるときだけ使う
     /// - sleep: 今日の睡眠（その朝とその夜）。目標のゴーストの起きている時間とデトックスに使う
+    /// - dayStart: その日の 4:00。過ぎた日（分析、ANA-05）は `now` を翌4:00 にするので、日を取り違えないよう渡す。nil なら `now` の日
     static func make(now: Date, calendar: Calendar, todaySessions: [FocusSession], plan: PlanDraft?,
                      lastWeekSessions: [FocusSession], reviewMinutes: Int = SettingsDefaults.reviewMinutes,
                      noPlanGoalSeconds: Int? = nil, detox: DetoxDay? = nil, lastWeekDetox: DetoxDay? = nil,
-                     sleep: [DateInterval] = [], sleepCaps: [DateInterval] = []) -> HomeSnapshot {
-        let dayStart = DayBoundary.dayStart(containing: now, calendar: calendar)
+                     sleep: [DateInterval] = [], sleepCaps: [DateInterval] = [], dayStart: Date? = nil) -> HomeSnapshot {
+        let dayStart = dayStart ?? DayBoundary.dayStart(containing: now, calendar: calendar)
         let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
         let lastWeekStart = DayBoundary.sameDayLastWeek(dayStart, calendar: calendar)
         // 計画なし日は目標時間だけ（GHO-10、Q13）
