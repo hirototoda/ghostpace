@@ -27,10 +27,11 @@ struct PlanTemplate: Identifiable, Hashable {
 
     /// `dayStart`（その日の4:00）の日に当てはめた計画。0:00〜3:59 は翌日の暦の日付になる（朝4:00区切り）。
     /// 今より前の時間帯のブロックも読み込む（2026-10-01 決定）。
+    /// 暦の日付に時:分を当てはめるので、夏時間の切り替えの日も同じ時刻になる（4:00 から分を足すと1時間ずれる）
     func draft(dayStart: Date, calendar: Calendar) -> PlanDraft {
         PlanDraft(blocks: blocks.map { block in
-            let hourFromStart = (block.hour - DayBoundary.hour + 24) % 24
-            let start = calendar.date(byAdding: .minute, value: hourFromStart * 60 + block.minute, to: dayStart) ?? dayStart
+            let day = calendar.date(byAdding: .day, value: block.hour < DayBoundary.hour ? 1 : 0, to: dayStart) ?? dayStart
+            let start = calendar.date(bySettingHour: block.hour, minute: block.minute, second: 0, of: day) ?? day
             return PlanBlockDraft(start: start, minutes: block.minutes, category: block.category, project: block.project)
         })
     }

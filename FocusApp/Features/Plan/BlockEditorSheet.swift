@@ -21,6 +21,8 @@ struct BlockEditorSheet: View {
     var now: Date = .distantPast
     /// 今その中にあるゲーム・SNS の時間を、今の時刻で終える
     var onEndNow: (() -> Void)?
+    /// 保存できない理由（習慣の画面はほかのブロックの数も見る、PLN-08）。nil なら計画の決まり
+    var problem: ((PlanBlockDraft) -> String?)?
 
     let onSave: (PlanBlockDraft) -> Void
     let onDelete: () -> Void
@@ -213,11 +215,11 @@ struct BlockEditorSheet: View {
     // MARK: 保存
 
     private var saveButton: some View {
-        let problem = isOngoingUnblock ? "今のゲーム・SNS の時間は動かせません。終えるときは「今で終える」" as String?
-            : plan.problem(with: block, dayStart: dayStart)
+        let reason = isOngoingUnblock ? "今のゲーム・SNS の時間は動かせません。終えるときは「今で終える」" as String?
+            : self.problem.map { $0(block) } ?? plan.problem(with: block, dayStart: dayStart)
         return VStack(spacing: 8) {
-            if let problem {
-                Label(problem, systemImage: "exclamationmark.circle")
+            if let reason {
+                Label(reason, systemImage: "exclamationmark.circle")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Button {
@@ -227,7 +229,7 @@ struct BlockEditorSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.extraLarge)
-            .disabled(problem != nil)
+            .disabled(reason != nil)
             .accessibilityIdentifier("blockSaveButton")
         }
         .padding(.horizontal, 20).padding(.bottom, 8)

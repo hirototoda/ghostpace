@@ -83,6 +83,7 @@ private struct MainView: View {
 
     var body: some View {
         tabs
+            .habitIntroCover(model: model)
             // 長押しの画面は、いちばん上に出ている画面から出す（設定・タイマーの上ではそれぞれの中から）
             .holdUnlockCover(model: model, initialProgress: holdProgress,
                              when: model.running == nil && model.morningPlan == nil && !showsSettings && !model.showsReview)
@@ -148,7 +149,9 @@ private struct MainView: View {
                           errorMessage: $model.errorMessage,
                           showsGoal: true, templates: model.templates, calendar: model.calendar,
                           onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) },
-                          sleep: sleepRow(dayStart: morning.dayStart))
+                          sleep: sleepRow(dayStart: morning.dayStart),
+                          habitDraft: model.habits.draft(dayStart: morning.dayStart, calendar: model.calendar),
+                          candidates: { model.candidates(for: $0, dayStart: morning.dayStart, excludingEnded: false) })
         }
         .background {
             // シートは1つの View に1つまで。設定・振り返り・通知の説明は別の階層から出す
@@ -252,7 +255,10 @@ private struct MainView: View {
                           showsGoal: true, templates: model.templates, calendar: model.calendar,
                           onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) },
                           templateEditor: { AnyView(TemplateEditView(model: model, template: $0)) },
-                          sleep: sleepRow(dayStart: model.snapshot.dayStart))
+                          sleep: sleepRow(dayStart: model.snapshot.dayStart),
+                          habitDraft: model.habits.draft(dayStart: model.snapshot.dayStart, calendar: model.calendar),
+                          candidates: { model.candidates(for: $0, dayStart: model.snapshot.dayStart, excludingEnded: true) },
+                          habits: model.habits, habitsEditor: { AnyView(HabitsView(model: model)) })
                 .id(model.snapshot.dayStart)
         } else {
             NoPlanTab(model: model)
@@ -275,7 +281,9 @@ private struct MainView: View {
                                   // 明日の最初のブロックは 8:00 から（review.md）
                                   firstStart: model.calendar.date(byAdding: .hour, value: 8 - DayBoundary.hour, to: plan.dayStart),
                                   showsGoal: true, templates: model.templates, calendar: model.calendar,
-                                  onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) })
+                                  onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) },
+                                  habitDraft: model.habits.draft(dayStart: plan.dayStart, calendar: model.calendar),
+                                  candidates: { model.candidates(for: $0, dayStart: plan.dayStart, excludingEnded: false) })
                 }
         } else {
             ContentUnavailableView("記録を読めませんでした", systemImage: "exclamationmark.triangle")
@@ -328,6 +336,14 @@ private struct NoPlanTab: View {
                 } footer: {
                     Text("目標と対戦できます。計画なしの日は 8:00〜20:00 に同じ速さで進みます。")
                 }
+                Section {
+                    NavigationLink {
+                        HabitsView(model: model)
+                    } label: {
+                        HabitsRow(habits: model.habits)
+                    }
+                    .accessibilityIdentifier("habitsRow")
+                }
                 if !model.templates.isEmpty {
                     Section("テンプレート") {
                         ForEach(model.templates) { template in
@@ -370,7 +386,26 @@ private struct HoldUnlockCover: ViewModifier {
     }
 }
 
+/// 初めて使う端末の習慣の画面（PLN-08）を全画面で出す。決めると朝の計画が出る
+private struct HabitIntroCover: ViewModifier {
+    @Bindable var model: AppModel
+
+    func body(content: Content) -> some View {
+        content.background {
+            Color.clear.fullScreenCover(isPresented: Binding(get: { model.showsHabitIntro && model.running == nil }, set: { _ in })) {
+                NavigationStack { HabitsView(model: model, isIntro: true) }
+                    .tint(Theme.focus)
+                    .interactiveDismissDisabled()
+            }
+        }
+    }
+}
+
 extension View {
+    func habitIntroCover(model: AppModel) -> some View {
+        modifier(HabitIntroCover(model: model))
+    }
+
     func holdUnlockCover(model: AppModel, initialProgress: Double = 0, when: Bool) -> some View {
         modifier(HoldUnlockCover(model: model, initialProgress: initialProgress, when: when))
     }

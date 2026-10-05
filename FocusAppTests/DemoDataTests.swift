@@ -32,7 +32,7 @@ struct DemoDataTests {
 
         let plan = try t.store.plan(dayKey: "2026-10-19")
         switch scene {
-        case .morning: #expect(plan == nil)
+        case .morning, .habits: #expect(plan == nil)
         case .noplan: #expect(plan?.status == .skipped)
         case .gamePlan:
             // 朝の計画の下書きに、ゲーム・SNS の時間が2つ（BLK-10）

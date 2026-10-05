@@ -319,7 +319,7 @@ struct GameTimeModelTests {
                   + games.map { PlanBlockDraft.unblock(start: jst("\(day)T\($0)")) })
     }
 
-    // MARK: 引き継ぎ
+    // MARK: 引き継ぎ（2026-10-05 からは、すでに使っている端末の最初の習慣を作るときだけ使う。PLN-08）
 
     @Test func morningPlanStartsWithYesterdaysGameTimes() throws {
         let t = try TestStore(now: jst("2026-10-18T09:00"))
@@ -351,13 +351,16 @@ struct GameTimeModelTests {
         #expect(second.morningPlan?.draft.blocks.isEmpty == true)
     }
 
-    @Test func tomorrowPlanCarriesTodaysGameTimes() throws {
+    /// 2026-10-05 から明日の計画も習慣から作る（今日のゲーム・SNS の時間は引き継がない、PLN-08）
+    @Test func tomorrowPlanUsesHabitsNotTodaysGameTimes() throws {
         let t = try TestStore(now: jst("2026-10-19T09:00"))
         let c = try t.seeded()
         let m = model(t)
         m.confirmPlan(plan(c, day: "2026-10-19", games: ["19:30"]))
         t.clock.set(jst("2026-10-19T22:30"))
-        #expect(m.tomorrowPlan().draft.blocks.map(\.start) == [jst("2026-10-20T19:30")])
+        #expect(m.tomorrowPlan().draft.blocks.isEmpty)
+        m.saveHabits(PlanHabits(blocks: [PlanTemplate.Block(hour: 21, minute: 0, minutes: 30, category: .gameSNS)]))
+        #expect(m.tomorrowPlan().draft.blocks.map(\.start) == [jst("2026-10-20T21:00")])
     }
 
     @Test func gameTimeIsSavedAndReadBack() throws {
@@ -511,8 +514,8 @@ struct GameTimeModelTests {
         t.clock.set(jst("2026-10-20T04:00"))
         m.reload()
         #expect(blockStore.state.unblockWindows.isEmpty)
-        // 朝の計画には引き継いでいる（翌日の暦の 0:30）
-        #expect(m.morningPlan?.draft.blocks.map(\.start) == [jst("2026-10-21T00:30")])
+        // 前の日からは引き継がない。朝の計画に入るのは習慣だけ（PLN-08、2026-10-05）
+        #expect(m.morningPlan?.draft.blocks.isEmpty == true)
     }
 
     @Test func noAuthorizationInsideWindowLogsNothing() throws {

@@ -19,6 +19,8 @@ enum DemoScene: String, CaseIterable, Hashable {
     case gamePlan
     /// day と同じ＋35分前に計画外（勉強・60分）で開始したまま、その後に計画ブロックの時刻が来た（TMR-11）
     case offPlanAtBlock
+    /// 朝の計画に習慣（7:00 瞑想・20:00 と 20:30 のゲーム・SNS）が入り、昨日・先週・テンプレートの候補が出る（PLN-08・09）
+    case habits
 
     var label: String {
         switch self {
@@ -30,6 +32,7 @@ enum DemoScene: String, CaseIterable, Hashable {
         case .firstweek: "先週のデータなし"
         case .gamePlan: "ゲーム・SNS の時間"
         case .offPlanAtBlock: "計画外のまま計画の時刻"
+        case .habits: "習慣と候補"
         }
     }
 }
@@ -102,6 +105,17 @@ enum DemoData {
         return events
     }
 
+    /// 習慣の見本（`habits` の場面）：7:00 休み › 瞑想 15分、20:00 と 20:30 のゲーム・SNS
+    static func habitsJSON(store: SwiftDataStore) throws -> Data {
+        let categories = try store.categories()
+        let rest = categories.first { $0.name == "休み" }
+        let meditation = try store.projects().first { $0.category == rest && $0.name == "瞑想" }
+        var blocks = [PlanTemplate.Block(hour: 20, minute: 0, minutes: 30, category: .gameSNS),
+                      PlanTemplate.Block(hour: 20, minute: 30, minutes: 30, category: .gameSNS)]
+        if let rest { blocks.insert(PlanTemplate.Block(hour: 7, minute: 0, minutes: 15, category: rest, project: meditation), at: 0) }
+        return TemplateBlockValue.encode(blocks.map(TemplateBlockValue.init))
+    }
+
     /// - goalMinutes: 今日の計画の目標（`-goalMinutes`）。nil なら計画の集中の合計
     static func seed(_ scene: DemoScene, into store: SwiftDataStore, calendar: Calendar, goalMinutes: Int? = nil) throws {
         try store.seedDefaultsIfNeeded()
@@ -165,7 +179,13 @@ enum DemoData {
             for day in 1...pastDays {
                 guard let dayStart = calendar.date(byAdding: .day, value: -day, to: todayStart) else { continue }
                 let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
-                let pastPlan = plan(dayStart: dayStart)
+                var pastPlan = plan(dayStart: dayStart)
+                // 習慣と候補の見本：先週の同じ曜日だけ 12:30 の掃除がある（候補に「先週」が出る）
+                if scene == .habits, day == 7, let housework = categories.first(where: { $0.name == "家事" }) {
+                    pastPlan.blocks.append(PlanBlockDraft(start: time(dayStart, Item(hour: 12, minute: 30, minutes: 30, category: 0)),
+                                                          minutes: 30, category: housework,
+                                                          project: try store.projects().first { $0.category == housework && $0.name == "掃除" }))
+                }
                 try store.confirm(pastPlan, dayKey: key, timeZone: timeZone)
                 let shift = (day * 13) % 5 * 5 - 10
                 let stretch = (day * 7) % 4 * 5 - 5
@@ -186,7 +206,7 @@ enum DemoData {
         var todayPlan = plan(dayStart: todayStart)
         todayPlan.goalSeconds = goalMinutes.map { $0 * 60 }
         switch scene {
-        case .morning:
+        case .morning, .habits:
             break
         case .gamePlan:
             var draft = todayPlan

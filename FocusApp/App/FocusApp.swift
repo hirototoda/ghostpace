@@ -57,6 +57,10 @@ final class AppLauncher {
         if options.storeURL == nil {
             let settings = MemorySettings()
             if let opponent = options.opponent { settings.opponent = opponent }
+            #if DEBUG
+            // 見本データでも習慣の最初の案内を出す（撮影用、PLN-08）
+            settings.habitIntroPending = options.habitIntro
+            #endif
             return (settings, NoNotifications())
         }
         if let storeName = options.storeName {
@@ -108,6 +112,11 @@ final class AppLauncher {
         return isReal || options.liveActivity ? ActivityKitLiveActivity(clock: clock) : NoLiveActivity()
     }
 
+    /// 初めて使う端末に習慣の最初の案内を出すか（PLN-08）。本物の保存先だけ。UI テスト・見本データでは `-habitIntro` のときだけ
+    static func offersHabitIntro(_ options: LaunchOptions) -> Bool {
+        (options.storeURL != nil && options.storeName == nil) || options.habitIntro
+    }
+
     /// `-resetStore` で消すファイル。`-storeName` を付けたときだけ（通常の記録は決して消さない、NFR-02）。
     static func filesToReset(_ options: LaunchOptions) -> [URL] {
         guard options.resetStore, options.storeName != nil, let url = options.storeURL else { return [] }
@@ -132,11 +141,15 @@ final class AppLauncher {
             }
             self.container = container
             let (settings, notifications) = Self.settingsAndNotifications(options)
+            #if DEBUG
+            if options.demoScene == .habits { settings.habitsJSON = try DemoData.habitsJSON(store: store) }
+            #endif
             let (blocking, blockStore, blockLog) = Self.blockingDependencies(options, clock: clock)
             let model = AppModel(store: store, clock: clock, settings: settings, notifications: notifications,
                                  blocking: blocking, blockStore: blockStore, blockLog: blockLog,
                                  liveActivity: Self.liveActivity(options, clock: clock),
-                                 sleepSource: Self.sleepSource(options, clock: clock))
+                                 sleepSource: Self.sleepSource(options, clock: clock),
+                                 offersHabitIntro: Self.offersHabitIntro(options))
             state = .ready(model)
         } catch {
             container = nil

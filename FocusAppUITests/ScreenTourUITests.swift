@@ -30,6 +30,32 @@ final class ScreenTourUITests: XCTestCase {
         add(attachment)
     }
 
+    /// 習慣と候補（PLN-08・09）：朝の計画の候補、確定したあとの計画のタブの習慣の行と習慣の画面、初めて使う端末の最初の案内
+    func testHabitsAndCandidates() {
+        let app = demo("habits", "2026-10-19T07:00:00")
+        let add = app.buttons["addBlockButton"]
+        let list = app.collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: timeout))
+        // 候補が見えるよう、「ブロックを追加」が画面の上半分に来るまでずらす（文字が大きいと初めは画面の外）
+        for _ in 0..<10 where !(add.exists && add.isHittable) || add.frame.minY > list.frame.midY { list.swipeUp(velocity: .slow) }
+        shoot("morning-candidates")
+        app.buttons["confirmPlanButton"].tap()
+        // 初めて確定したあとの通知の説明を閉じる
+        let later = app.buttons["あとで"]
+        if later.waitForExistence(timeout: 3) { later.tap() }
+        app.tabBars.buttons["計画"].tap()
+        let row = app.descendants(matching: .any)["habitsRow"].firstMatch
+        for _ in 0..<20 where !(row.exists && row.isHittable) { app.collectionViews.firstMatch.swipeUp() }
+        shoot("plan-tab-habits-row")
+        row.tap()
+        XCTAssertTrue(app.navigationBars["習慣"].waitForExistence(timeout: timeout))
+        shoot("habits-edit")
+        app.terminate()
+        let intro = launch(["-inMemoryStore", "-habitIntro", "-fixedNow", "2026-10-19T07:00:00+09:00"])
+        XCTAssertTrue(intro.buttons["skipHabitsButton"].waitForExistence(timeout: timeout))
+        shoot("habit-intro")
+    }
+
     /// デトックスのグループ（2026-10-03）：設定の一覧の右のグループと、カテゴリの編集のグループの一覧
     func testDetoxGroups() {
         let app = demo("day", "2026-10-19T15:20:00", ["-openSettings"])
