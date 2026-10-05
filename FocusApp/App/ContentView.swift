@@ -66,7 +66,10 @@ private struct MainView: View {
         let opensAnalysis = options.openAnalysis || options.openTimeline || options.openPoints
         _tab = State(initialValue: opensAnalysis ? .analysis : options.openPlan ? .plan : .timer)
         _analysisPath = State(initialValue: options.openTimeline ? [.timeline]
-                              : options.openPoints ? [.points] + (options.openDay.map { [.day(daysAgo: $0)] } ?? []) : [])
+                              : options.openPoints ? [.points] + (options.openDay.map { days in
+                                  let today = DayBoundary.dayStart(containing: model.clock.now(), calendar: model.calendar)
+                                  return [.day(model.calendar.date(byAdding: .day, value: -days, to: today) ?? today)]
+                              } ?? []) : [])
         _showsSettings = State(initialValue: options.openSettings)
         if options.openReview { model.showsReview = true }
         _holdProgress = State(initialValue: options.holdProgress)

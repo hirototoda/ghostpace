@@ -555,6 +555,14 @@ final class AppModel {
         let calendar = self.calendar
         let today = DayBoundary.dayStart(containing: now, calendar: calendar)
         guard daysAgo >= 0, let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { return nil }
+        return daySnapshot(of: dayStart)
+    }
+
+    /// `dayStart`（その日の 4:00）の1日分の数字。分析で押した日を、開いたまま4:00をまたいでも取り違えないよう日付で開く
+    func daySnapshot(of dayStart: Date) -> HomeSnapshot? {
+        let now = clock.now()
+        let calendar = self.calendar
+        guard dayStart <= DayBoundary.dayStart(containing: now, calendar: calendar) else { return nil }
         var snapshot: HomeSnapshot?
         perform(reportsError: false) {
             snapshot = try daySnapshot(dayStart: dayStart, now: now, events: (try? blockLog.all()) ?? [], calendar: calendar)
@@ -569,22 +577,17 @@ final class AppModel {
         let today = DayBoundary.dayStart(containing: now, calendar: calendar)
         // ブロックの記録は1回だけ読む
         let events = (try? blockLog.all()) ?? []
-        var result: [DayPoints] = []
-        perform(reportsError: false) {
-            for daysAgo in (0..<max(days, 0)).reversed() {
-                guard let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { continue }
-                let isToday = daysAgo == 0
-                let recorded = try isToday || hasRecord(dayStart: dayStart, calendar: calendar)
-                guard recorded else {
-                    result.append(DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: false))
-                    continue
-                }
-                let snapshot = try daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar)
-                result.append(DayPoints(dayStart: dayStart, points: snapshot.points,
-                                        lastWeek: snapshot.opponentPoints(.lastWeek, at: snapshot.now), isToday: isToday))
+        // 途中の1日が読めなくても全体は欠かさず、その日だけ記録なしにする
+        return (0..<max(days, 0)).reversed().compactMap { daysAgo -> DayPoints? in
+            guard let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { return nil }
+            let isToday = daysAgo == 0
+            guard let recorded = try? isToday || hasRecord(dayStart: dayStart, calendar: calendar), recorded,
+                  let snapshot = try? daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar) else {
+                return DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday)
             }
+            return DayPoints(dayStart: dayStart, points: snapshot.points,
+                             lastWeek: snapshot.opponentPoints(.lastWeek, at: snapshot.now), isToday: isToday)
         }
-        return result
     }
 
     /// その日に何か記録があるか：タイマーの記録・計画（下書き・確定・計画なし）・保存した睡眠のどれか。

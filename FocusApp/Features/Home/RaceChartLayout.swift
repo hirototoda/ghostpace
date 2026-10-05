@@ -169,10 +169,15 @@ struct RaceChartLayout {
 
     /// 上の行の差（例「差 −10.0pt」）。小数1桁に丸め、丸めて0なら符号なし
     static func gapText(_ points: Double) -> String {
+        String(localized: "差 \(signedPoints(points))")
+    }
+
+    /// 符号つきのポイント（例「+4.1pt」「−0.3pt」）。小数1桁に丸め、丸めて0なら符号なし。差の表示で共有する
+    static func signedPoints(_ points: Double) -> String {
         let rounded = (points * 10).rounded() / 10
         let number = abs(rounded).formatted(.number.precision(.fractionLength(1)))
         let sign = rounded > 0 ? "+" : rounded < 0 ? "−" : ""
-        return String(localized: "差 \(sign)\(number)pt")
+        return "\(sign)\(number)pt"
     }
 
     /// だんだんゆっくり（3次）

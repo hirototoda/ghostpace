@@ -5,20 +5,22 @@ import SwiftUI
 enum AnalysisRoute: Hashable {
     case points
     case timeline
-    /// その日のグラフ（今日は0）
-    case day(daysAgo: Int)
+    /// その日のグラフ（その日の 4:00。開いたまま4:00をまたいでも同じ日を指すよう日付で持つ）
+    case day(Date)
 }
 
 /// 分析のタブ（NAV-01・ANA-03、2026-10-05 オーナー決定でタイムラインのタブを置き換え）。項目の一覧から進む
 struct AnalysisScreen: View {
     @Bindable var model: AppModel
     @Binding var path: [AnalysisRoute]
+    /// 昨日までの7日の平均（開いたとき・1分ごとの読み直しで数え直す。描き直すたびには数えない）
+    @State private var average: Double?
 
     var body: some View {
         NavigationStack(path: $path) {
             List {
                 NavigationLink(value: AnalysisRoute.points) {
-                    row("ポイントの推移", systemImage: "chart.bar.xaxis", detail: averageText)
+                    row("ポイントの推移", systemImage: "chart.xyaxis.line", detail: averageText)
                 }
                 .accessibilityIdentifier("analysisPointsRow")
                 NavigationLink(value: AnalysisRoute.timeline) {
@@ -35,11 +37,12 @@ struct AnalysisScreen: View {
                 .accessibilityIdentifier("analysisReviewRow")
             }
             .navigationTitle("分析")
+            .task(id: model.snapshot.now) { average = PointsHistory.average(model.pointsHistory(days: 8)) }
             .navigationDestination(for: AnalysisRoute.self) { route in
                 switch route {
                 case .points: PointsHistoryView(model: model)
                 case .timeline: TimelineScreen(model: model)
-                case .day(let daysAgo): DayGraphView(model: model, daysAgo: daysAgo)
+                case .day(let dayStart): DayGraphView(model: model, dayStart: dayStart)
                 }
             }
         }
@@ -48,7 +51,7 @@ struct AnalysisScreen: View {
 
     /// 昨日までの7日の平均（今日は途中なので除く）
     private var averageText: Text? {
-        PointsHistory.average(model.pointsHistory(days: 8)).map {
+        average.map {
             Text("7日の平均 \(RaceChart.pointText($0))")
         }
     }
@@ -70,9 +73,10 @@ struct AnalysisScreen: View {
 struct PointsHistoryView: View {
     @Bindable var model: AppModel
     @State private var days = 7
+    /// 表示している期間の数字。期間を変えたとき・1分ごとの読み直しで数え直す（30日分を描き直すたびに数えない）
+    @State private var history: [DayPoints] = []
 
     var body: some View {
-        let history = model.pointsHistory(days: days)
         List {
             Section {
                 Picker("期間", selection: $days) {
@@ -88,7 +92,7 @@ struct PointsHistoryView: View {
             }
             Section("日ごと") {
                 ForEach(history.reversed()) { day in
-                    NavigationLink(value: AnalysisRoute.day(daysAgo: daysAgo(day))) {
+                    NavigationLink(value: AnalysisRoute.day(day.dayStart)) {
                         dayRow(day)
                     }
                     .disabled(day.points == nil)
@@ -97,11 +101,12 @@ struct PointsHistoryView: View {
         }
         .navigationTitle("ポイントの推移")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: Refresh(days: days, now: model.snapshot.now)) { history = model.pointsHistory(days: days) }
     }
 
-    private func daysAgo(_ day: DayPoints) -> Int {
-        let today = model.snapshot.dayStart
-        return max(model.calendar.dateComponents([.day], from: day.dayStart, to: today).day ?? 0, 0)
+    private struct Refresh: Equatable {
+        var days: Int
+        var now: Date
     }
 
     /// 自分（実線）と先週の同じ曜日（点線）の2本（2026-10-05 オーナー決定、棒と比べて選んだ）。
@@ -193,7 +198,7 @@ struct PointsHistoryView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(RaceChart.pointText(points)).monospacedDigit().fontWeight(.semibold)
                     if let gap = day.gap {
-                        Text("先週より \(RaceChartLayout.gapText(gap).replacingOccurrences(of: "差 ", with: ""))")
+                        Text("先週より \(RaceChartLayout.signedPoints(gap))")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(RaceChartLayout.isAhead(gap) ? Theme.lead : Theme.behind)
                     }
@@ -209,12 +214,13 @@ struct PointsHistoryView: View {
 /// その日のグラフ（ANA-05）：ホームの円の裏と同じグラフ。過ぎた日は 4:00〜翌4:00 の1日で始める
 struct DayGraphView: View {
     @Bindable var model: AppModel
-    let daysAgo: Int
+    let dayStart: Date
 
     var body: some View {
         ScrollView {
-            if let snapshot = model.daySnapshot(daysAgo: daysAgo) {
-                RaceChart(snapshot: snapshot, opponent: model.opponent, isPastDay: daysAgo > 0)
+            if let snapshot = model.daySnapshot(of: dayStart) {
+                // 過ぎた日（翌4:00 まで数えた日）は1日で始める。今日はホームの裏と同じ
+                RaceChart(snapshot: snapshot, opponent: model.opponent, isPastDay: snapshot.now >= snapshot.dayEnd)
                     .aspectRatio(0.8, contentMode: .fit)
                     .padding(16)
                     .navigationTitle(Text(snapshot.dayStart.formatted(
