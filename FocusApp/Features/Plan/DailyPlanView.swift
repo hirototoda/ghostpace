@@ -51,6 +51,9 @@ struct DailyPlanView: View {
     /// タブ：「習慣」の行（中身と、押したときに開く画面）。nil なら出さない
     var habits: PlanHabits?
     var habitsEditor: (() -> AnyView)?
+    /// 起きている時間（格子で寝ている時間を灰色にする、PLN-10）。nil なら1日全部
+    var awake: ClosedRange<Date>?
+    @State private var gridProblem: String?
     @State private var editsSleep = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -77,83 +80,49 @@ struct DailyPlanView: View {
         // 候補は描くたびに1回だけ求める（昨日・先週の計画を読むため）
         let shown = self.candidates(plan)
         NavigationStack {
-            List {
-                Section {
-                    summary
-                    if let sleep { sleepRow(sleep) }
-                    if showsGoal { goalRow }
-                }
-                if mode != .tab, !templates.isEmpty {
-                    Section("テンプレートから") { templateBar }
-                }
-                Section {
-                    if plan.blocks.isEmpty {
-                        Text("「ブロックを追加」から、今日やることを時間帯ごとに入れます。")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    ForEach(plan.sortedBlocks) { block in
-                        Button {
-                            editing = EditorTarget(block: block, isNew: false)
-                        } label: {
-                            PlanBlockRow(block: block, isPast: block.end <= now)
-                        }
-                        .buttonStyle(.plain)
-                        // 確定した日の終わったゲーム・SNS の時間は変えられない（BLK-10）
-                        .disabled(isLockedUnblock(block))
-                        .deleteDisabled(isLockedUnblock(block))
-                    }
-                    .onDelete { offsets in
-                        let sorted = plan.sortedBlocks
-                        offsets.forEach { delete(sorted[$0]) }
-                    }
-                    Button {
-                        editing = newBlockTarget
-                    } label: {
-                        Label("ブロックを追加", systemImage: "plus.circle.fill").font(.headline)
-                    }
-                    .accessibilityIdentifier("addBlockButton")
-                    if onSaveAsTemplate != nil, !plan.blocks.isEmpty, mode != .tab {
-                        saveAsTemplateButton
-                    }
-                } footer: {
-                    if mode == .tab {
-                        Text("直すとすぐ保存します。朝に確定した計画は、振り返りのためにそのまま残ります。")
-                    }
-                }
-                if !shown.isEmpty {
-                    candidateSection(shown)
-                }
-                if mode == .tab, let habits, let habitsEditor {
-                    Section {
-                        NavigationLink {
-                            habitsEditor()
-                        } label: {
-                            HabitsRow(habits: habits)
-                        }
-                        .accessibilityIdentifier("habitsRow")
-                    }
-                }
-                if mode == .tab, let templateEditor {
-                    Section {
-                        ForEach(templates) { template in
-                            Button {
-                                previewing = template
-                            } label: {
-                                HStack {
-                                    TemplateRow(template: template)
-                                    Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
-                                }
-                                .contentShape(Rectangle())
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        card {
+                            summary
+                            if let sleep {
+                                Divider()
+                                sleepRow(sleep).padding(.vertical, 10)
                             }
-                            .buttonStyle(.plain)
+                            if showsGoal {
+                                Divider()
+                                goalRow.padding(.vertical, 10)
+                            }
                         }
-                        if onSaveAsTemplate != nil, !plan.blocks.isEmpty { saveAsTemplateButton }
-                    } header: {
-                        Text("テンプレート")
-                    } footer: {
-                        Text("最大\(PlanTemplate.maxCount)つ（あと\(max(0, PlanTemplate.maxCount - templates.count))つ）。押すと中身を見て、今日はこれで進めるか、名前と中身を直せます。")
+                        if mode != .tab, !templates.isEmpty {
+                            card(header: "テンプレートから") { templateBar }
+                        }
+                        planCard
+                        if !shown.isEmpty { candidateSection(shown) }
+                        if mode == .tab, let habits, let habitsEditor {
+                            card {
+                                NavigationLink {
+                                    habitsEditor()
+                                } label: {
+                                    HStack {
+                                        HabitsRow(habits: habits)
+                                        Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.vertical, 8)
+                                .accessibilityIdentifier("habitsRow")
+                            }
+                        }
+                        if mode == .tab, templateEditor != nil { templateCard }
                     }
-                    .accessibilityIdentifier("templateSection")
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                }
+                .background(Color(.systemGroupedBackground))
+                .onAppear {
+                    // 朝・明日は起きた時刻、計画のタブは今の時刻のあたりから見せる
+                    proxy.scrollTo("hour-\(initialHour)", anchor: .center)
                 }
             }
             .background {
@@ -184,10 +153,12 @@ struct DailyPlanView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
+                    if let gridProblem { problemBanner(gridProblem) }
                     if let undo { undoBanner(undo) }
                     if mode != .tab { bottomButtons }
                 }
                 .animation(.easeOut(duration: 0.25), value: undo)
+                .animation(.easeOut(duration: 0.25), value: gridProblem)
             }
             .sheet(item: $editing) { target in
                 BlockEditorSheet(block: target.block, isNew: target.isNew, plan: plan, dayStart: dayStart,
@@ -217,6 +188,113 @@ struct DailyPlanView: View {
         .onChange(of: storedPlan) { _, newValue in
             if let newValue, newValue != plan { plan = newValue }
         }
+    }
+
+    // MARK: 時間の格子（PLN-10）
+
+    private var gridLayout: PlanGridLayout { PlanGridLayout(dayStart: dayStart, hourHeight: PlanGridLayout.hourHeight) }
+
+    /// 開いたときに見せる時刻（4:00 からの時間）。朝・明日は起きた時刻、計画のタブは今の1時間前
+    private var initialHour: Int {
+        PlanGridLayout.initialHour(confirmedDay: mode == .tab, now: now, wake: awake?.lowerBound ?? dayStart, dayStart: dayStart)
+    }
+
+    private var planCard: some View {
+        card(footer: mode == .tab ? "直すとすぐ保存します。朝に確定した計画は、振り返りのためにそのまま残ります。" : nil) {
+            if plan.blocks.isEmpty {
+                Text("空いた時間を押すか「ブロックを追加」で、今日やることを入れます。長押しで動かし、下の端で長さを変えます。")
+                    .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 8)
+            }
+            Button {
+                editing = newBlockTarget
+            } label: {
+                Label("ブロックを追加", systemImage: "plus.circle.fill").font(.headline)
+            }
+            .padding(.vertical, 10)
+            .accessibilityIdentifier("addBlockButton")
+            PlanGridView(blocks: plan.sortedBlocks, layout: gridLayout, now: now,
+                         showsNow: mode != .tomorrow, awake: awake ?? dayStart...gridLayout.dayEnd,
+                         confirmedDay: mode == .tab, isLocked: isLockedUnblock,
+                         onTap: { editing = EditorTarget(block: $0, isNew: false) },
+                         onTapEmpty: { start in
+                             editing = EditorTarget(block: PlanBlockDraft(start: start, minutes: PlanDraft.defaultMinutes,
+                                                                          category: categories.first ?? .unknown), isNew: true)
+                         },
+                         onCommit: commitFromGrid, calendar: calendar)
+                .padding(.vertical, 8)
+            if onSaveAsTemplate != nil, !plan.blocks.isEmpty, mode != .tab {
+                Divider()
+                saveAsTemplateButton.padding(.vertical, 10)
+            }
+        }
+    }
+
+    /// 格子で動かした・長さを変えたブロック。重なる・4:00 をまたぐときは元のまま理由を出す
+    private func commitFromGrid(_ block: PlanBlockDraft) {
+        if let reason = plan.problem(with: block, dayStart: dayStart) {
+            gridProblem = reason
+        } else {
+            plan.upsert(block)
+        }
+    }
+
+    private var templateCard: some View {
+        card(header: "テンプレート",
+             footer: "最大\(PlanTemplate.maxCount)つ（あと\(max(0, PlanTemplate.maxCount - templates.count))つ）。押すと中身を見て、今日はこれで進めるか、名前と中身を直せます。") {
+            ForEach(Array(templates.enumerated()), id: \.element.id) { index, template in
+                if index > 0 { Divider() }
+                Button {
+                    previewing = template
+                } label: {
+                    HStack {
+                        TemplateRow(template: template)
+                        Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 8)
+            }
+            if onSaveAsTemplate != nil, !plan.blocks.isEmpty {
+                Divider()
+                saveAsTemplateButton.padding(.vertical, 10)
+            }
+        }
+    }
+
+    /// 一覧の区切り（見出し・角丸の白い面・説明）
+    private func card<Content: View>(header: String? = nil, footer: String? = nil,
+                                     @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let header {
+                Text(header).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).padding(.horizontal, 16)
+            }
+            VStack(alignment: .leading, spacing: 0) { content() }
+                .padding(.horizontal, 16).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
+            if let footer {
+                Text(footer).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 格子で置けなかった理由の帯（3秒）
+    private func problemBanner(_ reason: String) -> some View {
+        Label(reason, systemImage: "exclamationmark.circle")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color(.systemBackground))
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.label).opacity(0.88)))
+            .padding(.horizontal, 16).padding(.bottom, 8)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .accessibilityIdentifier("gridProblem")
+            .task(id: reason) {
+                try? await Task.sleep(for: .seconds(3))
+                gridProblem = nil
+            }
     }
 
     private var title: String {
@@ -297,10 +375,11 @@ struct DailyPlanView: View {
 
     // MARK: 候補（PLN-09）
 
-    /// 一覧の下に、候補を1行ずつ（押すと足す。2026-10-05 オーナー決定：横に並べる案と比べた）
+    /// 計画の下に、候補を1行ずつ（押すと足す。2026-10-05 オーナー決定：横に並べる案と比べた）
     private func candidateSection(_ candidates: [PlanCandidate]) -> some View {
-        Section {
-            ForEach(candidates) { candidate in
+        card(header: "候補から足す", footer: "昨日・先週の\(weekdayName)曜日・テンプレートから。押すと同じ時刻・長さで足します。") {
+            ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
+                if index > 0 { Divider() }
                 Button {
                     plan.upsert(candidate.blockToAdd)
                 } label: {
@@ -311,14 +390,14 @@ struct DailyPlanView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(.vertical, 6)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(candidate.block.title) \(timeRange(candidate.block.start, candidate.block.end))、\(candidate.sourceLabel)")
+                .accessibilityAddTraits(.isButton)
                 .accessibilityHint("同じ時刻で計画に足します")
+                .accessibilityIdentifier("candidate")
             }
-        } header: {
-            Text("候補から足す")
-        } footer: {
-            Text("昨日・先週の\(weekdayName)曜日・テンプレートから。押すと同じ時刻・長さで足します。")
         }
-        .accessibilityIdentifier("candidateSection")
     }
 
     private var weekdayName: String {

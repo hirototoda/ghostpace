@@ -33,11 +33,13 @@ final class ScreenTourUITests: XCTestCase {
     /// 習慣と候補（PLN-08・09）：朝の計画の候補、確定したあとの計画のタブの習慣の行と習慣の画面、初めて使う端末の最初の案内
     func testHabitsAndCandidates() {
         let app = demo("habits", "2026-10-19T07:00:00")
-        let add = app.buttons["addBlockButton"]
-        let list = app.collectionViews.firstMatch
-        XCTAssertTrue(list.waitForExistence(timeout: timeout))
-        // 候補が見えるよう、「ブロックを追加」が画面の上半分に来るまでずらす（文字が大きいと初めは画面の外）
-        for _ in 0..<10 where !(add.exists && add.isHittable) || add.frame.minY > list.frame.midY { list.swipeUp(velocity: .slow) }
+        let confirm = app.buttons["confirmPlanButton"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: timeout))
+        shoot("morning-grid")
+        // 候補が見えるまで送る（後ろのタブの画面ではなく、いちばん上の画面を送る）
+        let candidate = app.buttons.matching(identifier: "candidate").firstMatch
+        for _ in 0..<20 where !(candidate.exists && candidate.frame.minY < confirm.frame.minY - 200) { app.swipeUp(velocity: .slow) }
+        Thread.sleep(forTimeInterval: 1)
         shoot("morning-candidates")
         app.buttons["confirmPlanButton"].tap()
         // 初めて確定したあとの通知の説明を閉じる
@@ -45,7 +47,8 @@ final class ScreenTourUITests: XCTestCase {
         if later.waitForExistence(timeout: 3) { later.tap() }
         app.tabBars.buttons["計画"].tap()
         let row = app.descendants(matching: .any)["habitsRow"].firstMatch
-        for _ in 0..<20 where !(row.exists && row.isHittable) { app.collectionViews.firstMatch.swipeUp() }
+        for _ in 0..<20 where !(row.exists && row.isHittable) { app.swipeUp() }
+        Thread.sleep(forTimeInterval: 1)
         shoot("plan-tab-habits-row")
         row.tap()
         XCTAssertTrue(app.navigationBars["習慣"].waitForExistence(timeout: timeout))
@@ -54,6 +57,18 @@ final class ScreenTourUITests: XCTestCase {
         let intro = launch(["-inMemoryStore", "-habitIntro", "-fixedNow", "2026-10-19T07:00:00+09:00"])
         XCTAssertTrue(intro.buttons["skipHabitsButton"].waitForExistence(timeout: timeout))
         shoot("habit-intro")
+    }
+
+    /// 時間の格子（PLN-10）：計画のタブ（今の線、終わったブロックは薄い）と、長押しで動かしている途中
+    func testPlanGrid() {
+        let app = demo("day", "2026-10-19T11:20:00", ["-openPlan"])
+        let exercise = app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", "運動 ")).firstMatch
+        XCTAssertTrue(exercise.waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("plan-tab-grid")
+        app.swipeUp(velocity: .slow)
+        Thread.sleep(forTimeInterval: 1)
+        shoot("plan-tab-grid-later")
     }
 
     /// デトックスのグループ（2026-10-03）：設定の一覧の右のグループと、カテゴリの編集のグループの一覧
@@ -102,11 +117,12 @@ final class ScreenTourUITests: XCTestCase {
     func testPlanChange() {
         let app = demo("day", "2026-10-19T10:30:00")
         app.buttons["planLine"].tap()
-        let row = app.collectionViews.cells.containing(.staticText, identifier: "ゼミ準備").firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: timeout))
+        // 時間の格子（PLN-10）のブロックを押して編集の画面から消す
+        let block = app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", "卒論 ")).firstMatch
+        XCTAssertTrue(block.waitForExistence(timeout: timeout))
         shoot("plan-tab")
-        row.swipeLeft()
-        app.buttons.matching(NSPredicate(format: "label IN {'削除', 'Delete'}")).firstMatch.tap()
+        block.tap()
+        app.buttons["このブロックを削除"].tap()
         app.tabBars.buttons["タイマー"].tap()
         XCTAssertTrue(app.buttons["planLine"].waitForExistence(timeout: timeout))
         shoot("plan-edit-saved")
@@ -162,7 +178,7 @@ final class ScreenTourUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["明日の計画"].waitForExistence(timeout: timeout))
         shoot("tomorrow-empty")
         let addBlock = app.buttons["addBlockButton"]
-        for _ in 0..<4 where !addBlock.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        for _ in 0..<4 where !addBlock.isHittable { app.scrollViews.firstMatch.swipeUp() }
         addBlock.tap()
         XCTAssertTrue(app.buttons["blockSaveButton"].waitForExistence(timeout: timeout))
         shoot("tomorrow-block")
@@ -275,7 +291,7 @@ final class ScreenTourUITests: XCTestCase {
         app = demo("day", "2026-10-19T15:20:00")
         app.tabBars.buttons["計画"].tap()
         let section = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '理想の休日'")).firstMatch
-        for _ in 0..<5 where !(section.exists && section.isHittable) { app.collectionViews.firstMatch.swipeUp() }
+        for _ in 0..<5 where !(section.exists && section.isHittable) { app.scrollViews.firstMatch.swipeUp() }
         shoot("plan-tab-templates")
         section.tap()
         XCTAssertTrue(app.textFields["templateNameField"].waitForExistence(timeout: timeout))
@@ -295,14 +311,14 @@ final class ScreenTourUITests: XCTestCase {
     func testApplyTemplateMidday() {
         let app = demo("day", "2026-10-19T11:20:00", ["-openPlan"])
         let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '理想の休日'")).firstMatch
-        for _ in 0..<5 where !(row.exists && row.isHittable) { app.collectionViews.firstMatch.swipeUp() }
+        for _ in 0..<5 where !(row.exists && row.isHittable) { app.scrollViews.firstMatch.swipeUp() }
         shoot("midday-list")
         row.tap()
         XCTAssertTrue(app.buttons["applyTemplateButton"].waitForExistence(timeout: timeout))
         shoot("midday-preview")
         app.buttons["applyTemplateButton"].tap()
         shoot("midday-undo")
-        for _ in 0..<3 { app.collectionViews.firstMatch.swipeDown() }
+        for _ in 0..<3 { app.scrollViews.firstMatch.swipeDown() }
         shoot("midday-applied")
     }
 
@@ -325,7 +341,7 @@ final class ScreenTourUITests: XCTestCase {
         let app = demo("gamePlan", "2026-10-19T07:00:00")
         XCTAssertTrue(app.buttons["confirmPlanButton"].waitForExistence(timeout: timeout))
         shoot("unblock-top")
-        let row = app.staticTexts["ゲーム・SNS"].firstMatch
+        let row = app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", "ゲーム・SNS ")).firstMatch
         for _ in 0..<8 where !(row.exists && row.isHittable) { app.swipeUp() }
         shoot("unblock-list")
         let add = app.buttons["addBlockButton"]

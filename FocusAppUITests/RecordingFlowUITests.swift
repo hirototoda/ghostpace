@@ -42,12 +42,12 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["ゼミ準備"].waitForExistence(timeout: timeout))
         XCTAssertTrue(app.buttons["ゼミ準備"].isSelected)
         app.buttons["blockSaveButton"].tap()
-        XCTAssertTrue(app.staticTexts["ゼミ準備"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "ゼミ準備").waitForExistence(timeout: timeout))
 
         // 下書きは再起動しても残る
         app.terminate()
         app = launch(store("ui-a", at: "09:12:00", reset: false))
-        XCTAssertTrue(app.staticTexts["ゼミ準備"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "ゼミ準備").waitForExistence(timeout: timeout))
         app.buttons["confirmPlanButton"].tap()
         // 初めて確定した直後に、通知の説明が1回だけ出る（TMR-05）
         let later = app.buttons["notificationsLaterButton"]
@@ -191,7 +191,7 @@ final class RecordingFlowUITests: XCTestCase {
         let planTab = app.tabBars.buttons["計画"]
         XCTAssertTrue(planTab.waitForExistence(timeout: timeout))
         planTab.tap()
-        XCTAssertTrue(app.staticTexts["卒論"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "卒論").waitForExistence(timeout: timeout))
         XCTAssertTrue(app.buttons["addBlockButton"].exists)
 
         // ホームの歯車から設定を開き、カテゴリを足す
@@ -448,22 +448,22 @@ final class RecordingFlowUITests: XCTestCase {
         add.tap()
         app.buttons["読書"].tap()
         app.buttons["blockSaveButton"].tap()
-        XCTAssertTrue(app.staticTexts["読書"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "読書").waitForExistence(timeout: timeout))
 
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH '理想の休日'")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["瞑想"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "瞑想").waitForExistence(timeout: timeout))
         let undo = app.buttons["undoTemplateButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: timeout))
         undo.tap()
-        XCTAssertFalse(app.staticTexts["瞑想"].exists)
-        XCTAssertTrue(app.staticTexts["読書"].exists)
+        XCTAssertFalse(planBlock(app, "瞑想").exists)
+        XCTAssertTrue(planBlock(app, "読書").exists)
     }
 
     /// 日中にテンプレートで進める：計画のタブで押して「今日はこれで進む」、今から先だけ置き換わり「元に戻す」で戻る
     func testApplyTemplateMidday() {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T11:20:00+09:00", "-openPlan"])
         let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '理想の休日'")).firstMatch
-        for _ in 0..<5 where !(row.exists && row.isHittable) { app.collectionViews.firstMatch.swipeUp() }
+        for _ in 0..<5 where !(row.exists && row.isHittable) { app.scrollViews.firstMatch.swipeUp() }
         row.tap()
         let apply = app.buttons["applyTemplateButton"]
         XCTAssertTrue(apply.waitForExistence(timeout: timeout))
@@ -478,10 +478,10 @@ final class RecordingFlowUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(apply.waitForExistence(timeout: timeout))
         apply.tap()
-        for _ in 0..<5 { app.collectionViews.firstMatch.swipeDown() }
-        XCTAssertTrue(app.staticTexts["13:30–14:00"].waitForExistence(timeout: timeout))  // 掃除が入る
-        XCTAssertTrue(app.staticTexts["ゼミ準備"].exists)  // 今のブロックは残る
-        XCTAssertFalse(app.staticTexts["14:00–16:00"].exists)  // まだ始まっていない卒論は外れる
+        for _ in 0..<5 { app.scrollViews.firstMatch.swipeDown() }
+        XCTAssertTrue(planBlock(app, "掃除").waitForExistence(timeout: timeout))  // 掃除が入る
+        XCTAssertTrue(planBlock(app, "ゼミ準備").exists)  // 今のブロックは残る
+        XCTAssertFalse(planBlock(app, "卒論").exists)  // まだ始まっていない卒論は外れる
     }
 
     /// 設定の「計画の前の通知」：初めは5分前。選ぶと変わり、開き直しても残る（TMR-12、1b-22）
@@ -594,7 +594,7 @@ final class RecordingFlowUITests: XCTestCase {
         chip.tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "30分（決まり）")).firstMatch.exists)
         app.buttons["blockSaveButton"].tap()
-        XCTAssertTrue(app.staticTexts["ゲーム・SNS"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "ゲーム・SNS").waitForExistence(timeout: timeout))
         XCTAssertTrue(app.buttons["confirmPlanButton"].isEnabled)
     }
 
@@ -614,7 +614,7 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(finish.waitForExistence(timeout: timeout))
         finish.tap()
         XCTAssertTrue(app.buttons["confirmPlanButton"].waitForExistence(timeout: timeout))
-        XCTAssertTrue(app.staticTexts["ゲーム・SNS"].exists)
+        XCTAssertTrue(planBlock(app, "ゲーム・SNS").exists)
 
         app.terminate()
         let again = launch(store("habits", at: "07:05:00", reset: false) + ["-habitIntro"])
@@ -625,25 +625,30 @@ final class RecordingFlowUITests: XCTestCase {
     /// 候補（PLN-09）を押すと計画に足され、候補から消える。計画のタブから習慣を直すとすぐ行に出る（PLN-08）
     func testAddCandidateAndEditHabits() {
         let app = launch(["-seedDemoData", "habits", "-fixedNow", "2026-10-19T07:00:00+09:00"])
-        let list = app.collectionViews.firstMatch
-        XCTAssertTrue(list.waitForExistence(timeout: timeout))
-        // 先週の月曜だけにある 12:30 の掃除
-        let cleaning = app.buttons.containing(label("先週の月曜")).firstMatch
-        for _ in 0..<6 where !(cleaning.exists && cleaning.isHittable) { list.swipeUp() }
+        XCTAssertTrue(app.buttons["confirmPlanButton"].waitForExistence(timeout: timeout))
+        // 先週の月曜だけにある 12:30 の掃除（朝の計画の下の方。後ろのタブの画面ではなく、いちばん上の画面を送る）
+        let cleaning = app.buttons.matching(identifier: "candidate").matching(label("先週の月曜")).firstMatch
+        // 下の「この計画で始める」の帯に隠れない所まで送る
+        let confirm = app.buttons["confirmPlanButton"]
+        for _ in 0..<15 where !(cleaning.exists && cleaning.isHittable && cleaning.frame.maxY < confirm.frame.minY - 20) {
+            app.swipeUp(velocity: .slow)
+        }
+        Thread.sleep(forTimeInterval: 1)  // 送り終わるのを待つ（動いている間に押すと止まるだけ）
         XCTAssertTrue(cleaning.isHittable)
         cleaning.tap()
-        XCTAssertFalse(app.buttons.containing(label("先週の月曜")).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(identifier: "candidate").matching(label("先週の月曜")).firstMatch.exists)
         // 足したブロックは上の計画の一覧に入る（一覧は見えている行だけ読めるので、上へ戻して探す）
-        let added = app.buttons.containing(label("12:30–13:00")).firstMatch
-        for _ in 0..<6 where !added.exists { list.swipeDown() }
+        let added = planBlock(app, "掃除")
+        for _ in 0..<6 where !added.isHittable { app.swipeDown() }
         XCTAssertTrue(added.exists)
+        XCTAssertTrue(added.label.contains("12:30–13:00"))
 
         app.buttons["confirmPlanButton"].tap()
         let later = app.buttons["あとで"]
         if later.waitForExistence(timeout: 3) { later.tap() }
         app.tabBars.buttons["計画"].tap()
         let row = app.descendants(matching: .any)["habitsRow"].firstMatch
-        for _ in 0..<6 where !(row.exists && row.isHittable) { app.collectionViews.firstMatch.swipeUp() }
+        for _ in 0..<6 where !(row.exists && row.isHittable) { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertTrue(row.label.contains("ゲーム・SNS 2つ"))
         row.tap()
         let add = app.buttons["addHabitButton"]
@@ -658,6 +663,46 @@ final class RecordingFlowUITests: XCTestCase {
     }
 
     private func label(_ text: String) -> NSPredicate { NSPredicate(format: "label CONTAINS %@", text) }
+
+    /// 時間の格子（PLN-10）：空いた所を押すとその時刻から足せる。重なる所へのドラッグは元に戻って理由が出る。空いた所へは動く
+    func testPlanGridTapAndDrag() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T11:20:00+09:00", "-openPlan"])
+        let zemi = planBlock(app, "ゼミ準備"), thesis = planBlock(app, "卒論")
+        XCTAssertTrue(thesis.waitForExistence(timeout: timeout))
+        // 格子の上でも、すぐのドラッグは画面を上下に送る
+        let before = thesis.frame.minY
+        app.swipeUp(velocity: .slow)
+        XCTAssertLessThan(thesis.frame.minY, before - 50)
+        app.swipeDown(velocity: .slow)
+        Thread.sleep(forTimeInterval: 1)  // 送り終わるのを待つ（動いている間に押すと止まるだけ）
+        // 13:00〜14:00 の空きの上の方（13:10 ごろ）を押す → 13:00 に切り下げて1時間
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: thesis.frame.midX, dy: zemi.frame.maxY + 10)).tap()
+        let save = app.buttons["blockSaveButton"]
+        XCTAssertTrue(save.waitForExistence(timeout: timeout))
+        save.tap()
+        XCTAssertTrue(planBlock(app, "勉強").waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "勉強").label.contains("13:00–14:00"))
+
+        // 卒論を1時間下へ → 運動と重なるので元のまま
+        let start = thesis.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 60)))
+        XCTAssertTrue(app.descendants(matching: .any)["gridProblem"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "卒論").label.contains("14:00–16:00"))
+
+        // 運動を1時間下へ → 17:00〜18:00
+        let scroll = app.scrollViews.firstMatch
+        let exercise = planBlock(app, "運動")
+        for _ in 0..<3 where exercise.frame.maxY > scroll.frame.midY { scroll.swipeUp(velocity: .slow) }
+        let from = exercise.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        from.press(forDuration: 0.6, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 60)))
+        XCTAssertTrue(planBlock(app, "運動").label.contains("17:00–18:00"))
+    }
+
+    /// 計画の時間の格子のブロック（PLN-10）。読み上げは「名前 時刻」
+    private func planBlock(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", name + " ")).firstMatch
+    }
 
     /// 前倒しで始める（TMR-10）：10:40、次は 11:00–13:00 のゼミ準備 → ［今から始める］で 13:00 までのカウントダウン
     func testEarlyStart() {
