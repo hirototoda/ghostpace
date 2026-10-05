@@ -29,6 +29,18 @@ struct StartRequest {
     var timeZone: TimeZone
 }
 
+/// 押し忘れの申告（TMR-13）の値。
+struct DeclareRequest {
+    var category: CategoryOption
+    var project: ProjectOption?
+    var planBlockId: UUID
+    var start: Date
+    var end: Date
+    /// ブロックの終わり（タイムラインでブロックの記録として出すため）
+    var plannedEndAt: Date
+    var timeZone: TimeZone
+}
+
 enum EndResult: Equatable {
     case saved
     /// 一時停止を除いて1分未満だったので記録しなかった
@@ -103,6 +115,8 @@ protocol SessionRepository {
     func sessions(dayKey: String) throws -> [FocusSession]
     /// 終わった記録の終了時刻を早める（TMR-08）。直せる日かどうかは呼ぶ側で確かめる
     func shortenEnd(id: UUID, to newEnd: Date) throws
+    /// 押し忘れの申告（TMR-13）。申告の印を付けた終わった記録を足す
+    func declare(_ request: DeclareRequest) throws -> FocusSession
 }
 
 /// 睡眠の記録（DTX-02、保存データ第3版）。

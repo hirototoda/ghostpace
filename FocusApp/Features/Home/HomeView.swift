@@ -21,8 +21,20 @@ struct HomeView: View {
     /// ブロック名（CAT-03）。計画外の開始で選べる
     var projects: [ProjectOption] = []
     var onCreateProject: ((String, CategoryOption) -> ProjectOption?)?
+    /// 今のブロックを遅れて始めるとき「開始から始めていた」にできる開始（TMR-13）。nil なら聞かずに始める
+    var lateStart: (PlanBlockSummary) -> Date? = { _ in nil }
+    /// 「〜から始めていた（申告）」：ブロックの開始〜今を申告にして、今から始める
+    var onStartFromBlockStart: (PlanBlockSummary) -> Void = { _ in }
 
     @State private var showsStartSheet = false
+    /// 遅れて始めるときに聞いているブロックと、その開始
+    @State private var lateChoice: LateChoice?
+
+    private struct LateChoice: Identifiable {
+        var block: PlanBlockSummary
+        var start: Date
+        var id: UUID { block.id }
+    }
     /// 見本の撮影用に、計画外で開始のシートを開いて始める（`-openStartSheet`）
     @Environment(\.opensStartSheet) private var opensStartSheet
 
@@ -42,6 +54,16 @@ struct HomeView: View {
         }
         .safeAreaInset(edge: .bottom) { footer }
         .onAppear { if opensStartSheet { showsStartSheet = true } }
+        .confirmationDialog("いつから始めましたか？", isPresented: Binding(get: { lateChoice != nil }, set: { if !$0 { lateChoice = nil } }),
+                            titleVisibility: .visible, presenting: lateChoice) { choice in
+            Button("今から始める") { onStartBlock(choice.block) }
+            Button("\(choice.start.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits))) から始めていた（申告）") {
+                onStartFromBlockStart(choice.block)
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: { choice in
+            Text("押し忘れていたときは「\(choice.start.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits))) から始めていた」を選ぶと、それまでの分を申告にします（点は0.8倍）。")
+        }
         .sheet(isPresented: $showsStartSheet) {
             StartSheet(now: snapshot.now, categories: categories, projects: projects, onCreateProject: onCreateProject,
                        onCreateCategory: onCreateCategory) { category, project, minutes in
@@ -82,7 +104,12 @@ struct HomeView: View {
             }
             Button {
                 if let block = startableBlock {
-                    onStartBlock(block)
+                    // 開始から5分以上たって始めるときは「今から／開始から始めていた」を聞く（TMR-13、案A）
+                    if let start = lateStart(block) {
+                        lateChoice = LateChoice(block: block, start: start)
+                    } else {
+                        onStartBlock(block)
+                    }
                 } else {
                     showsStartSheet = true
                 }

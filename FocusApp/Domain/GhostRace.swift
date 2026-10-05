@@ -7,6 +7,8 @@ struct TimeSegment: Hashable {
     var countsAsFocus: Bool
     /// デトックスのタイマーのグループ（DTX-03 の上限に使う）。集中・上乗せなしのカテゴリは nil
     var detoxGroup: DetoxGroup? = nil
+    /// 押し忘れの申告（TMR-13）の区間。点は0.8倍
+    var isDeclared = false
 
     /// `until` までに含まれる秒数。
     func seconds(until date: Date) -> Int {

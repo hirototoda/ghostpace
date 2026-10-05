@@ -241,7 +241,9 @@ private struct MainView: View {
                  opponent: Binding(get: { model.opponent }, set: { model.selectOpponent($0) }),
                  onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) },
                  projects: model.projects,
-                 onCreateProject: { model.createProject(name: $0, category: $1) })
+                 onCreateProject: { model.createProject(name: $0, category: $1) },
+                 lateStart: { model.lateStart(for: $0) },
+                 onStartFromBlockStart: { model.startPlanned(block: $0, fromBlockStart: true) })
     }
 
     @ViewBuilder
@@ -260,7 +262,9 @@ private struct MainView: View {
                           habitDraft: model.habits.draft(dayStart: model.snapshot.dayStart, calendar: model.calendar),
                           candidates: { model.candidates(for: $0, dayStart: model.snapshot.dayStart, excludingEnded: true) },
                           habits: model.habits, habitsEditor: { AnyView(HabitsView(model: model)) },
-                          awake: model.awakeRange(dayStart: model.snapshot.dayStart))
+                          awake: model.awakeRange(dayStart: model.snapshot.dayStart),
+                          declarationProblem: { model.declarationProblem(for: $0, end: $1) },
+                          onDeclare: { model.declare($0, end: $1) })
                 .id(model.snapshot.dayStart)
         } else {
             NoPlanTab(model: model)

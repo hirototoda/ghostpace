@@ -35,12 +35,18 @@ enum FocusPoints {
         var end: Date
         var rate: Double = 1
         var continuous = true
+        /// 点の重み。押し忘れの申告（TMR-13）は0.8
+        var weight: Double = 1
     }
+
+    /// 押し忘れの申告の倍率（TMR-13）
+    static let declaredFactor = 0.8
 
     /// 記録の区間の `until` までの集中のポイント（デトックスのカテゴリの区間は数えない）。
     /// `opened` は開けていた時間（DTX-05）。その間は点を付けない
     static func points(_ segments: [TimeSegment], until date: Date, opened: [DateInterval] = []) -> Double {
-        points(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end) }, until: date, opened: opened)
+        points(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? declaredFactor : 1) },
+               until: date, opened: opened)
     }
 
     /// 目標のゴーストの `until` までのポイント。計画のブロックは自分のタイマーと同じに数え、目標を足した分は休みを挟むとみなす
@@ -77,7 +83,7 @@ enum FocusPoints {
                 let factor = max(min(flow.continuous ? runFactor(run) : 1, dayFactor(day)), floor)
                 let middle = cursor.addingTimeInterval(step / flow.rate / 2)
                 if !opened.contains(where: { $0.start < middle && middle < $0.end }) {
-                    total += focusPerSecond * step * factor
+                    total += focusPerSecond * step * factor * flow.weight
                 }
                 cursor = cursor.addingTimeInterval(step / flow.rate)
                 day += step

@@ -699,6 +699,35 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(planBlock(app, "運動").label.contains("17:00–18:00"))
     }
 
+    /// 押し忘れの申告（TMR-13）：計画のタブで記録のない終わったブロックを押すと「やった（申告）」で記録になり、二度は出ない
+    func testDeclareForgottenBlock() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00", "-openPlan"])
+        let zemi = planBlock(app, "ゼミ準備")
+        XCTAssertTrue(zemi.waitForExistence(timeout: timeout))
+        zemi.tap()
+        let declare = app.buttons["declareButton"]
+        XCTAssertTrue(declare.waitForExistence(timeout: timeout))
+        XCTAssertTrue(declare.isEnabled)
+        declare.tap()
+        XCTAssertFalse(declare.waitForExistence(timeout: 2))
+        zemi.tap()
+        XCTAssertTrue(app.buttons["blockSaveButton"].waitForExistence(timeout: timeout))
+        XCTAssertFalse(app.buttons["declareButton"].exists)
+    }
+
+    /// ブロックの最中に始めるとき（TMR-13、案A）：「11:00 から始めていた（申告）」を選ぶとタイマーが始まる
+    func testStartLateFromBlockStart() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T11:20:00+09:00"])
+        let start = app.buttons["startButton"]
+        XCTAssertTrue(start.waitForExistence(timeout: timeout))
+        start.tap()
+        let fromStart = app.buttons["11:00 から始めていた（申告）"]
+        XCTAssertTrue(fromStart.waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["今から始める"].exists)
+        fromStart.tap()
+        XCTAssertTrue(app.buttons["endButton"].waitForExistence(timeout: timeout))
+    }
+
     /// 計画の時間の格子のブロック（PLN-10）。読み上げは「名前 時刻」
     private func planBlock(_ app: XCUIApplication, _ name: String) -> XCUIElement {
         app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", name + " ")).firstMatch

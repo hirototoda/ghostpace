@@ -44,6 +44,8 @@ struct FocusSession: Identifiable, Hashable {
     var plannedDurationSec: Int?
     var pauses: [PauseInterval] = []
     var originalEndAt: Date?
+    /// 押し忘れの申告（TMR-13）。点は0.8倍
+    var isDeclared = false
 
     var title: String { project?.name ?? category.name }
     var isCountdown: Bool { plannedEndAt != nil || plannedDurationSec != nil }
@@ -80,7 +82,7 @@ struct FocusSession: Identifiable, Hashable {
         let group = DetoxGroup.of(category)
         func append(until segmentEnd: Date) {
             segments.append(TimeSegment(start: cursor, end: segmentEnd, countsAsFocus: category.countsAsFocus,
-                                        detoxGroup: group))
+                                        detoxGroup: group, isDeclared: isDeclared))
         }
         for pause in pauses.sorted(by: { $0.start < $1.start }) {
             let pauseStart = min(max(pause.start, cursor), end)
