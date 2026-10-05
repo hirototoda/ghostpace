@@ -334,10 +334,13 @@ final class ScreenTourUITests: XCTestCase {
         empty.buttons["sleepRow"].tap()
         let emptyButton = empty.buttons["sleepRereadButton"]
         XCTAssertTrue(emptyButton.waitForExistence(timeout: timeout))
+        // 大きな文字では下に隠れるので、見えるまで送る
+        for _ in 0..<6 where !emptyButton.isHittable { empty.swipeUp() }
         sleep(1)
         shoot("sleep-reread-sheet")
         emptyButton.tap()
         XCTAssertTrue(empty.staticTexts["sleepNoRecordText"].waitForExistence(timeout: timeout))
+        sleep(1)  // ひとことまで送り終えるのを待つ
         shoot("sleep-reread-norecord")
 
         let app = demo("gamePlan", "2026-10-19T07:30:00")

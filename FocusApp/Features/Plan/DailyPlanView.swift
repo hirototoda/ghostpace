@@ -536,6 +536,7 @@ struct SleepEditSheet: View {
     @State var end: Date
     let onSave: (Date, Date) -> Void
     let onReread: (() async -> Bool)?
+    private static let noRecordID = "sleepNoRecord"
     @State private var isRereading = false
     @State private var showsNoRecord = false
     @Environment(\.dismiss) private var dismiss
@@ -550,29 +551,34 @@ struct SleepEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    row("寝た", $start, shownDate: SleepLine.normalizedStart(start, end: end))
-                    row("起きた", $end, shownDate: end)
-                    Text("直すと、あとでヘルスケアに記録が入っても置き換えません（「ヘルスケアから読み直す」を押したときは置き換えます）。寝た時刻が起きた時刻より遅いときは、前の夜とみなします。")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        row("寝た", $start, shownDate: SleepLine.normalizedStart(start, end: end))
+                        row("起きた", $end, shownDate: end)
+                        Text("直すと、あとでヘルスケアに記録が入っても置き換えません（「ヘルスケアから読み直す」を押したときは置き換えます）。寝た時刻が起きた時刻より遅いときは、前の夜とみなします。")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        // 下に固定すると、大きな文字で説明に重なるので中身の終わりに置く（保存の上）
+                        if let onReread { rereadButton(onReread) }
+                    }
+                    .padding(20)
                 }
-                .padding(20)
+                // 大きな文字では、出したひとことが保存の下に隠れるので、そこまで送る
+                .onChange(of: showsNoRecord) { _, shows in
+                    if shows { withAnimation { proxy.scrollTo(Self.noRecordID, anchor: .bottom) } }
+                }
             }
             .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 10) {
-                    if let onReread { rereadButton(onReread) }
-                    Button {
-                        onSave(SleepLine.normalizedStart(start, end: end), end)
-                    } label: {
-                        Text("保存").font(.headline).frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.extraLarge)
-                    .accessibilityIdentifier("sleepSaveButton")
+                Button {
+                    onSave(SleepLine.normalizedStart(start, end: end), end)
+                } label: {
+                    Text("保存").font(.headline).frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.extraLarge)
                 .padding(.horizontal, 20).padding(.bottom, 8)
+                .accessibilityIdentifier("sleepSaveButton")
             }
             .navigationTitle("睡眠")
             .navigationBarTitleDisplayMode(.inline)
@@ -610,9 +616,13 @@ struct SleepEditSheet: View {
             if showsNoRecord {
                 Text("ヘルスケアに記録がありませんでした")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .id(Self.noRecordID)
                     .accessibilityIdentifier("sleepNoRecordText")
             }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
     }
 
     /// `shownDate`：前の夜に合わせたあとの日付（23:30 を選ぶと前の日になる）
