@@ -151,7 +151,8 @@ private struct MainView: View {
                           onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) },
                           sleep: sleepRow(dayStart: morning.dayStart),
                           habitDraft: model.habits.draft(dayStart: morning.dayStart, calendar: model.calendar),
-                          candidates: { model.candidates(for: $0, dayStart: morning.dayStart, excludingEnded: false) })
+                          candidates: { model.candidates(for: $0, dayStart: morning.dayStart, excludingEnded: false) },
+                          awake: model.awakeRange(dayStart: morning.dayStart))
         }
         .background {
             // シートは1つの View に1つまで。設定・振り返り・通知の説明は別の階層から出す
@@ -258,7 +259,8 @@ private struct MainView: View {
                           sleep: sleepRow(dayStart: model.snapshot.dayStart),
                           habitDraft: model.habits.draft(dayStart: model.snapshot.dayStart, calendar: model.calendar),
                           candidates: { model.candidates(for: $0, dayStart: model.snapshot.dayStart, excludingEnded: true) },
-                          habits: model.habits, habitsEditor: { AnyView(HabitsView(model: model)) })
+                          habits: model.habits, habitsEditor: { AnyView(HabitsView(model: model)) },
+                          awake: model.awakeRange(dayStart: model.snapshot.dayStart))
                 .id(model.snapshot.dayStart)
         } else {
             NoPlanTab(model: model)
@@ -283,7 +285,8 @@ private struct MainView: View {
                                   showsGoal: true, templates: model.templates, calendar: model.calendar,
                                   onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) },
                                   habitDraft: model.habits.draft(dayStart: plan.dayStart, calendar: model.calendar),
-                                  candidates: { model.candidates(for: $0, dayStart: plan.dayStart, excludingEnded: false) })
+                                  candidates: { model.candidates(for: $0, dayStart: plan.dayStart, excludingEnded: false) },
+                                  awake: model.awakeRange(dayStart: plan.dayStart))
                 }
         } else {
             ContentUnavailableView("記録を読めませんでした", systemImage: "exclamationmark.triangle")

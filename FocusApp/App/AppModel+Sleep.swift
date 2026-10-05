@@ -12,6 +12,18 @@ extension AppModel {
         return sleep.line
     }
 
+    /// 起きている時間（時間の格子で寝ている時間を灰色にする、PLN-10）。起きた時刻はその日の睡眠（なければ設定の時刻）、
+    /// 寝る時刻は設定の時刻をその夜に当てはめる
+    func awakeRange(dayStart: Date) -> ClosedRange<Date> {
+        let calendar = self.calendar
+        let settings = sleepSettings
+        let morning = sleepLine(dayStart: dayStart)
+            ?? SleepLine.fromSetting(startMinutes: settings.start, endMinutes: settings.end, dayStart: dayStart, calendar: calendar)
+        let next = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
+        let tonight = SleepLine.fromSetting(startMinutes: settings.start, endMinutes: settings.end, dayStart: next, calendar: calendar)
+        return PlanGridLayout.awake(wake: morning.end, bed: tonight.start, dayStart: dayStart)
+    }
+
     /// その日と、その前の6日のうち、まだ睡眠を保存していない日に設定の時刻で保存する（開かなかった日も、次に開いたとき）。
     /// そのあとで設定を変えても、保存した日は変わらない
     func ensureSleep(dayStart: Date, calendar: Calendar) throws {
