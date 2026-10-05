@@ -268,19 +268,31 @@ struct RingHero: View {
 }
 
 /// 「先週の自分より +25分」。ホームとタイマー画面で共通。
+/// 1行に入らない（文字サイズが大きい）ときは、言葉の下に差を出す2行にする（数字を削らない）。
+/// 文字の大きさは日付の行と同じ accessibility1 まで（ホームでは下のボタンの帯に隠れないように）
 struct GhostDiffLine: View {
     let seconds: Int
     var prefix = Opponent.lastWeek.diffPrefix
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(prefix).foregroundStyle(.secondary)
-            Text(DurationFormat.signed(seconds)).fontWeight(.bold).monospacedDigit()
-                .foregroundStyle(Theme.diffColor(seconds))
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { label; value }
+            VStack(spacing: 2) { label; value }
         }
         .font(.title3)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ghostDiff")
+    }
+
+    private var label: some View {
+        Text(prefix).foregroundStyle(.secondary).fixedSize()
+    }
+
+    private var value: some View {
+        Text(DurationFormat.signed(seconds)).fontWeight(.bold).monospacedDigit()
+            .foregroundStyle(Theme.diffColor(seconds))
+            .fixedSize()
     }
 }
 
