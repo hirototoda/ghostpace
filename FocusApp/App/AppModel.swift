@@ -581,8 +581,8 @@ final class AppModel {
         return (0..<max(days, 0)).reversed().compactMap { daysAgo -> DayPoints? in
             guard let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { return nil }
             let isToday = daysAgo == 0
-            guard let recorded = try? isToday || hasRecord(dayStart: dayStart, calendar: calendar), recorded,
-                  let snapshot = try? daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar) else {
+            guard let snapshot = try? daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar),
+                  let recorded = try? isToday || hasRecord(dayStart: dayStart, snapshot: snapshot, calendar: calendar), recorded else {
                 return DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday)
             }
             return DayPoints(dayStart: dayStart, points: snapshot.points,
@@ -590,11 +590,13 @@ final class AppModel {
         }
     }
 
-    /// その日に何か記録があるか：タイマーの記録・計画（下書き・確定・計画なし）・保存した睡眠のどれか。
-    /// ない日は使い始める前などで、設定の睡眠の時刻だけで点が付いてしまうので数えない
-    private func hasRecord(dayStart: Date, calendar: Calendar) throws -> Bool {
+    /// その日に何か記録があるか：タイマーの記録・計画（下書き・確定・計画なし）・ブロックが効いていた時間のどれか。
+    /// ない日は使い始める前などで、設定の睡眠の時刻だけで点が付いてしまうので数えない。
+    /// 睡眠は開くたびに直近7日分を保存するので、使っていた印にはならない
+    private func hasRecord(dayStart: Date, snapshot: HomeSnapshot, calendar: Calendar) throws -> Bool {
         let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
-        return try !store.sessions(dayKey: key).isEmpty || store.plan(dayKey: key) != nil || store.sleep(dayKey: key) != nil
+        // ブロックが一度も効いていない日は開けた時間が nil（DTX-05 の「出さない日」と同じ判定）
+        return try !store.sessions(dayKey: key).isEmpty || store.plan(dayKey: key) != nil || snapshot.opened != nil
     }
 
     /// その日の4:00から（今日は今まで、過ぎた日は翌4:00まで）の、ホームと同じ数字

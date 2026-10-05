@@ -138,13 +138,16 @@ struct PointsHistoryTests {
         #expect(m.pointsHistory(days: 30).count == 30)
     }
 
-    /// タイマーの記録・計画・保存した睡眠のどれもない日は「記録なし」（使い始める前の日に設定の睡眠で点が付かないように）
+    /// タイマーの記録・計画・ブロックが効いていた時間のどれもない日は「記録なし」（使い始める前の日に設定の睡眠で点が付かないように）。
+    /// 開くたびに直近7日分の睡眠を保存するので、保存した睡眠は印にしない
     @Test func daysWithoutAnyRecordHaveNoPoints() throws {
         let t = try TestStore(now: jst("2026-10-19T12:00"))
         try t.seeded()
         try record(t, "2026-10-17T09:00", "2026-10-17T10:00")
         try t.store.skip(dayKey: "2026-10-16", timeZone: tokyo)
         let m = model(t)
+        // 起動・前面に来たときの読み直しで、直近7日分の睡眠が保存される
+        m.reload()
         let week = m.pointsHistory(days: 7)
         let byDay = Dictionary(uniqueKeysWithValues: week.map { (DayBoundary.dayKey(containing: $0.dayStart, calendar: tokyoCalendar), $0) })
         #expect(byDay["2026-10-15"]?.points == nil)
@@ -164,7 +167,8 @@ struct PointsHistoryTests {
         let day = try #require(m.pointsHistory(days: 7).first { $0.dayStart == jst("2026-10-17T04:00") })
         let snapshot = try #require(m.daySnapshot(daysAgo: 2))
         #expect(try #require(day.points).isApprox(snapshot.points))
-        #expect(snapshot.points >= 12)
+        // 2時間続けた集中：90分まで9pt＋残り30分は×0.75で2.25pt（GHO-14）
+        #expect(snapshot.points >= 11.25 - 0.001)
     }
 
     // MARK: 平均
