@@ -41,6 +41,13 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 - `/review-3` を docs の変更に1回。critical・major は docs に反映する。判断が割れるものだけオーナーに聞く
 - review-3 の3体には「`.claude/rules/review-checklist.md` をグローバルのチェックリストより優先せよ」と必ず伝える（グローバルの項目は Web アプリ向け）
 
+### 区切る（中以上）
+段階1〜3で決めたことは docs にあるので、実装の前に会話を軽くする。長い会話のまま実装に入ると、以降のやりとりが毎回重くなる。
+- `.claude/state/session-notes.md` を書く：要望、大きさ、選ばれた画面案、直した docs のファイル、review-3 で直したこと・見送ったことと理由、作業ブランチ・worktree、「次は段階4から」
+- オーナーに「ここで一度区切ります。`/compact` と打ち、終わったら『続けて』と送ってください」と伝えて止まる（Claude は自分で compact できない）。`/clear` や新しいセッションにはしない（session-notes が自動で戻るのは compact のときだけ）
+- 再開したら、session-notes と変更した docs を読み直してから段階4へ進む
+- 段階5で手間取って会話が長くなったときも、段階6の前に同じように区切ってよい
+
 ## 4. テストを先に書いて実装する
 - Swift Testing でテストを先に書き、失敗を確かめてから実装する。テストを弱めて通すのは禁止
 - 守ること：現在時刻は `AppClock`（テストは `FixedClock`・`OffsetClock`）、日付の区切りは `DayBoundary`（朝4:00）、データは Repository 経由、`project.yml` を直して `xcodegen generate`
@@ -59,11 +66,12 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 - コミットと PR のタイトルに要件ID（例：TMR-07）を入れる
 - 報告・open-questions は非公開側の main に直接コミットして push する（`git pull --rebase` してから。PR は作らない）。報告の「PR:」に ghostpace の PR を書く
 - docs と報告がそろったら `gh pr merge <番号> --auto --squash --delete-branch` で自動マージを予約する。CI の「CI OK」が通ると GitHub がマージする（ADR-0010・0021）。データの形が変わる PR は予約せず、オーナーの確認を待つ
-- CI が失敗したら直して push する（予約はそのまま残る）。結果は `gh pr checks <番号>`
+- CI が失敗したら直して push する（予約はそのまま残る）
+- CI の結果は `gh pr checks <番号> --watch` を Bash の `run_in_background` で1本だけ走らせて待つ。終われば知らせが来るので、`gh pr checks` を何度も打って様子を見ない。待つあいだは報告など別の作業を進める
 - `.claude/state/session-notes.md` を更新する
 
 ## 8. iPhone に届ける（画面や動きが変わったとき）
-- マージすると、GitHub Actions が main でテスト全件 → TestFlight に送る（ADR-0011・0021。docs だけの変更では送らない）。`gh run list -R hirototoda/ghostpace --workflow TestFlight` で結果を見て、送れたら「マージから40分〜1時間で iPhone の TestFlight に届く」と伝える。失敗したら直す PR を出す
+- マージすると、GitHub Actions が main でテスト全件 → TestFlight に送る（ADR-0011・0021。docs だけの変更では送らない）。`gh run list -R hirototoda/ghostpace --workflow TestFlight` で回の番号を調べ、`gh run watch <番号> -R hirototoda/ghostpace --exit-status` を `run_in_background` で待つ（何度も見に行かない）。送れたら「マージから40分〜1時間で iPhone の TestFlight に届く」と伝える。失敗したら直す PR を出す
 - CI が使えないときだけ、この Mac の main で `scripts/testflight.sh` をバックグラウンドで実行する
 - オーナーが急いでいるときは、CLAUDE.md の `devicectl` の手順で直接入れる。起動の指示が失敗したら（画面ロック中など）、「ホーム画面から開いてください」と伝える
 
