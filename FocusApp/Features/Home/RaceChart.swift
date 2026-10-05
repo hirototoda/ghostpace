@@ -5,6 +5,8 @@ import SwiftUI
 extension EnvironmentValues {
     /// 見本の撮影用：裏のグラフを1日全体で始める（`-raceWholeDay`）
     @Entry var raceStartsWholeDay = false
+    /// 見本の撮影用：裏が見えたら［▶］で1日を流し始める（`-raceReplay`）
+    @Entry var raceStartsReplay = false
 }
 #endif
 
@@ -23,6 +25,7 @@ struct RaceChart: View {
     @Environment(\.scenePhase) private var scenePhase
     #if DEBUG
     @Environment(\.raceStartsWholeDay) private var startsWholeDay
+    @Environment(\.raceStartsReplay) private var startsReplay
     #endif
     /// 1日全体を出しているか
     @State private var showsWholeDay = false
@@ -392,6 +395,11 @@ struct RaceChart: View {
         reset()
         #if DEBUG
         if startsWholeDay { showsWholeDay = true }
+        if startsReplay {
+            try? await Task.sleep(for: .seconds(RaceChartLayout.flipWaitSeconds))
+            if !Task.isCancelled { startReplay() }
+            return
+        }
         #endif
         guard layout.playsIntro(alreadyPlayed: introPlayed, reduceMotion: reduceMotion, wholeDay: showsWholeDay) else { return }
         // 動いている間に「今」が進んでも、始めたときの今まで伸ばす
