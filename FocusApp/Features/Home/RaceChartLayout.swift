@@ -3,7 +3,8 @@ import Foundation
 /// 裏のポイントのグラフ（GHO-13）の見える範囲と、開いたときの動き。
 /// 2026-10-03 オーナー決定：今の2時間前〜1時間先の3時間で始め、横にずらせて、［1日］で 4:00〜翌4:00
 /// （同じ日に8時間から3時間へ。差が見えにくかったため）。
-/// 開いて最初に裏返したときは、3時間の幅で 4:00 から線の先を追いかけ、今に近づくほどゆっくりになって止まる。
+/// 2026-10-05 オーナー決定：開いて最初に裏返したときは、3時間の窓のまま直前2時間の線が伸びる。
+/// ［▶］で 4:00 から今までを1時間＝1秒で、3時間の幅で線の先を追いかけて流す。ずらしは離しても勢いで滑る
 struct RaceChartLayout {
     var dayStart: Date
     var dayEnd: Date
@@ -24,6 +25,11 @@ struct RaceChartLayout {
     static let lookAhead = 1 * hour
     /// 裏返りきるのを待つ時間（秒）
     static let flipWaitSeconds = 0.35
+    /// 開いたときに伸びる長さ（今の2時間前から）と、その長さを伸ばす秒数
+    static let introLookBack = 2 * hour
+    static let introFullSeconds = 1.5
+    /// 慣性：はじいた速さでこの秒数ぶん進んで止まる（iPhone のふつうのスクロールの減速と同じくらい）
+    static let glideTimeConstant = 0.5
 
     /// 止まったときの3時間（今の2時間前〜1時間先。1日からはみ出すなら端に寄せる）
     var homeWindow: ClosedRange<Date> {
@@ -68,9 +74,18 @@ struct RaceChartLayout {
     /// 差の色：丸めて0以上なら前向きな色（true）、後ろなら落ち着いた色（false）
     static func isAhead(_ gap: Double) -> Bool { (gap * 10).rounded() >= 0 }
 
-    /// 動く時間（秒）。4:00 からの時間に合わせて2〜4.5秒（12時間で4秒。3秒と比べてオーナーが選んだ）
+    /// 開いたときに線が伸び始める時刻（今の2時間前。4:00〜6:00 は 4:00）
+    var introStart: Date { max(now.addingTimeInterval(-Self.introLookBack), dayStart) }
+
+    /// 開いたときの動きの秒数。2時間ぶんで1.5秒、短いときは比べて短く（最短0.5秒）
     var introSeconds: Double {
-        min(max(2 + now.timeIntervalSince(dayStart) / Self.hour / 6, 2), 4.5)
+        max(Self.introFullSeconds * now.timeIntervalSince(introStart) / Self.introLookBack, 0.5)
+    }
+
+    /// 開いたときの動きの、進み（0〜1）のときの形。窓は止まったときの3時間のまま、線の先が今に近づくほどゆっくり伸びる
+    func introFrame(_ progress: Double) -> Frame {
+        let head = Self.lerp(introStart, now, Self.easeOut(min(max(progress, 0), 1)))
+        return Frame(head: head, domain: homeWindow)
     }
 
     /// 歩いている間の3時間（線の先を止まったときと同じ、2時間前〜1時間先の境目に置く）
@@ -78,10 +93,41 @@ struct RaceChartLayout {
         window(endingAt: head.addingTimeInterval(Self.lookAhead), length: Self.windowLength)
     }
 
-    /// 進み（0〜1）のときの線の先と見えている範囲。初めは速く、今に近づくほどゆっくり（12時間の日は最後の1時間に4割強の時間）
-    func introFrame(_ progress: Double) -> Frame {
-        let head = Self.lerp(dayStart, now, Self.easeOut(min(max(progress, 0), 1)))
+    /// ［▶］で流す秒数。1時間＝1秒で、最後の1時間に2秒（＝たった時間＋1秒）。
+    /// 1時間たっていないときは全体がだんだん遅くなる部分で、たった時間の2倍（最短1秒）
+    var replaySeconds: Double {
+        let hours = now.timeIntervalSince(dayStart) / Self.hour
+        return hours >= 1 ? hours + 1 : max(hours * 2, 1)
+    }
+
+    /// ［▶］で流している、進み（0〜1）のときの形。最後の1時間は2次の減速（入ったところの速さは1時間＝1秒のまま）
+    func replayFrame(_ progress: Double) -> Frame {
+        let elapsed = min(max(progress, 0), 1) * replaySeconds
+        let hours = now.timeIntervalSince(dayStart) / Self.hour
+        let steady = max(hours - 1, 0)
+        let headHours: Double
+        if elapsed <= steady {
+            headHours = elapsed
+        } else {
+            let slowing = hours - steady
+            let t = min((elapsed - steady) / (replaySeconds - steady), 1)
+            headHours = steady + slowing * (1 - (1 - t) * (1 - t))
+        }
+        let head = min(dayStart.addingTimeInterval(headHours * Self.hour), now)
         return Frame(head: head, domain: walkWindow(head: head))
+    }
+
+    /// 指を離してから `elapsed` 秒たったときの3時間の左端。`velocity` は離したときの指の速さ（pt/秒、右が＋）。
+    /// はじいた速さで約0.5秒ぶん進み、だんだん遅くなる。4:00〜翌4:00 の端で止まる
+    func glided(from start: Date, velocity: CGFloat, plotWidth: CGFloat, elapsed: TimeInterval) -> Date {
+        let tau = Self.glideTimeConstant
+        let distance = Double(velocity) * tau * (1 - exp(-max(elapsed, 0) / tau))
+        return panned(from: start, by: CGFloat(distance), plotWidth: plotWidth)
+    }
+
+    /// 滑りの残りが半ポイントを切ったら終わり
+    static func glideIsOver(velocity: CGFloat, elapsed: TimeInterval) -> Bool {
+        abs(Double(velocity)) * glideTimeConstant * exp(-max(elapsed, 0) / glideTimeConstant) < 0.5
     }
 
     /// 縦の範囲。1日は0から。3時間は見えている点の一番下〜一番上に上下15%の余白。
