@@ -66,6 +66,8 @@ struct AnalysisScreen: View {
             Image(systemName: systemImage).foregroundStyle(Theme.focus)
         }
         .padding(.vertical, 4)
+        // 行の中で折り返しすぎないよう上限を付ける（タイムラインの日付の帯と同じ）
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 }
 
@@ -85,10 +87,14 @@ struct PointsHistoryView: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("pointsRangePicker")
-                chart(history)
-                    .frame(height: 220)
-                    .padding(.vertical, 8)
-                legend
+                // グラフの目盛りと線の見分け方は、大きな文字だと重なるので裏のグラフと同じ上限にする
+                Group {
+                    chart(history)
+                        .frame(height: 220)
+                        .padding(.vertical, 8)
+                    legend
+                }
+                .dynamicTypeSize(...DynamicTypeSize.xLarge)
             }
             Section("日ごと") {
                 ForEach(history.reversed()) { day in
@@ -189,25 +195,41 @@ struct PointsHistoryView: View {
         .foregroundStyle(.secondary)
     }
 
+    /// 日付と、その日の合計・先週との差。大きな文字で入りきらなければ縦に並べる
     private func dayRow(_ day: DayPoints) -> some View {
-        HStack {
-            Text(day.dayStart.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
-                 + (day.isToday ? "（今日）" : ""))
-            Spacer()
-            if let points = day.points {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(RaceChart.pointText(points)).monospacedDigit().fontWeight(.semibold)
-                    if let gap = day.gap {
-                        Text("先週より \(RaceChartLayout.signedPoints(gap))")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(RaceChartLayout.isAhead(gap) ? Theme.lead : Theme.behind)
-                    }
-                }
-            } else {
-                Text("記録なし").foregroundStyle(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                dayTitle(day)
+                Spacer()
+                dayValues(day, alignment: .trailing)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                dayTitle(day)
+                dayValues(day, alignment: .leading)
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private func dayTitle(_ day: DayPoints) -> some View {
+        Text(day.dayStart.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
+             + (day.isToday ? "（今日）" : ""))
+    }
+
+    @ViewBuilder
+    private func dayValues(_ day: DayPoints, alignment: HorizontalAlignment) -> some View {
+        if let points = day.points {
+            VStack(alignment: alignment, spacing: 2) {
+                Text(RaceChart.pointText(points)).monospacedDigit().fontWeight(.semibold)
+                if let gap = day.gap {
+                    Text("先週より \(RaceChartLayout.signedPoints(gap))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(RaceChartLayout.isAhead(gap) ? Theme.lead : Theme.behind)
+                }
+            }
+        } else {
+            Text("記録なし").foregroundStyle(.secondary)
+        }
     }
 }
 
