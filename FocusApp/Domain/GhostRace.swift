@@ -58,7 +58,8 @@ extension GhostSummary {
                 let end = min(segment.end, limit)
                 guard end > segment.start else { return nil }
                 return TimeSegment(start: segment.start.addingTimeInterval(offset), end: end.addingTimeInterval(offset),
-                                   countsAsFocus: segment.countsAsFocus, detoxGroup: segment.detoxGroup)
+                                   countsAsFocus: segment.countsAsFocus, detoxGroup: segment.detoxGroup,
+                                   isDeclared: segment.isDeclared)
             }
     }
 }

@@ -299,7 +299,9 @@ struct DeclarationCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("このブロックの記録がありません", systemImage: "questionmark.circle")
                 .font(.subheadline.bold())
-            Text("タイマーを押し忘れたけれどやったときは、申告できます。集中した時間に入り、点は0.8倍です。")
+            Text(block.category.countsAsFocus
+                 ? "タイマーを押し忘れたけれどやったときは、申告できます。集中した時間に入り、点は0.8倍です。"
+                 : "タイマーを押し忘れたけれどやったときは、申告できます。点は10分0.6pt です（タイマーは0.75pt）。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

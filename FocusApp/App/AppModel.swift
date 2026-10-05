@@ -728,14 +728,16 @@ final class AppModel {
                                      opened: context.opened, now: clock.now())
     }
 
-    /// 計画ブロックを始める。`fromBlockStart` ならブロックの開始〜今を申告にしてから、今からタイマーを動かす
+    /// 計画ブロックを始める。`fromBlockStart` ならブロックの開始〜今を申告にしてから、今からタイマーを動かす。
+    /// 申告を保存できなかったときはタイマーも始めない（「保存できませんでした」を出す）。聞いている間に申告できなくなったら今から始める
     func startPlanned(block: PlanBlockSummary, fromBlockStart: Bool) {
         if fromBlockStart, let start = lateStart(for: block), let draft = plan?.blocks.first(where: { $0.id == block.id }) {
             let now = clock.now()
-            perform {
+            let declared = perform {
                 _ = try store.declare(DeclareRequest(category: draft.category, project: draft.project, planBlockId: draft.id,
                                                      start: start, end: now, plannedEndAt: draft.end, timeZone: timeZone()))
             }
+            guard declared else { return }
         }
         startPlanned(block: block)
     }

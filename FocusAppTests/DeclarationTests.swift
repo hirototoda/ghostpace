@@ -95,6 +95,52 @@ struct DeclarationTests {
         // 30分の家事：タイマーなら 2.25pt、申告なら 1.8pt（4:00〜9:00 のブロック中の点は同じ）
         #expect(abs(points(declared: false) - points(declared: true) - 0.45) < 0.0001)
     }
+
+    @Test func openedTimeJustTouchingIsFine() {
+        let b = block("09:00", 90)
+        #expect(check(b, opened: [DateInterval(start: jst("2026-10-19T08:50"), end: jst("2026-10-19T09:00"))]) == nil)
+        #expect(check(b, opened: [DateInterval(start: jst("2026-10-19T10:30"), end: jst("2026-10-19T10:40"))]) == nil)
+    }
+
+    @Test func gameTimeIsNeverAskedForALateStart() {
+        let game = PlanBlockDraft.unblock(start: jst("2026-10-19T11:00"))
+        #expect(Declaration.lateStart(block: game, morningBlockIds: [game.id], sessions: [], opened: [],
+                                      now: jst("2026-10-19T11:20")) == nil)
+    }
+
+    /// 先週の自分のゴーストも、申告した分は0.8倍（今日の自分と同じに数える）
+    @Test func lastWeekGhostKeepsTheDeclaredMark() throws {
+        var declared = FocusSession(id: UUID(), dayKey: "2026-10-12", category: study, planBlockId: nil,
+                                    startAt: jst("2026-10-12T09:00"), endAt: jst("2026-10-12T10:00"))
+        declared.isDeclared = true
+        let ghost = try #require(GhostSummary(lastWeek: [declared], lastWeekStart: jst("2026-10-12T04:00"),
+                                              todayStart: jst("2026-10-19T04:00")))
+        #expect(ghost.segments.allSatisfy { $0.isDeclared })
+        #expect(abs(FocusPoints.points(ghost.segments, until: jst("2026-10-19T12:00")) - 4.8) < 0.0001)
+        // 集中した時間はそのまま
+        #expect(ghost.focusSeconds(at: jst("2026-10-19T12:00")) == 3600)
+    }
+
+    @Test func timelineSaysDeclared() {
+        var declared = session("09:00", "10:00")
+        declared.isDeclared = true
+        #expect(sessionCaption(declared, now: jst("2026-10-19T12:00")).contains("申告"))
+        #expect(!sessionCaption(session("09:00", "10:00"), now: jst("2026-10-19T12:00")).contains("申告"))
+    }
+
+    @Test func declaredDetoxTimerUsesTheSameDailyCap() {
+        let dayStart = jst("2026-10-19T04:00")
+        let interval = DateInterval(start: jst("2026-10-19T09:00"), end: jst("2026-10-19T10:30"))
+        func points(declared: Bool) -> Double {
+            DetoxDay.make(.init(dayStart: dayStart, dayEnd: dayStart.addingTimeInterval(86400), until: jst("2026-10-19T10:30"),
+                                events: [BlockEvent(occurredAt: dayStart.addingTimeInterval(-60), timeZoneId: "Asia/Tokyo", kind: .started)],
+                                focus: [], detoxTimers: [DetoxTimer(interval: interval, group: .housework, isDeclared: declared)],
+                                sleep: [], gameWindows: []))
+                .points(until: jst("2026-10-19T10:30"))
+        }
+        // 家事の上限1時間：タイマーは 4.5＋1.5、申告は 3.6＋1.5（上限を超えた30分はどちらもブロック中の0.5pt）
+        #expect(abs(points(declared: false) - points(declared: true) - 0.9) < 0.0001)
+    }
 }
 
 /// 本体（AppModel）とストアでの申告
@@ -205,5 +251,50 @@ struct DeclarationModelTests {
         let sessions = try store.sessions(dayKey: "2026-10-19")
         #expect(sessions.map(\.id) == [sessionId])
         #expect(sessions.first?.isDeclared == false)
+    }
+
+    @Test func noLateStartQuestionWhileATimerRuns() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let m = try confirmedPlan(t, c)
+        t.clock.set(jst("2026-10-19T10:50"))
+        m.reload()
+        m.startUnplanned(category: c[2], minutes: nil)
+        t.clock.set(jst("2026-10-19T11:20"))
+        m.reload()
+        let block = try #require(m.snapshot.currentBlock)
+        #expect(m.lateStart(for: block) == nil)
+    }
+
+    @Test func declaringOverARunningTimerIsRefused() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let m = try confirmedPlan(t, c)
+        t.clock.set(jst("2026-10-19T09:30"))
+        m.reload()
+        m.startUnplanned(category: c[2], minutes: nil)
+        t.clock.set(jst("2026-10-19T10:40"))
+        m.reload()
+        let morning = try #require(m.plan?.sortedBlocks.first)
+        #expect(m.declarationProblem(for: morning, end: morning.end) == .overlapsRecord)
+        // 計画外のタイマーより前で終わるなら申告できる
+        #expect(m.declarationProblem(for: morning, end: jst("2026-10-19T09:30")) == nil)
+    }
+
+    /// 日をまたぐブロック（23:30〜翌1:00）は 3:59 までその日のうちとして申告でき、記録は始めた日の分
+    @Test func blockAcrossMidnightCanBeDeclaredUntilFourAm() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let m = model(t)
+        m.confirmPlan(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T23:30"), minutes: 90, category: c[0])]))
+        t.clock.set(jst("2026-10-20T03:59"))
+        m.reload()
+        let late = try #require(m.plan?.sortedBlocks.first)
+        #expect(m.declare(late, end: late.end))
+        #expect(try t.store.sessions(dayKey: "2026-10-19").first?.isDeclared == true)
+        // 4:00 を過ぎると新しい日の計画なので、前の日のブロックは申告できない
+        t.clock.set(jst("2026-10-20T04:00"))
+        m.reload()
+        #expect(m.declarationProblem(for: late, end: late.end) != nil)
     }
 }

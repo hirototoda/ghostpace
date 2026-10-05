@@ -34,6 +34,8 @@ struct HomeView: View {
         var block: PlanBlockSummary
         var start: Date
         var id: UUID { block.id }
+        /// 例：11:00
+        var startText: String { start.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits)) }
     }
     /// 見本の撮影用に、計画外で開始のシートを開いて始める（`-openStartSheet`）
     @Environment(\.opensStartSheet) private var opensStartSheet
@@ -57,12 +59,10 @@ struct HomeView: View {
         .confirmationDialog("いつから始めましたか？", isPresented: Binding(get: { lateChoice != nil }, set: { if !$0 { lateChoice = nil } }),
                             titleVisibility: .visible, presenting: lateChoice) { choice in
             Button("今から始める") { onStartBlock(choice.block) }
-            Button("\(choice.start.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits))) から始めていた（申告）") {
-                onStartFromBlockStart(choice.block)
-            }
+            Button("\(choice.startText) から始めていた（申告）") { onStartFromBlockStart(choice.block) }
             Button("キャンセル", role: .cancel) {}
         } message: { choice in
-            Text("押し忘れていたときは「\(choice.start.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits))) から始めていた」を選ぶと、それまでの分を申告にします（点は0.8倍）。")
+            Text("押し忘れていたときは、\(choice.startText) からの分を申告にできます（点は少し控えめ）。")
         }
         .sheet(isPresented: $showsStartSheet) {
             StartSheet(now: snapshot.now, categories: categories, projects: projects, onCreateProject: onCreateProject,

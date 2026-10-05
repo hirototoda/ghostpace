@@ -40,8 +40,6 @@ struct DetoxDay: Hashable {
     static let detoxPerSecond = 0.5 / 600
     /// 家事・運動・休みのタイマー中（10分0.75pt、上限まで）
     static let timerPerSecond = 0.75 / 600
-    /// 押し忘れの申告の倍率（TMR-13）
-    static let declaredFactor = 0.8
     /// 寝ている：寝てから7時間まで10分0.75pt、8時間まで0.5pt、超えたら0
     static let sleepTiers: [(until: TimeInterval, perSecond: Double)] = [(7 * 3600, 0.75 / 600), (8 * 3600, 0.5 / 600)]
     /// n 回目に開けたときに引く点は n × これ
@@ -102,7 +100,7 @@ struct DetoxDay: Hashable {
                     let boosted = min(seconds, max(0, group.dailyCap - used[group, default: 0]))
                     used[group, default: 0] += boosted
                     // 申告した分は0.8倍。ブロック中の0.5pt より下げない（TMR-13）
-                    let rate = piece.isDeclared ? max(Self.timerPerSecond * Self.declaredFactor, Self.detoxPerSecond) : Self.timerPerSecond
+                    let rate = piece.isDeclared ? max(Self.timerPerSecond * FocusPoints.declaredFactor, Self.detoxPerSecond) : Self.timerPerSecond
                     earned = rate * boosted + Self.detoxPerSecond * (seconds - boosted)
                 } else {
                     earned = Self.detoxPerSecond * seconds
