@@ -58,7 +58,7 @@ struct RaceChartLayoutTests {
         #expect(layout.panned(from: start, by: 100, plotWidth: 0) == start)
     }
 
-    // MARK: 開いたときの動き（3時間の幅で 4:00 から追いかけ、だんだんゆっくり今に着く）
+    // MARK: 開いたときの動き（2026-10-05 から、3時間の窓のまま直前2時間の線が今まで伸びる）
 
     /// 4:00 ちょうどはまだ線がないので動かない。1分でも過ぎたら動く
     @Test func introPlaysOnlyAfterTheDayStarts() {
@@ -77,14 +77,52 @@ struct RaceChartLayoutTests {
         #expect(!self.layout("2026-10-19T04:00").playsIntro(alreadyPlayed: false, reduceMotion: false, wholeDay: false))
     }
 
-    /// 動く時間は 4:00 からの時間に合わせて2〜4.5秒（12時間で4秒）
-    @Test func introSecondsFollowElapsedHours() {
-        #expect(layout("2026-10-19T04:01").introSeconds.isApprox(2.0, tolerance: 0.01))
-        #expect(layout("2026-10-19T07:00").introSeconds.isApprox(2.5))
-        #expect(layout("2026-10-19T16:00").introSeconds.isApprox(4.0))
-        #expect(layout("2026-10-19T19:00").introSeconds.isApprox(4.5))
-        #expect(layout("2026-10-20T03:59").introSeconds.isApprox(4.5))
+    /// 窓は止まったときの3時間のまま動かず、線の先が今の2時間前から今まで伸びる
+    @Test func introGrowsTheLastTwoHoursInTheHomeWindow() {
+        let layout = layout("2026-10-19T15:20")
+        #expect(layout.introFrame(0).head == jst("2026-10-19T13:20"))
+        #expect(layout.introFrame(1).head == jst("2026-10-19T15:20"))
+        for progress in stride(from: 0.0, through: 1.0, by: 0.1) {
+            #expect(layout.introFrame(progress).domain == layout.homeWindow)
+        }
     }
+
+    /// 4:00〜6:00 はまだ2時間たっていないので 4:00 から。6:01 からは2時間前から
+    @Test func introStartsAtDayStartBeforeSix() {
+        #expect(layout("2026-10-19T04:01").introFrame(0).head == jst("2026-10-19T04:00"))
+        #expect(layout("2026-10-19T05:00").introFrame(0).head == jst("2026-10-19T04:00"))
+        #expect(layout("2026-10-19T06:00").introFrame(0).head == jst("2026-10-19T04:00"))
+        #expect(layout("2026-10-19T06:01").introFrame(0).head == jst("2026-10-19T04:01"))
+        #expect(layout("2026-10-20T03:59").introFrame(0).head == jst("2026-10-20T01:59"))
+        #expect(layout("2026-10-20T03:59").introFrame(1).domain == range("2026-10-20T01:00", "2026-10-20T04:00"))
+    }
+
+    /// 2時間ぶんで1.5秒。2時間たっていないときは伸びる長さに合わせて短く、最短0.5秒
+    @Test func introSecondsFollowTheGrowingLength() {
+        #expect(layout("2026-10-19T15:20").introSeconds.isApprox(1.5))
+        #expect(layout("2026-10-19T06:00").introSeconds.isApprox(1.5))
+        #expect(layout("2026-10-20T03:59").introSeconds.isApprox(1.5))
+        #expect(layout("2026-10-19T05:00").introSeconds.isApprox(0.75))
+        #expect(layout("2026-10-19T04:20").introSeconds.isApprox(0.5))
+        #expect(layout("2026-10-19T04:01").introSeconds.isApprox(0.5))
+    }
+
+    @Test func introHeadNeverGoesBack() {
+        let layout = layout("2026-10-19T15:20")
+        let heads = stride(from: 0.0, through: 1.0, by: 0.05).map { layout.introFrame($0).head }
+        #expect(heads == heads.sorted())
+    }
+
+    /// だんだんゆっくり：同じ時間で進む量が少しずつ減る
+    @Test func introSlowsDownTowardNow() {
+        let layout = layout("2026-10-19T16:00")
+        let heads = stride(from: 0.0, through: 1.0, by: 0.1).map { layout.introFrame($0).head }
+        let steps = zip(heads.dropFirst(), heads).map { $0.timeIntervalSince($1) }
+        #expect(steps == steps.sorted(by: >))
+        #expect(steps.first! > steps.last! * 5)
+    }
+
+    // MARK: 1日を流す（2026-10-05、4:00 から1時間＝1秒、最後の1時間は2秒でだんだん遅く）
 
     /// 歩いている間も3時間。線の先は止まったときと同じ位置（2時間前〜1時間先の境目）
     @Test func walkWindowIsThreeHoursWithTheHeadLikeHome() {
@@ -95,37 +133,97 @@ struct RaceChartLayoutTests {
         #expect(layout.walkWindow(head: layout.now) == layout.homeWindow)
     }
 
-    @Test func introStartsAtDayStartAndEndsAtHome() {
-        let layout = layout("2026-10-19T15:20")
-        let start = layout.introFrame(0)
-        #expect(start.head == jst("2026-10-19T04:00"))
-        #expect(start.domain == range("2026-10-19T04:00", "2026-10-19T07:00"))
+    /// 1時間たったあとは「たった時間＋1秒」。1時間より前は、たった時間の2倍（最短1秒）
+    @Test func replaySecondsAreOneSecondPerHour() {
+        #expect(layout("2026-10-19T16:00").replaySeconds.isApprox(13))
+        #expect(layout("2026-10-19T05:00").replaySeconds.isApprox(2))
+        #expect(layout("2026-10-19T04:45").replaySeconds.isApprox(1.5))
+        #expect(layout("2026-10-19T04:30").replaySeconds.isApprox(1))
+        #expect(layout("2026-10-19T04:10").replaySeconds.isApprox(1))
+        #expect(layout("2026-10-20T03:59").replaySeconds.isApprox(24 + 59.0 / 60, tolerance: 0.001))
+    }
 
-        let end = layout.introFrame(1)
-        #expect(end.head == jst("2026-10-19T15:20"))
-        #expect(end.domain == layout.homeWindow)
-
-        // 途中もずっと3時間の幅
+    /// 4:00 から3時間の幅で追いかけ、今に着いたら止まったときの3時間
+    @Test func replayStartsAtDayStartAndEndsAtHome() {
+        let layout = layout("2026-10-19T16:00")
+        #expect(layout.replayFrame(0).head == jst("2026-10-19T04:00"))
+        #expect(layout.replayFrame(0).domain == range("2026-10-19T04:00", "2026-10-19T07:00"))
+        #expect(layout.replayFrame(1).head == jst("2026-10-19T16:00"))
+        #expect(layout.replayFrame(1).domain == layout.homeWindow)
         for progress in stride(from: 0.0, through: 1.0, by: 0.1) {
-            let domain = layout.introFrame(progress).domain
+            let domain = layout.replayFrame(progress).domain
             #expect(domain.upperBound.timeIntervalSince(domain.lowerBound) == 3 * 3600)
         }
     }
 
-    @Test func introHeadNeverGoesBack() {
-        let layout = layout("2026-10-19T15:20")
-        let heads = stride(from: 0.0, through: 1.0, by: 0.05).map { layout.introFrame($0).head }
+    /// 1秒で1時間ずつ同じ速さで進み、最後の1時間（2秒）だけだんだん遅くなる
+    @Test func replayMovesOneHourPerSecondThenSlowsDown() {
+        let layout = layout("2026-10-19T16:00")
+        let seconds = layout.replaySeconds
+        func head(at second: Double) -> Date { layout.replayFrame(second / seconds).head }
+        #expect(abs(head(at: 5).timeIntervalSince(jst("2026-10-19T09:00"))) < 1)
+        #expect(abs(head(at: 11).timeIntervalSince(jst("2026-10-19T15:00"))) < 1)
+        // 最後の1時間に入るところで速さが急に変わらない（0.1秒で約6分）
+        #expect(abs(head(at: 11.1).timeIntervalSince(head(at: 11)) - 360) < 10)
+        // 最後の2秒はだんだん遅く
+        let tail = stride(from: 11.0, through: 13.0, by: 0.25).map { head(at: $0) }
+        let steps = zip(tail.dropFirst(), tail).map { $0.timeIntervalSince($1) }
+        #expect(steps == steps.sorted(by: >))
+    }
+
+    /// 1時間たっていない日は全体がだんだん遅くなる部分
+    @Test func replayBeforeFiveIsAllSlowingDown() {
+        let layout = layout("2026-10-19T04:30")
+        #expect(layout.replayFrame(0).head == jst("2026-10-19T04:00"))
+        #expect(abs(layout.replayFrame(0.5).head.timeIntervalSince(jst("2026-10-19T04:22:30"))) < 1)
+        #expect(layout.replayFrame(1).head == jst("2026-10-19T04:30"))
+    }
+
+    @Test func replayHeadNeverGoesBack() {
+        let layout = layout("2026-10-20T03:59")
+        let heads = stride(from: 0.0, through: 1.0, by: 0.02).map { layout.replayFrame($0).head }
         #expect(heads == heads.sorted())
     }
 
-    /// だんだんゆっくり：同じ時間で進む量が少しずつ減る。12時間の日は、半分の時間がたってもまだ最後の1時間に入らない
-    @Test func introSlowsDownTowardNow() {
-        let layout = layout("2026-10-19T16:00")
-        let heads = stride(from: 0.0, through: 1.0, by: 0.1).map { layout.introFrame($0).head }
-        let steps = zip(heads.dropFirst(), heads).map { $0.timeIntervalSince($1) }
-        #expect(steps == steps.sorted(by: >))
-        #expect(steps.first! > steps.last! * 5)
-        #expect(layout.introFrame(0.5).head < jst("2026-10-19T15:00"))
+    // MARK: 慣性（2026-10-05、指を離しても勢いで滑ってだんだん止まる）
+
+    /// はじいた速さ（pt/秒）で約0.5秒ぶん進む。幅300pt＝3時間なので、300pt/秒なら150pt＝1時間30分
+    @Test func glideTravelsHalfASecondOfVelocity() {
+        let layout = layout("2026-10-19T15:20")
+        let start = jst("2026-10-19T13:20")
+        #expect(layout.glided(from: start, velocity: 300, plotWidth: 300, elapsed: 0) == start)
+        let end = layout.glided(from: start, velocity: 300, plotWidth: 300, elapsed: 10)
+        #expect(abs(end.timeIntervalSince(jst("2026-10-19T11:50"))) < 1)
+        // 左へはじくと先の時刻へ
+        let ahead = layout.glided(from: start, velocity: -300, plotWidth: 300, elapsed: 10)
+        #expect(abs(ahead.timeIntervalSince(jst("2026-10-19T14:50"))) < 1)
+    }
+
+    /// だんだん遅くなる：最初の0.25秒で、次の0.25秒より多く進む
+    @Test func glideSlowsDown() {
+        let layout = layout("2026-10-19T15:20")
+        let start = jst("2026-10-19T13:20")
+        let positions = [0, 0.25, 0.5].map { layout.glided(from: start, velocity: 300, plotWidth: 300, elapsed: $0) }
+        let first = start.timeIntervalSince(positions[1])
+        let second = positions[1].timeIntervalSince(positions[2])
+        #expect(first > 0)
+        #expect(first > second * 1.5)
+    }
+
+    /// 4:00〜翌4:00 の端で止まる（跳ね返らない）
+    @Test func glideStopsAtTheDayEdges() {
+        let layout = layout("2026-10-19T15:20")
+        let start = jst("2026-10-19T13:20")
+        #expect(layout.glided(from: start, velocity: 100_000, plotWidth: 300, elapsed: 10) == jst("2026-10-19T04:00"))
+        #expect(layout.glided(from: start, velocity: -100_000, plotWidth: 300, elapsed: 10) == jst("2026-10-20T01:00"))
+    }
+
+    /// 残りが半ポイントを切ったら終わり。ゆっくり離したときは滑らない
+    @Test func glideEndsWhenTheRestIsTiny() {
+        #expect(!RaceChartLayout.glideIsOver(velocity: 300, elapsed: 0))
+        #expect(!RaceChartLayout.glideIsOver(velocity: -300, elapsed: 1))
+        #expect(RaceChartLayout.glideIsOver(velocity: 300, elapsed: 5))
+        #expect(RaceChartLayout.glideIsOver(velocity: 0.5, elapsed: 0))
     }
 
     // MARK: 縦の範囲

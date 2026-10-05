@@ -5,13 +5,16 @@ import SwiftUI
 extension EnvironmentValues {
     /// 見本の撮影用：裏のグラフを1日全体で始める（`-raceWholeDay`）
     @Entry var raceStartsWholeDay = false
+    /// 見本の撮影用：裏が見えたら［▶］で1日を流し始める（`-raceReplay`）
+    @Entry var raceStartsReplay = false
 }
 #endif
 
 /// 円の裏のグラフ（GHO-13）。横＝時刻、縦＝その時刻までにたまったポイント（集中＋デトックス）。
 /// 自分は実線、相手は点線。相手の今より先は薄くする。2026-10-02 から時間の線はなくしてポイントだけ（オーナー決定、Q26）
-/// 2026-10-03 から今の2時間前〜1時間先の3時間で始め、横にずらせて、［1日］で 4:00〜翌4:00。上の行に相手との差。
-/// 起動したとき・ほかのアプリから戻ったときの最初の裏返しだけ、4:00 から線を追いかけ、だんだんゆっくり今に着く（範囲と動きは RaceChartLayout）
+/// 2026-10-03 から今の2時間前〜1時間先の3時間で始め、横にずらせて（2026-10-05 から離しても勢いで滑る）、［1日］で 4:00〜翌4:00。上の行に相手との差。
+/// 起動したとき・ほかのアプリから戻ったときの最初の裏返しだけ、直前2時間の線が伸びる。［▶］で 4:00 から今までをゆっくり流す
+/// （範囲と動きは RaceChartLayout）
 struct RaceChart: View {
     let snapshot: HomeSnapshot
     let opponent: Opponent?
@@ -22,14 +25,19 @@ struct RaceChart: View {
     @Environment(\.scenePhase) private var scenePhase
     #if DEBUG
     @Environment(\.raceStartsWholeDay) private var startsWholeDay
+    @Environment(\.raceStartsReplay) private var startsReplay
     #endif
     /// 1日全体を出しているか
     @State private var showsWholeDay = false
     /// 3時間の窓の左端（横にずらすと動く）
     @State private var scrollStart: Date?
-    /// 開いたときの動きの進み（0〜1）。動いている間だけ `introRunning`
-    @State private var introProgress = 1.0
-    @State private var introRunning = false
+    /// 動き（開いたとき・［▶］）の進み（0〜1）。動いている間だけ `motion` があり、そのときの「今」の形を持つ
+    @State private var motionProgress = 1.0
+    @State private var motion: Motion?
+    /// ［▶］で流している途中（止めるときに取り消す）
+    @State private var replayTask: Task<Void, Never>?
+    /// 指を離したあとの滑り（慣性）。触る・裏返すなどで取り消す
+    @State private var glideTask: Task<Void, Never>?
     /// 起動したとき・ほかのアプリから戻ったときから、もう動いたか
     @State private var introPlayed = false
     /// 指で横にずらし始めた場所と、そのときの3時間の左端。始めた場所が変わったら新しいずらしとして取り直す
@@ -44,8 +52,8 @@ struct RaceChart: View {
     var body: some View {
         VStack(spacing: 8) {
             header
-            AnimatedProgress(progress: introProgress) { progress in
-                chart(intro: introRunning ? layout.introFrame(progress) : nil)
+            AnimatedProgress(progress: motionProgress) { progress in
+                chart(motion: motion, progress: progress)
             }
             legend
         }
@@ -60,7 +68,10 @@ struct RaceChart: View {
         // 開いたまま朝4:00をまたいだら、新しい日の今のまわりの3時間に戻す
         .onChange(of: snapshot.dayStart) { reset() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { introPlayed = false }
+            guard phase == .background else { return }
+            introPlayed = false
+            stopReplay()
+            stopGlide()
         }
         .task(id: isShowing) {
             if isShowing {
@@ -124,12 +135,32 @@ struct RaceChart: View {
                 .background(Capsule().fill(Color.secondary.opacity(0.15)))
         }
         .buttonStyle(.plain)
-        .disabled(introRunning)
+        .disabled(motion != nil)
         .accessibilityLabel(showsWholeDay ? "3時間に戻す" : "1日全体を見る")
         .accessibilityIdentifier("raceZoomButton")
     }
 
+    /// ［▶］1日を流す・［■］止める（下の行の［1日］の左）
+    private var replayButton: some View {
+        let replaying = motion?.kind == .replay
+        return Button {
+            if replaying { stopReplay() } else { startReplay() }
+        } label: {
+            Image(systemName: replaying ? "stop.fill" : "play.fill")
+                .font(.caption.bold())
+                .frame(minWidth: 14)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Capsule().fill(Color.secondary.opacity(0.15)))
+        }
+        .buttonStyle(.plain)
+        // 4:00 ちょうど（まだ線がない）と、開いたときの動きの途中は押せない
+        .disabled(!layout.playsIntro || motion?.kind == .opening)
+        .accessibilityLabel(replaying ? Text("止める") : Text("1日を流す"))
+        .accessibilityIdentifier("raceReplayButton")
+    }
+
     private func toggleWholeDay() {
+        stopGlide()
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
             showsWholeDay.toggle()
             if !showsWholeDay { scrollStart = layout.homeWindow.lowerBound }
@@ -138,10 +169,13 @@ struct RaceChart: View {
 
     // MARK: - グラフ
 
-    private func chart(intro: RaceChartLayout.Frame?) -> some View {
+    private func chart(motion: Motion?, progress: Double) -> some View {
+        let intro = motion?.frame(progress)
         let pieces = pieces(intro: intro)
         let range = visibleRange(intro: intro)
-        let values = pieces.flatMap(\.values).filter { range.contains($0.date) }.map(\.value)
+        // 開いたときの動きは、縦の目盛りを止まったときと同じにしておく（線が伸びても目盛りは動かない）
+        let scalePieces = motion?.kind == .opening ? self.pieces(intro: nil) : pieces
+        let values = scalePieces.flatMap(\.values).filter { range.contains($0.date) }.map(\.value)
         // 見えている範囲の点と、その外の1つずつだけ描く（線が端まで届くように。外にはみ出た分は切り取る）
         let margin = HomeSnapshot.curveStep
         let shown = pieces.map { piece in
@@ -173,7 +207,7 @@ struct RaceChart: View {
                 }
             }
             if snapshot.now > snapshot.dayStart {
-                RuleMark(x: .value("今", min(intro?.head ?? snapshot.now, snapshot.now)))
+                RuleMark(x: .value("今", min(intro?.head ?? snapshot.now, motion?.now ?? snapshot.now)))
                     .foregroundStyle(Color.secondary.opacity(0.4))
                     .lineStyle(StrokeStyle(lineWidth: 1))
             }
@@ -186,6 +220,8 @@ struct RaceChart: View {
         .chartOverlay { proxy in
             Rectangle().fill(.clear).contentShape(Rectangle())
                 .gesture(pan(plotWidth: proxy.plotSize.width))
+                // 滑っている途中に押したら止めるだけ（裏返さない）
+                .gesture(glideTask == nil ? nil : TapGesture().onEnded { stopGlide() })
                 .allowsHitTesting(intro == nil && !showsWholeDay)
         }
         .chartXAxis {
@@ -227,13 +263,14 @@ struct RaceChart: View {
                 legendItem(dashed: true, Text(verbatim: opponent.pickerName))
             }
             Spacer(minLength: 0)
-            if !showsWholeDay && !introRunning {
+            if !showsWholeDay && motion == nil {
                 ViewThatFits {
                     Label("横にずらせます", systemImage: "arrow.left.and.right")
                     Image(systemName: "arrow.left.and.right")
                 }
                 .foregroundStyle(.tertiary)
             }
+            replayButton
             zoomButton
         }
         .font(.caption2)
@@ -266,14 +303,50 @@ struct RaceChart: View {
     private func pan(plotWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
+                // 触ったら滑りは止める
+                stopGlide()
                 // 縦の動きのほうが大きいときはずらさない（ホームの縦スクロールのため）
-                guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                guard abs(value.translation.width) >= abs(value.translation.height) else {
+                    dragAnchor = nil
+                    return
+                }
                 let anchor = dragAnchor.flatMap { $0.location == value.startLocation ? $0 : nil }
                     ?? (location: value.startLocation, start: scrollStart ?? layout.homeWindow.lowerBound)
                 dragAnchor = anchor
                 scrollStart = layout.panned(from: anchor.start, by: value.translation.width, plotWidth: plotWidth)
             }
-            .onEnded { _ in dragAnchor = nil }
+            .onEnded { value in
+                // このずらしで横に動かしていたときだけ滑らせる（前のずらしの残りでは滑らせない）
+                let wasPanning = dragAnchor?.location == value.startLocation
+                dragAnchor = nil
+                guard wasPanning else { return }
+                glide(velocity: value.velocity.width, plotWidth: plotWidth)
+            }
+    }
+
+    /// 指を離したあと、はじいた勢いで滑ってだんだん止まる（2026-10-05）。端に着くか、残りがわずかになったら終わり
+    private func glide(velocity: CGFloat, plotWidth: CGFloat) {
+        stopGlide()
+        guard !RaceChartLayout.glideIsOver(velocity: velocity, elapsed: 0) else { return }
+        let layout = self.layout
+        let start = scrollStart ?? layout.homeWindow.lowerBound
+        glideTask = Task {
+            let clock = ContinuousClock()
+            let began = clock.now
+            while !Task.isCancelled {
+                let elapsed = began.duration(to: clock.now) / .seconds(1)
+                let next = layout.glided(from: start, velocity: velocity, plotWidth: plotWidth, elapsed: elapsed)
+                let stuck = next == scrollStart && elapsed > 0
+                scrollStart = next
+                if stuck || RaceChartLayout.glideIsOver(velocity: velocity, elapsed: elapsed) { break }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    private func stopGlide() {
+        glideTask?.cancel()
+        glideTask = nil
     }
 
     /// 見えている時間帯（例「13:20〜16:20」）。VoiceOver で読む
@@ -329,32 +402,92 @@ struct RaceChart: View {
         reset()
         #if DEBUG
         if startsWholeDay { showsWholeDay = true }
+        if startsReplay {
+            try? await Task.sleep(for: .seconds(RaceChartLayout.flipWaitSeconds))
+            if !Task.isCancelled { startReplay() }
+            return
+        }
         #endif
         guard layout.playsIntro(alreadyPlayed: introPlayed, reduceMotion: reduceMotion, wholeDay: showsWholeDay) else { return }
-        introRunning = true
-        introProgress = 0
+        // 動いている間に「今」が進んでも、始めたときの今まで伸ばす
+        let opening = Motion(kind: .opening, layout: layout)
+        motion = opening
+        motionProgress = 0
         // 裏返る途中から見え始めるので、回りきるのを少し待つ
         try? await Task.sleep(for: .seconds(RaceChartLayout.flipWaitSeconds))
         guard !Task.isCancelled else { return }
-        let seconds = layout.introSeconds
+        let seconds = opening.layout.introSeconds
         withAnimation(.linear(duration: seconds)) {
-            introProgress = 1
+            motionProgress = 1
         }
         try? await Task.sleep(for: .seconds(seconds))
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, motion?.kind == .opening else { return }
         // 最後まで動いたときだけ「最初の1回」を済ませたことにする（途中で表に戻したら次も動く）
         introPlayed = true
         scrollStart = layout.homeWindow.lowerBound
-        introRunning = false
+        motion = nil
     }
 
-    /// 裏返し直すと、［1日］やずらした位置は戻して今のまわりの3時間から。動いている途中なら止める
+    /// ［▶］：4:00 から押したときの今までを、3時間の幅で追いかけて流す（2026-10-05）。視差効果を減らす設定でも、自分で押したときは流す
+    private func startReplay() {
+        stopGlide()
+        replayTask?.cancel()
+        let replay = Motion(kind: .replay, layout: layout)
+        showsWholeDay = false
+        dragAnchor = nil
+        motion = replay
+        motionProgress = 0
+        replayTask = Task {
+            // 0 にした進みが描かれてから動かし始める
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            let seconds = replay.layout.replaySeconds
+            withAnimation(.linear(duration: seconds)) {
+                motionProgress = 1
+            }
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            stopReplay()
+        }
+    }
+
+    /// 流すのをやめて今のまわりの3時間に戻す（［■］・最後まで流れたとき・表に戻す・ほかのアプリへ行く）
+    private func stopReplay() {
+        replayTask?.cancel()
+        replayTask = nil
+        guard motion?.kind == .replay else { return }
+        motion = nil
+        motionProgress = 1
+        scrollStart = layout.homeWindow.lowerBound
+    }
+
+    /// 裏返し直すと、［1日］やずらした位置は戻して今のまわりの3時間から。動いている・滑っている途中なら止める
     private func reset() {
+        stopGlide()
+        replayTask?.cancel()
+        replayTask = nil
         dragAnchor = nil
         showsWholeDay = false
         scrollStart = layout.homeWindow.lowerBound
-        introRunning = false
-        introProgress = 1
+        motion = nil
+        motionProgress = 1
+    }
+}
+
+/// 動いている途中の種類と、始めたときの「今」の形（動いている間に今が進んでも、始めたときの今まで動かす）
+private struct Motion {
+    enum Kind { case opening, replay }
+
+    var kind: Kind
+    var layout: RaceChartLayout
+
+    var now: Date { layout.now }
+
+    func frame(_ progress: Double) -> RaceChartLayout.Frame {
+        switch kind {
+        case .opening: layout.introFrame(progress)
+        case .replay: layout.replayFrame(progress)
+        }
     }
 }
 

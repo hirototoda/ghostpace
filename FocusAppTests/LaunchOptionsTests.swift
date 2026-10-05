@@ -99,6 +99,8 @@ struct LaunchOptionsTests {
         #expect(options.opponent == .goal)
         #expect(options.raceStartsWholeDay)
         #expect(options.demoScene == .day)
+        #expect(!options.raceStartsReplay)
+        #expect(LaunchOptions.parse(["-raceReplay", "-flipRace"]).raceStartsReplay)
         // 知らない名前は読み飛ばさない
         let unknown = LaunchOptions.parse(["-opponent", "-seedDemoData", "day"])
         #expect(unknown.opponent == nil)

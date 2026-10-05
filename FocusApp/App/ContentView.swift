@@ -26,6 +26,7 @@ struct ContentView: View {
         #if DEBUG
         .environment(\.raceStartsFlipped, launcher.options.raceStartsFlipped)
         .environment(\.raceStartsWholeDay, launcher.options.raceStartsWholeDay)
+        .environment(\.raceStartsReplay, launcher.options.raceStartsReplay)
         .environment(\.opensStartSheet, launcher.options.openStartSheet)
         .overlay(alignment: .top) {
             if launcher.options.demoScene != nil || launcher.options.liveGallery {

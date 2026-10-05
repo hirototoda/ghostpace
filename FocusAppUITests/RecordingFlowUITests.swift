@@ -305,7 +305,7 @@ final class RecordingFlowUITests: XCTestCase {
     }
 
     /// 裏のグラフ：3時間で始まり、［1日］で24時間、［3時間］で戻る。上の行に差。
-    /// 最初の裏返しだけ動き（その間は［1日］を押せない）、2回目はすぐ押せる。裏返し直すと3時間に戻る（GHO-13、1b-15〜17）
+    /// 最初の裏返しだけ動き（直前2時間が伸びる約1.5秒。その間は［1日］［▶］を押せない）、2回目はすぐ押せる。裏返し直すと3時間に戻る（GHO-13、1b-15〜17）
     func testRaceChartZoomAndIntroOnlyOnce() {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00", "-opponent", "goal"])
         let focus = app.descendants(matching: .any)["todayFocus"]
@@ -313,12 +313,13 @@ final class RecordingFlowUITests: XCTestCase {
         focus.tap()
         let zoom = app.buttons["raceZoomButton"]
         XCTAssertTrue(zoom.waitForExistence(timeout: timeout))
+        // 最初は動いている間（約1.85秒）［1日］［▶］を押せない。ほかを調べる前に確かめる。動き終わると押せる
+        XCTAssertFalse(zoom.isEnabled)
+        XCTAssertFalse(app.buttons["raceReplayButton"].isEnabled)
+        XCTAssertTrue(zoom.wait(for: \.isEnabled, toEqual: true, timeout: 6))
         XCTAssertTrue(app.descendants(matching: .any)["raceGap"].label.hasPrefix("差 "))
         // グラフは VoiceOver で1つの部品として読む
         XCTAssertEqual(app.descendants(matching: .any)["今日たまったポイントのグラフ"].exists, true)
-        // 最初は動いている間［1日］を押せない。動き終わると押せる
-        XCTAssertFalse(zoom.isEnabled)
-        XCTAssertTrue(zoom.wait(for: \.isEnabled, toEqual: true, timeout: 6))
         XCTAssertEqual(zoom.label, "1日全体を見る")
         // 指で右へずらすと前の時刻が見える（裏返らない）
         let plot = app.descendants(matching: .any)["今日たまったポイントのグラフ"]
@@ -349,6 +350,52 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(zoom.waitForExistence(timeout: timeout))
         XCTAssertFalse(zoom.isEnabled)
         XCTAssertTrue(zoom.wait(for: \.isEnabled, toEqual: true, timeout: 6))
+    }
+
+    /// ［▶］で 4:00 から今までを流し、［■］で止める。流している間は［1日］を押せない。
+    /// ［1日］のときに押しても3時間で流し、最後まで流れたら［▶］に戻る（GHO-13、1b-26、2026-10-05）
+    func testRaceChartReplayTheDay() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T08:00:00+09:00", "-opponent", "goal"])
+        let focus = app.descendants(matching: .any)["todayFocus"]
+        XCTAssertTrue(focus.waitForExistence(timeout: timeout))
+        focus.tap()
+        let zoom = app.buttons["raceZoomButton"]
+        let replay = app.buttons["raceReplayButton"]
+        XCTAssertTrue(replay.waitForExistence(timeout: timeout))
+        // 開いたときの動きが終わるのを待つ
+        XCTAssertTrue(zoom.wait(for: \.isEnabled, toEqual: true, timeout: 6))
+        XCTAssertTrue(replay.isEnabled)
+        XCTAssertEqual(replay.label, "1日を流す")
+
+        // 流している間は［■］、［1日］は押せない。［■］で止める
+        replay.tap()
+        XCTAssertTrue(replay.wait(for: \.label, toEqual: "止める", timeout: timeout))
+        XCTAssertFalse(zoom.isEnabled)
+        replay.tap()
+        XCTAssertTrue(replay.wait(for: \.label, toEqual: "1日を流す", timeout: timeout))
+        XCTAssertTrue(zoom.wait(for: \.isEnabled, toEqual: true, timeout: timeout))
+        XCTAssertEqual(zoom.label, "1日全体を見る")
+
+        // ［1日］から押しても3時間で流し、最後まで流れると（8:00 なら5秒）［▶］に戻って3時間のまま
+        zoom.tap()
+        XCTAssertTrue(zoom.wait(for: \.label, toEqual: "3時間に戻す", timeout: timeout))
+        replay.tap()
+        XCTAssertTrue(zoom.wait(for: \.label, toEqual: "1日全体を見る", timeout: timeout))
+        XCTAssertTrue(replay.wait(for: \.label, toEqual: "1日を流す", timeout: 10))
+        XCTAssertTrue(zoom.isEnabled)
+
+        // 速くはじいてすぐ［1日］→［3時間］を押すと、滑りは止まって今のまわりの3時間のまま動かない（2026-10-05 慣性）
+        let plot = app.descendants(matching: .any)["今日たまったポイントのグラフ"]
+        let home = plot.value as? String
+        plot.swipeLeft(velocity: .fast)
+        zoom.tap()
+        XCTAssertTrue(zoom.wait(for: \.label, toEqual: "3時間に戻す", timeout: timeout))
+        zoom.tap()
+        XCTAssertTrue(zoom.wait(for: \.label, toEqual: "1日全体を見る", timeout: timeout))
+        let settled = plot.value as? String
+        XCTAssertEqual(settled, home)
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(plot.value as? String, settled)
     }
 
     /// テンプレートの読み込み：確認なしで置き換わり、「元に戻す」で戻る（PLN-07、1a-17）
