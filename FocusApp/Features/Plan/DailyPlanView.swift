@@ -347,7 +347,7 @@ struct DailyPlanView: View {
         .accessibilityIdentifier("sleepRow")
         .accessibilityHint("寝た時刻と起きた時刻を直します")
         .sheet(isPresented: $editsSleep) {
-            SleepEditSheet(line: sleep.line) { start, end in
+            SleepEditSheet(line: sleep.line, onReread: sleep.onReread) { start, end in
                 if sleep.onEdit(start, end) { editsSleep = false }
             }
         }
@@ -525,6 +525,9 @@ struct SleepRowModel {
     /// 寝た・起きた時刻を手で直す。直せたら true
     var onEdit: (Date, Date) -> Bool
     var onRequestHealth: () -> Void
+    /// ヘルスケアから読み直す。記録がなかったら false（画面を開いたまま、ひとこと出す）、それ以外は true（閉じる）。
+    /// ヘルスケアのない端末では nil（出さない）
+    var onReread: (() async -> Bool)? = nil
 }
 
 /// 寝た・起きた時刻を直す（DTX-02）。5分刻み。直すとヘルスケアで置き換えなくなる。
@@ -532,26 +535,39 @@ struct SleepEditSheet: View {
     @State var start: Date
     @State var end: Date
     let onSave: (Date, Date) -> Void
+    let onReread: (() async -> Bool)?
+    private static let noRecordID = "sleepNoRecord"
+    @State private var isRereading = false
+    @State private var showsNoRecord = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(line: SleepLine, onSave: @escaping (Date, Date) -> Void) {
+    init(line: SleepLine, onReread: (() async -> Bool)? = nil, onSave: @escaping (Date, Date) -> Void) {
         _start = State(initialValue: line.start)
         _end = State(initialValue: line.end)
+        self.onReread = onReread
         self.onSave = onSave
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    row("寝た", $start, shownDate: SleepLine.normalizedStart(start, end: end))
-                    row("起きた", $end, shownDate: end)
-                    Text("直すと、あとでヘルスケアに記録が入っても置き換えません。寝た時刻が起きた時刻より遅いときは、前の夜とみなします。")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        row("寝た", $start, shownDate: SleepLine.normalizedStart(start, end: end))
+                        row("起きた", $end, shownDate: end)
+                        Text("直すと、あとでヘルスケアに記録が入っても置き換えません（「ヘルスケアから読み直す」を押したときは置き換えます）。寝た時刻が起きた時刻より遅いときは、前の夜とみなします。")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        // 下に固定すると、大きな文字で説明に重なるので中身の終わりに置く（保存の上）
+                        if let onReread { rereadButton(onReread) }
+                    }
+                    .padding(20)
                 }
-                .padding(20)
+                // 大きな文字では、出したひとことが保存の下に隠れるので、そこまで送る
+                .onChange(of: showsNoRecord) { _, shows in
+                    if shows { withAnimation { proxy.scrollTo(Self.noRecordID, anchor: .bottom) } }
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 Button {
@@ -574,6 +590,39 @@ struct SleepEditSheet: View {
         }
         .tint(Theme.focus)
         .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+    }
+
+    /// ヘルスケアから読み直す（2026-10-03）。記録がなければひとこと出し、それ以外は閉じる（保存の失敗は手で直したときと同じく閉じてから知らせる）
+    @ViewBuilder
+    private func rereadButton(_ reread: @escaping () async -> Bool) -> some View {
+        VStack(spacing: 4) {
+            Button {
+                isRereading = true
+                showsNoRecord = false
+                Task {
+                    let closes = await reread()
+                    isRereading = false
+                    if closes { dismiss() } else { showsNoRecord = true }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if isRereading { ProgressView().controlSize(.small) }
+                    Label("ヘルスケアから読み直す", systemImage: "arrow.clockwise.heart")
+                }
+                .font(.subheadline)
+            }
+            .disabled(isRereading)
+            .accessibilityIdentifier("sleepRereadButton")
+            if showsNoRecord {
+                Text("ヘルスケアに記録がありませんでした")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .id(Self.noRecordID)
+                    .accessibilityIdentifier("sleepNoRecordText")
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
     }
 
     /// `shownDate`：前の夜に合わせたあとの日付（23:30 を選ぶと前の日になる）

@@ -71,6 +71,7 @@ final class AppLauncher {
     /// （本物の保存先では使わない。ライブアクティビティの見本と同じ分け方）
     static func sleepSource(_ options: LaunchOptions, clock: any AppClock) -> any SleepSource {
         guard options.storeURL == nil || options.storeName != nil else { return HealthKitSleepSource() }
+        guard !options.noHealthSleep else { return NoSleepSource(isAvailable: true) }
         let midnight = Calendar.app(timeZone: .current).startOfDay(for: clock.now())
         return NoSleepSource(isAvailable: true, intervals: [
             DateInterval(start: midnight.addingTimeInterval(10 * 60), end: midnight.addingTimeInterval(7 * 3600 + 5 * 60)),

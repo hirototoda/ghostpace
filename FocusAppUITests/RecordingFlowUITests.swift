@@ -548,4 +548,23 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["英語"].waitForExistence(timeout: timeout))
         XCTAssertTrue(app.buttons["endButton"].exists)
     }
+
+    /// 睡眠をヘルスケアから読み直す（DTX-02）：記録がなければ開いたままひとこと出し、あれば閉じて行が「ヘルスケア」
+    func testRereadSleepFromHealth() {
+        let empty = launch(["-seedDemoData", "gamePlan", "-fixedNow", "2026-10-19T07:30:00+09:00", "-noHealthSleep"])
+        XCTAssertTrue(empty.buttons["sleepRow"].waitForExistence(timeout: timeout))
+        empty.buttons["sleepRow"].tap()
+        XCTAssertTrue(empty.buttons["sleepRereadButton"].waitForExistence(timeout: timeout))
+        empty.buttons["sleepRereadButton"].tap()
+        XCTAssertTrue(empty.staticTexts["sleepNoRecordText"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(empty.buttons["sleepSaveButton"].exists)
+
+        let app = launch(["-seedDemoData", "gamePlan", "-fixedNow", "2026-10-19T07:30:00+09:00"])
+        XCTAssertTrue(app.buttons["sleepRow"].waitForExistence(timeout: timeout))
+        app.buttons["sleepRow"].tap()
+        XCTAssertTrue(app.buttons["sleepRereadButton"].waitForExistence(timeout: timeout))
+        app.buttons["sleepRereadButton"].tap()
+        XCTAssertTrue(app.buttons["sleepSaveButton"].waitForNonExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["sleepRow"].label.contains("ヘルスケア"))
+    }
 }

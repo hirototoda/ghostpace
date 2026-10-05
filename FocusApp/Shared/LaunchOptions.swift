@@ -14,6 +14,7 @@ import Foundation
 /// - `-opponent lastWeek|goal`: 見本データで比べる相手を選んで始める。`-raceWholeDay`: 裏のグラフを1日全体で始める（GHO-13 の撮影用）
 /// - `-liveGallery`: 起動したらロック画面と画面上部の見本を出す（画面の確認用）
 /// - `-openAddCategory`: 起動したら「カテゴリを追加」をデトックスで開く（グループの一覧の撮影用）
+/// - `-noHealthSleep`: 見本のヘルスケアに睡眠の記録がないことにする（「ヘルスケアから読み直す」で記録がないときの撮影用、DTX-02）
 /// - `-liveActivity`: 見本データでも本物のロック画面・画面上部に出す（シミュレーターでの確認用）
 /// - `-openHold [unlocked]`: 起動したら長押しの画面を開く（`unlocked` なら15分開けたあと）。`-holdProgress 0.6`: 押している途中の見た目で始める
 struct LaunchOptions: Hashable {
@@ -46,6 +47,8 @@ struct LaunchOptions: Hashable {
     var liveGallery = false
     /// 「カテゴリを追加」をデトックスで開く（撮影用）
     var openAddCategory = false
+    /// 見本のヘルスケアに睡眠の記録がないことにする（撮影用）
+    var noHealthSleep = false
     /// 計画外で開始のシートを開く
     var openStartSheet = false
     /// 見本データでも本物のロック画面・画面上部に出す
@@ -121,6 +124,8 @@ struct LaunchOptions: Hashable {
                 options.liveGallery = true
             case "-openAddCategory":
                 options.openAddCategory = true
+            case "-noHealthSleep":
+                options.noHealthSleep = true
             case "-liveActivity":
                 options.liveActivity = true
             case "-holdProgress":

@@ -61,6 +61,47 @@ extension AppModel {
         await refreshSleep()
     }
 
+    /// 睡眠を直す画面に「ヘルスケアから読み直す」を出すか（ヘルスケアのない端末では出さない）
+    var canRereadHealth: Bool { sleepSource.isAvailable }
+
+    enum HealthRereadResult: Equatable {
+        /// ヘルスケアの値にした（前と同じ値も含む）
+        case replaced
+        /// ヘルスケアに記録がなかった（今のまま）
+        case noRecord
+        /// 置き換えなかった：保存に失敗した（エラーを出す）、またはシートを開いたまま4:00を過ぎた（新しい日を出す）
+        case notReplaced
+    }
+
+    /// 「ヘルスケアから読み直す」（2026-10-03）。許可をまだ聞いていなければ聞いてから、その日の睡眠を読み直す。
+    /// 自分で押したときなので、計画を確定したあとでも・手で直していても置き換える（自動の読み直しの決まりは変えない）
+    func rereadSleepFromHealth() async -> HealthRereadResult {
+        if await sleepSource.shouldRequestAuthorization() { await sleepSource.requestAuthorization() }
+        healthNeedsRequest = await sleepSource.shouldRequestAuthorization()
+        guard sleepSource.isAvailable else { return .noRecord }
+        let calendar = self.calendar
+        let dayStart = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        let dayKey = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
+        let (from, to) = SleepPicker.searchRange(dayStart: dayStart, calendar: calendar)
+        let intervals = await sleepSource.sleepIntervals(from: from, to: to)
+        // 画面に出ている睡眠の日（開いたまま4:00を過ぎたら、その日のものではないので置き換えない）
+        guard sleep?.dayKey == dayKey else {
+            reload(quietly: true)
+            return .notReplaced
+        }
+        guard let picked = SleepPicker.pick(intervals, dayStart: dayStart, calendar: calendar) else { return .noRecord }
+        let line = SleepLine(start: picked.start, end: picked.end, source: .health)
+        do {
+            try sleepStore.saveSleep(line, dayKey: dayKey, timeZone: calendar.timeZone)
+        } catch {
+            errorMessage = Self.saveErrorMessage
+            return .notReplaced
+        }
+        // ホームの数字（ポイント・目標のゴースト）もすぐ数え直す。reload が今日の睡眠を読み直す
+        reload(quietly: true)
+        return .replaced
+    }
+
     /// 寝た・起きた時刻を手で直す（ヘルスケアで置き換えなくなる）。起きた時刻が寝た時刻より後で、24時間未満でなければ false。
     /// 画面は寝た時刻を前の夜に合わせてから渡すので、ふつうは通らない（念のための確かめ）
     @discardableResult
