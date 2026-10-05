@@ -196,8 +196,7 @@ struct DailyPlanView: View {
 
     /// 開いたときに見せる時刻（4:00 からの時間）。朝・明日は起きた時刻、計画のタブは今の1時間前
     private var initialHour: Int {
-        let target = mode == .tab ? now.addingTimeInterval(-3600) : (awake?.lowerBound ?? dayStart)
-        return min(max(0, Int(target.timeIntervalSince(dayStart) / 3600)), 23)
+        PlanGridLayout.initialHour(confirmedDay: mode == .tab, now: now, wake: awake?.lowerBound ?? dayStart, dayStart: dayStart)
     }
 
     private var planCard: some View {
@@ -221,7 +220,7 @@ struct DailyPlanView: View {
                              editing = EditorTarget(block: PlanBlockDraft(start: start, minutes: PlanDraft.defaultMinutes,
                                                                           category: categories.first ?? .unknown), isNew: true)
                          },
-                         onCommit: commitFromGrid)
+                         onCommit: commitFromGrid, calendar: calendar)
                 .padding(.vertical, 8)
             if onSaveAsTemplate != nil, !plan.blocks.isEmpty, mode != .tab {
                 Divider()
@@ -273,7 +272,7 @@ struct DailyPlanView: View {
             VStack(alignment: .leading, spacing: 0) { content() }
                 .padding(.horizontal, 16).padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemGroupedBackground)))
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
             if let footer {
                 Text(footer).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16)
                     .fixedSize(horizontal: false, vertical: true)

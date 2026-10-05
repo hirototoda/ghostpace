@@ -17,9 +17,19 @@ struct PlanGridView: View {
     let onTapEmpty: (Date) -> Void
     /// 動かした・長さを変えたブロックを渡す。保存できなければ呼ぶ側で理由を出し、元のまま
     let onCommit: (PlanBlockDraft) -> Void
+    /// 目盛りの時刻を出す暦（アプリの暦を渡す）
+    var calendar: Calendar = .app(timeZone: .current)
 
-    /// ドラッグ中のブロックの見た目（離すまで計画は変えない）
-    @State private var preview: PlanBlockDraft?
+    /// ドラッグ中のブロックと動かした量（離すまで計画は変えない）。取り消されたら自動で消える
+    @GestureState private var moving: (id: UUID, dy: CGFloat)?
+    @GestureState private var resizing: (id: UUID, dy: CGFloat)?
+
+    /// ドラッグ中の見た目
+    private func preview(_ block: PlanBlockDraft) -> PlanBlockDraft? {
+        if let moving, moving.id == block.id { return layout.moved(block, by: moving.dy) }
+        if let resizing, resizing.id == block.id { return layout.resized(block, by: resizing.dy) }
+        return nil
+    }
 
     static let rulerWidth: CGFloat = 48
 
@@ -35,7 +45,7 @@ struct PlanGridView: View {
                 .onTapGesture(coordinateSpace: .local) { location in onTapEmpty(layout.tapStart(y: location.y)) }
                 .accessibilityHidden(true)
             ForEach(blocks) { block in
-                blockView(preview?.id == block.id ? preview! : block, original: block)
+                blockView(preview(block) ?? block, original: block)
             }
             if showsNow, (layout.dayStart..<layout.dayEnd).contains(now) { nowLine }
         }
@@ -68,8 +78,10 @@ struct PlanGridView: View {
         .accessibilityHidden(true)
     }
 
+    /// 4:00 から index 時間後の時刻（夏時間の切り替えの日も実際の時刻）
     private func hourLabel(_ index: Int) -> String {
-        "\((index + DayBoundary.hour) % 24):00"
+        let date = layout.dayStart.addingTimeInterval(Double(index * 3600))
+        return "\(calendar.component(.hour, from: date)):00"
     }
 
     private func sleepShade(from start: Date, to end: Date) -> some View {
@@ -105,7 +117,7 @@ struct PlanGridView: View {
     @ViewBuilder
     private func blockView(_ shown: PlanBlockDraft, original: PlanBlockDraft) -> some View {
         let movable = PlanGridLayout.canMove(original, confirmedDay: confirmedDay, now: now) && !isLocked(original)
-        let isDragging = preview?.id == original.id
+        let isDragging = moving?.id == original.id || resizing?.id == original.id
         let height = max(layout.height(minutes: shown.minutes), 22)
         PlanGridBlock(block: shown, isPast: shown.end <= now && confirmedDay, isDragging: isDragging, height: height)
             .overlay(alignment: .bottom) {
@@ -130,15 +142,14 @@ struct PlanGridView: View {
     private func moveGesture(_ block: PlanBlockDraft) -> some Gesture {
         LongPressGesture(minimumDuration: 0.3)
             .sequenced(before: DragGesture(coordinateSpace: .named("grid")))
-            .onChanged { value in
+            .updating($moving) { value, state, _ in
                 switch value {
-                case .first(true): preview = block
-                case .second(true, let drag?): preview = layout.moved(block, by: drag.translation.height)
+                case .first(true): state = (block.id, 0)
+                case .second(true, let drag): state = (block.id, drag?.translation.height ?? 0)
                 default: break
                 }
             }
             .onEnded { value in
-                defer { preview = nil }
                 guard case .second(true, let drag?) = value else { return }
                 let moved = layout.moved(block, by: drag.translation.height)
                 if moved.start != block.start { onCommit(moved) }
@@ -154,9 +165,8 @@ struct PlanGridView: View {
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(coordinateSpace: .named("grid"))
-                    .onChanged { preview = layout.resized(block, by: $0.translation.height) }
+                    .updating($resizing) { value, state, _ in state = (block.id, value.translation.height) }
                     .onEnded { value in
-                        defer { preview = nil }
                         let resized = layout.resized(block, by: value.translation.height)
                         if resized.minutes != block.minutes { onCommit(resized) }
                     }

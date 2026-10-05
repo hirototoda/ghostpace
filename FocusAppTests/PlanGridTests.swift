@@ -100,4 +100,88 @@ struct PlanGridTests {
         let broken = PlanGridLayout.awake(wake: jst("2026-10-19T09:00"), bed: jst("2026-10-19T08:00"), dayStart: dayStart)
         #expect(broken == dayStart...jst("2026-10-20T04:00"))
     }
+
+    @Test func blocksLockFromTheMomentTheyStart() {
+        let now = jst("2026-10-19T11:00")
+        #expect(!PlanGridLayout.canMove(block("11:00", 60), confirmedDay: true, now: now))
+        #expect(PlanGridLayout.canMove(block("11:05", 60), confirmedDay: true, now: now))
+    }
+
+    @Test func gameTimeMovesInHalfHoursAndIsRefusedOnAnotherGameTime() {
+        let first = PlanBlockDraft.unblock(start: jst("2026-10-19T20:00"))
+        let second = PlanBlockDraft.unblock(start: jst("2026-10-19T21:00"))
+        let moved = layout.moved(first, by: 40)
+        #expect(moved.start == jst("2026-10-19T20:30"))
+        #expect(moved.minutes == 30)
+        let plan = PlanDraft(blocks: [first, second])
+        #expect(plan.problem(with: layout.moved(first, by: 60), dayStart: dayStart) != nil)
+        // 最後の30分（翌3:30）より下へは行かない
+        #expect(layout.moved(first, by: 1000).start == jst("2026-10-20T03:30"))
+    }
+
+    @Test func lateNightBlocksStayInsideTheDay() {
+        // 0:00〜3:59 は前の日（4:00 区切り）の格子の下の端
+        let late = block("01:00", 90, day: "2026-10-20")
+        #expect(layout.y(for: late.start) == 1260)
+        #expect(layout.moved(late, by: 120).start == jst("2026-10-20T02:30"))
+        #expect(layout.resized(late, by: 120).minutes == 180)
+        #expect(layout.resized(block("03:00", 30, day: "2026-10-20"), by: 600).end == jst("2026-10-20T04:00"))
+        // VoiceOver の「30分遅く」も翌4:00 で止まる
+        #expect(layout.shifted(block("03:30", 30, day: "2026-10-20"), minutes: 30).start == jst("2026-10-20T03:30"))
+    }
+
+    @Test func threeHourBlockDoesNotGrow() {
+        #expect(layout.resized(block("09:00", 180), by: 60).minutes == 180)
+        #expect(layout.resized(block("09:00", 180), by: -60).minutes == 120)
+    }
+
+    @Test func openingPosition() {
+        let wake = jst("2026-10-19T07:05")
+        // 朝・明日（下書き）は起きた時刻、計画のタブは今の1時間前
+        #expect(PlanGridLayout.initialHour(confirmedDay: false, now: jst("2026-10-19T15:00"), wake: wake, dayStart: dayStart) == 3)
+        #expect(PlanGridLayout.initialHour(confirmedDay: true, now: jst("2026-10-19T15:00"), wake: wake, dayStart: dayStart) == 10)
+        // 4:00 すぐ・3:59 は端に収める
+        #expect(PlanGridLayout.initialHour(confirmedDay: true, now: jst("2026-10-19T04:10"), wake: wake, dayStart: dayStart) == 0)
+        #expect(PlanGridLayout.initialHour(confirmedDay: true, now: jst("2026-10-20T03:59"), wake: wake, dayStart: dayStart) == 22)
+    }
+}
+
+/// 起きている時間（格子の灰色、PLN-10）を本体から求める
+@MainActor
+struct PlanGridAwakeTests {
+    private func model(_ t: TestStore, source: NoSleepSource = NoSleepSource()) -> AppModel {
+        AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: MemorySettings(), sleepSource: source)
+    }
+
+    @Test func wakeComesFromTheDaysSleepAndBedFromTonightsSetting() async throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let m = model(t, source: NoSleepSource(isAvailable: true,
+                                                intervals: [DateInterval(start: jst("2026-10-19T00:10"), end: jst("2026-10-19T07:05"))]))
+        await m.refreshSleep()
+        m.setSleepSetting(startMinutes: 23 * 60 + 30, endMinutes: 7 * 60)
+        let range = m.awakeRange(dayStart: jst("2026-10-19T04:00"))
+        #expect(range.lowerBound == jst("2026-10-19T07:05"))
+        #expect(range.upperBound == jst("2026-10-19T23:30"))
+    }
+
+    @Test func settingTimesWhenThereIsNoSleepForTheDay() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let m = model(t)
+        // 明日の計画（まだ睡眠を保存していない日）は設定の時刻（初期 0:00〜7:00）
+        let range = m.awakeRange(dayStart: jst("2026-10-20T04:00"))
+        #expect(range.lowerBound == jst("2026-10-20T07:00"))
+        #expect(range.upperBound == jst("2026-10-21T00:00"))
+    }
+
+    @Test func bedAfterTheDayEndStopsAtFourAm() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let m = model(t)
+        // 寝る 6:00・起きる 7:00（朝に寝る人）→ 寝る時刻は翌4:00 より後なので、格子の終わり（翌4:00）まで起きている
+        m.setSleepSetting(startMinutes: 6 * 60, endMinutes: 7 * 60)
+        let range = m.awakeRange(dayStart: jst("2026-10-20T04:00"))
+        #expect(range == jst("2026-10-20T07:00")...jst("2026-10-21T04:00"))
+    }
 }

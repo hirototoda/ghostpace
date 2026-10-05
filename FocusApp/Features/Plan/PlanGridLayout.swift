@@ -10,7 +10,7 @@ struct PlanGridLayout {
     static let dayMinutes = 24 * 60
     /// 長さの範囲（ブロックの追加と同じ、5分〜3時間）
     static let minMinutes = PlanDraft.minuteStep
-    static let maxMinutes = 180
+    static let maxMinutes = 180  // LengthSlider.minuteRange の上限と同じ（View の定数は MainActor なので写す）
 
     let dayStart: Date
     var hourHeight: CGFloat
@@ -66,6 +66,12 @@ struct PlanGridLayout {
     }
 
     static func canResize(_ block: PlanBlockDraft) -> Bool { !block.isUnblock }
+
+    /// 開いたときに見せる時刻（4:00 からの時間、0〜23）。確定した日（計画のタブ）は今の1時間前、下書き（朝・明日）は起きた時刻
+    static func initialHour(confirmedDay: Bool, now: Date, wake: Date, dayStart: Date) -> Int {
+        let target = confirmedDay ? now.addingTimeInterval(-3600) : wake
+        return min(max(0, Int(target.timeIntervalSince(dayStart) / 3600)), 23)
+    }
 
     /// 確定した日（計画のタブ）は、もう始まった・終わったブロックを格子で動かさない（2026-10-06 オーナー決定）
     static func canMove(_ block: PlanBlockDraft, confirmedDay: Bool, now: Date) -> Bool {
