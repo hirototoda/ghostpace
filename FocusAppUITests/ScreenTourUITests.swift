@@ -205,7 +205,8 @@ final class ScreenTourUITests: XCTestCase {
     /// タイムライン（カード）と、終了時刻を早めるシート
     func testTimeline() {
         let app = demo("day", "2026-10-19T15:20:00")
-        app.tabBars.buttons["タイムライン"].tap()
+        app.tabBars.buttons["分析"].tap()
+        app.buttons["analysisTimelineRow"].tap()
         let row = app.buttons["sessionRow"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: timeout))
         shoot("timeline")

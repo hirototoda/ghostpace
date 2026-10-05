@@ -37,17 +37,19 @@ struct ContentView: View {
     }
 }
 
-/// 下のタブ（NAV-01、2026-10-01 決定）。
+/// 下のタブ（NAV-01、2026-10-01 決定。2026-10-05 にタイムラインを分析に置き換え）。
 private enum MainTab: Hashable {
     case timer
     case plan
-    case timeline
+    case analysis
 }
 
-/// 下のタブ（タイマー・計画・タイムライン）と、その上に出る朝の計画・タイマー・設定・振り返り。
+/// 下のタブ（タイマー・計画・分析）と、その上に出る朝の計画・タイマー・設定・振り返り。
 private struct MainView: View {
     @Bindable var model: AppModel
     @State private var tab: MainTab
+    /// 分析のタブで進んだ先（タイムライン・ポイントの推移・その日のグラフ）
+    @State private var analysisPath: [AnalysisRoute]
     @State private var showsSettings: Bool
     /// 夜の振り返りから開いた明日の計画
     @State private var tomorrow: MorningPlan?
@@ -61,7 +63,10 @@ private struct MainView: View {
 
     init(model: AppModel, options: LaunchOptions) {
         self.model = model
-        _tab = State(initialValue: options.openTimeline ? .timeline : options.openPlan ? .plan : .timer)
+        let opensAnalysis = options.openAnalysis || options.openTimeline || options.openPoints
+        _tab = State(initialValue: opensAnalysis ? .analysis : options.openPlan ? .plan : .timer)
+        _analysisPath = State(initialValue: options.openTimeline ? [.timeline]
+                              : options.openPoints ? [.points] + (options.openDay.map { [.day(daysAgo: $0)] } ?? []) : [])
         _showsSettings = State(initialValue: options.openSettings)
         if options.openReview { model.showsReview = true }
         _holdProgress = State(initialValue: options.holdProgress)
@@ -121,13 +126,13 @@ private struct MainView: View {
                 .accessibilityIdentifier("timerTab")
             Tab("計画", systemImage: "list.bullet.clipboard", value: MainTab.plan) { planTab }
                 .accessibilityIdentifier("planTab")
-            Tab("タイムライン", systemImage: "calendar.day.timeline.left", value: MainTab.timeline) {
-                TimelineScreen(model: model, showsCloseButton: false)
+            Tab("分析", systemImage: "chart.line.uptrend.xyaxis", value: MainTab.analysis) {
+                AnalysisScreen(model: model, path: $analysisPath)
             }
-            .accessibilityIdentifier("timelineTab")
+            .accessibilityIdentifier("analysisTab")
         }
         .overlay(alignment: .top) { noticeBanner }
-        // 計画・タイムラインのタブは、それぞれの画面が自分で知らせを出す
+        // 計画・分析のタブは、それぞれの画面が自分で知らせを出す
         .saveErrorAlert($model.errorMessage, when: tab == .timer && isHomeTopmost)
         .fullScreenCover(item: Binding(get: { model.morningPlan }, set: { _ in })) { morning in
             DailyPlanView(mode: .morning, dayStart: morning.dayStart, now: model.clock.now(), plan: morning.draft,

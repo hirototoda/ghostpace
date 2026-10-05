@@ -118,12 +118,13 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["timerReading"].exists)
     }
 
-    /// タイムライン：下のタブから開き、記録をタップして終了時刻を早めると「修正済み」になる（TML-04）
+    /// タイムライン：下のタブの分析から開き、記録をタップして終了時刻を早めると「修正済み」になる（TML-04、NAV-01）
     func testTimelineShortenEnd() {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00"])
-        let open = app.tabBars.buttons["タイムライン"]
+        let open = app.tabBars.buttons["分析"]
         XCTAssertTrue(open.waitForExistence(timeout: timeout))
         open.tap()
+        app.buttons["analysisTimelineRow"].tap()
         let row = app.buttons["sessionRow"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: timeout))
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '修正済み'")).firstMatch.exists)
@@ -396,6 +397,47 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertEqual(settled, home)
         Thread.sleep(forTimeInterval: 1)
         XCTAssertEqual(plot.value as? String, settled)
+    }
+
+    /// 分析のタブ：一覧からポイントの推移 → 過ぎた日のグラフ（1日で始まり「この日」）→ 戻る。
+    /// 今日の振り返りは昼でも開ける（NAV-01・ANA-04・05・REV-01、1b-27〜29、2026-10-05）
+    func testAnalysisPointsAndDayGraph() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00"])
+        let tab = app.tabBars.buttons["分析"]
+        XCTAssertTrue(tab.waitForExistence(timeout: timeout))
+        tab.tap()
+        let points = app.buttons["analysisPointsRow"]
+        XCTAssertTrue(points.waitForExistence(timeout: timeout))
+        XCTAssertTrue(points.label.contains("7日の平均"))
+        points.tap()
+
+        // ［7日｜30日］で切り替えられる
+        let picker = app.segmentedControls["pointsRangePicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: timeout))
+        picker.buttons["30日"].tap()
+        XCTAssertTrue(picker.buttons["30日"].isSelected)
+        picker.buttons["7日"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '10月19日'")).firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["日ごとのポイントのグラフ"].exists)
+
+        // 昨日を押すと、その日のグラフが1日全体で始まる（動かないので［3時間］がすぐ押せる）
+        let yesterday = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '10月18日'")).firstMatch
+        XCTAssertTrue(yesterday.waitForExistence(timeout: timeout))
+        yesterday.tap()
+        let zoom = app.buttons["raceZoomButton"]
+        XCTAssertTrue(zoom.waitForExistence(timeout: timeout))
+        XCTAssertTrue(zoom.isEnabled)
+        XCTAssertEqual(zoom.label, "3時間に戻す")
+        XCTAssertTrue(app.descendants(matching: .any)["この日たまったポイントのグラフ"].exists)
+        XCTAssertTrue(app.staticTexts["10月18日(日)"].exists)
+
+        // 戻って、一覧から今日の振り返りを開く（通知の 22:00 の前でも開ける）
+        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars.buttons.firstMatch.tap()
+        let review = app.buttons["analysisReviewRow"]
+        XCTAssertTrue(review.waitForExistence(timeout: timeout))
+        review.tap()
+        XCTAssertTrue(app.staticTexts["今のところ・確定は朝4:00"].waitForExistence(timeout: timeout))
     }
 
     /// テンプレートの読み込み：確認なしで置き換わり、「元に戻す」で戻る（PLN-07、1a-17）

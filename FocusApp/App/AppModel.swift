@@ -547,6 +547,72 @@ final class AppModel {
             .filter { ($0.endAt ?? now) > dayStart }
     }
 
+    // MARK: 分析（ANA-04・05）：過去の日のポイント。ホームと同じ計算をその日の記録でやり直す
+
+    /// `daysAgo` 日前（今日は0）の1日分の数字。今日は今まで、過ぎた日は翌4:00まで。未来・読めないときは nil
+    func daySnapshot(daysAgo: Int) -> HomeSnapshot? {
+        let now = clock.now()
+        let calendar = self.calendar
+        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
+        guard daysAgo >= 0, let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { return nil }
+        var snapshot: HomeSnapshot?
+        perform(reportsError: false) {
+            snapshot = try daySnapshot(dayStart: dayStart, now: now, events: (try? blockLog.all()) ?? [], calendar: calendar)
+        }
+        return snapshot
+    }
+
+    /// 直近 `days` 日（今日を含む、古い日が先）のポイントと、先週の同じ曜日のポイント
+    func pointsHistory(days: Int) -> [DayPoints] {
+        let now = clock.now()
+        let calendar = self.calendar
+        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
+        // ブロックの記録は1回だけ読む
+        let events = (try? blockLog.all()) ?? []
+        var result: [DayPoints] = []
+        perform(reportsError: false) {
+            for daysAgo in (0..<max(days, 0)).reversed() {
+                guard let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { continue }
+                let isToday = daysAgo == 0
+                let recorded = try isToday || hasRecord(dayStart: dayStart, calendar: calendar)
+                guard recorded else {
+                    result.append(DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: false))
+                    continue
+                }
+                let snapshot = try daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar)
+                result.append(DayPoints(dayStart: dayStart, points: snapshot.points,
+                                        lastWeek: snapshot.opponentPoints(.lastWeek, at: snapshot.now), isToday: isToday))
+            }
+        }
+        return result
+    }
+
+    /// その日に何か記録があるか：タイマーの記録・計画（下書き・確定・計画なし）・保存した睡眠のどれか。
+    /// ない日は使い始める前などで、設定の睡眠の時刻だけで点が付いてしまうので数えない
+    private func hasRecord(dayStart: Date, calendar: Calendar) throws -> Bool {
+        let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
+        return try !store.sessions(dayKey: key).isEmpty || store.plan(dayKey: key) != nil || store.sleep(dayKey: key) != nil
+    }
+
+    /// その日の4:00から（今日は今まで、過ぎた日は翌4:00まで）の、ホームと同じ数字
+    private func daySnapshot(dayStart: Date, now: Date, events: [BlockEvent], calendar: Calendar) throws -> HomeSnapshot {
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
+        let until = min(now, dayEnd)
+        let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
+        let stored = try store.plan(dayKey: key)
+        let sleep = try sleepLines(dayStart: dayStart, calendar: calendar)
+        return HomeSnapshot.make(
+            now: until, calendar: calendar,
+            todaySessions: try store.sessions(dayKey: key) + carriedOver(into: dayStart, calendar: calendar),
+            plan: stored?.status == .skipped ? nil : (stored?.draft ?? PlanDraft()),
+            lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
+            reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
+            detox: try detoxDay(dayStart: dayStart, until: until, events: events, calendar: calendar),
+            lastWeekDetox: try detoxDay(dayStart: DayBoundary.sameDayLastWeek(dayStart, calendar: calendar),
+                                        until: .distantFuture, events: events, calendar: calendar),
+            sleep: sleep.map(\.interval), sleepCaps: sleep.compactMap(\.extendedPart), dayStart: dayStart)
+    }
+
     // MARK: タイムライン
 
     /// タイムラインの1日分。`daysAgo` は今日を0として何日前か（未来は見られない、TML-02）。

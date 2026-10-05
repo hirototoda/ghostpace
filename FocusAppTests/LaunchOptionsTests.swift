@@ -101,6 +101,20 @@ struct LaunchOptionsTests {
         #expect(options.demoScene == .day)
         #expect(!options.raceStartsReplay)
         #expect(LaunchOptions.parse(["-raceReplay", "-flipRace"]).raceStartsReplay)
+    }
+
+    /// 分析のタブを開いて始める（NAV-01・ANA-04・05 の撮影用）
+    @Test func parsesAnalysisOpeners() {
+        let none = LaunchOptions.parse([])
+        #expect(!none.openAnalysis && !none.openPoints && none.openDay == nil)
+        #expect(LaunchOptions.parse(["-openAnalysis"]).openAnalysis)
+        #expect(LaunchOptions.parse(["-openPoints"]).openPoints)
+        let day = LaunchOptions.parse(["-openDay", "1", "-seedDemoData", "day"])
+        #expect(day.openPoints)
+        #expect(day.openDay == 1)
+        #expect(day.demoScene == .day)
+        // 数でなければ読み飛ばさない
+        #expect(LaunchOptions.parse(["-openDay", "-seedDemoData", "day"]).openDay == nil)
         // 知らない名前は読み飛ばさない
         let unknown = LaunchOptions.parse(["-opponent", "-seedDemoData", "day"])
         #expect(unknown.opponent == nil)
