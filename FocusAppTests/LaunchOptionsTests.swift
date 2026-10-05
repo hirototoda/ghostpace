@@ -113,4 +113,13 @@ struct LaunchOptionsTests {
         #expect(options.demoScene == .day)
         #expect(LaunchOptions.parse(["-goalMinutes", "-seedDemoData"]).demoGoalMinutes == nil)
     }
+
+    /// 見本のヘルスケアに睡眠の記録がない（「ヘルスケアから読み直す」の撮影用、DTX-02）
+    @MainActor @Test func parsesNoHealthSleep() async {
+        #expect(!LaunchOptions.parse([]).noHealthSleep)
+        let options = LaunchOptions.parse(["-seedDemoData", "gamePlan", "-noHealthSleep"])
+        #expect(options.noHealthSleep)
+        let source = await AppLauncher.sleepSource(options, clock: FixedClock(date: jst("2026-10-19T07:30")))
+        #expect(await source.sleepIntervals(from: .distantPast, to: .distantFuture).isEmpty)
+    }
 }

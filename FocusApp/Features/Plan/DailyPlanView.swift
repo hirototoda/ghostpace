@@ -525,7 +525,8 @@ struct SleepRowModel {
     /// 寝た・起きた時刻を手で直す。直せたら true
     var onEdit: (Date, Date) -> Bool
     var onRequestHealth: () -> Void
-    /// ヘルスケアから読み直す。置き換えたら true（記録がなければ false）。ヘルスケアのない端末では nil（出さない）
+    /// ヘルスケアから読み直す。記録がなかったら false（画面を開いたまま、ひとこと出す）、それ以外は true（閉じる）。
+    /// ヘルスケアのない端末では nil（出さない）
     var onReread: (() async -> Bool)? = nil
 }
 
@@ -585,7 +586,7 @@ struct SleepEditSheet: View {
         .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
     }
 
-    /// ヘルスケアから読み直す（2026-10-03）。読めたら閉じ、記録がなければひとこと出す
+    /// ヘルスケアから読み直す（2026-10-03）。記録がなければひとこと出し、それ以外は閉じる（保存の失敗は手で直したときと同じく閉じてから知らせる）
     @ViewBuilder
     private func rereadButton(_ reread: @escaping () async -> Bool) -> some View {
         VStack(spacing: 4) {
@@ -593,9 +594,9 @@ struct SleepEditSheet: View {
                 isRereading = true
                 showsNoRecord = false
                 Task {
-                    let replaced = await reread()
+                    let closes = await reread()
                     isRereading = false
-                    if replaced { dismiss() } else { showsNoRecord = true }
+                    if closes { dismiss() } else { showsNoRecord = true }
                 }
             } label: {
                 HStack(spacing: 6) {

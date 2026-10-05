@@ -69,6 +69,8 @@ extension AppModel {
         case replaced
         /// ヘルスケアに記録がなかった（今のまま）
         case noRecord
+        /// 置き換えなかった：保存に失敗した（エラーを出す）、またはシートを開いたまま4:00を過ぎた（新しい日を出す）
+        case notReplaced
     }
 
     /// 「ヘルスケアから読み直す」（2026-10-03）。許可をまだ聞いていなければ聞いてから、その日の睡眠を読み直す。
@@ -82,13 +84,18 @@ extension AppModel {
         let dayKey = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
         let (from, to) = SleepPicker.searchRange(dayStart: dayStart, calendar: calendar)
         let intervals = await sleepSource.sleepIntervals(from: from, to: to)
+        // 画面に出ている睡眠の日（開いたまま4:00を過ぎたら、その日のものではないので置き換えない）
+        guard sleep?.dayKey == dayKey else {
+            reload(quietly: true)
+            return .notReplaced
+        }
         guard let picked = SleepPicker.pick(intervals, dayStart: dayStart, calendar: calendar) else { return .noRecord }
         let line = SleepLine(start: picked.start, end: picked.end, source: .health)
         do {
             try sleepStore.saveSleep(line, dayKey: dayKey, timeZone: calendar.timeZone)
         } catch {
             errorMessage = Self.saveErrorMessage
-            return .noRecord
+            return .notReplaced
         }
         // ホームの数字（ポイント・目標のゴースト）もすぐ数え直す。reload が今日の睡眠を読み直す
         reload(quietly: true)

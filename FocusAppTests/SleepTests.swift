@@ -500,4 +500,71 @@ extension SleepModelTests {
         #expect(await m.rereadSleepFromHealth() == .replaced)
         #expect(m.snapshot.goalDetox != before)
     }
+
+    /// 保存に失敗したら今のまま、エラーを出す（「記録がない」とは言わない）
+    @Test func rereadSaveFailureKeepsCurrentAndShowsError() async throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let source = NoSleepSource(isAvailable: true)
+        let m = model(t, source: source)
+        let before = m.sleepLine(dayStart: jst("2026-10-19T04:00"))
+        source.intervals = [lastNight]
+        t.store.saveHook = { throw TestFailure() }
+        #expect(await m.rereadSleepFromHealth() == .notReplaced)
+        #expect(m.errorMessage == AppModel.saveErrorMessage)
+        t.store.saveHook = nil
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00")) == before)
+        #expect(try t.store.sleep(dayKey: "2026-10-19")?.source == .setting)
+    }
+
+    /// 許可を断ると記録は読めない（断ったかどうかは iPhone の仕組みで分からない）ので、記録がないときと同じ。もう聞かない
+    @Test func rereadWhenPermissionDeniedKeepsCurrent() async throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        let source = NoSleepSource(isAvailable: true, needsRequest: true)
+        let m = model(t, source: source)
+        #expect(await m.rereadSleepFromHealth() == .noRecord)
+        #expect(!m.healthNeedsRequest)
+        #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00"))?.source == .setting)
+    }
+
+    /// ヘルスケアが空・ない端末でも記録なし
+    @Test func rereadWithEmptyOrUnavailableHealth() async throws {
+        let t = try TestStore(now: jst("2026-10-19T07:30"))
+        try t.seeded()
+        #expect(await model(t, source: NoSleepSource(isAvailable: true)).rereadSleepFromHealth() == .noRecord)
+        #expect(await model(t, source: NoSleepSource(isAvailable: false, intervals: [lastNight])).rereadSleepFromHealth() == .noRecord)
+        #expect(try t.store.sleep(dayKey: "2026-10-19")?.source == .setting)
+    }
+
+    /// 3:59 は前の日、4:00 はその日の睡眠を読み直す
+    @Test func rereadAtThreeFiftyNineAndFour() async throws {
+        let t = try TestStore(now: jst("2026-10-20T03:59"))
+        try t.seeded()
+        let tonight = DateInterval(start: jst("2026-10-19T23:30"), end: jst("2026-10-20T03:50"))
+        let source = NoSleepSource(isAvailable: true, intervals: [lastNight, tonight])
+        let m = model(t, source: source)
+        #expect(await m.rereadSleepFromHealth() == .replaced)
+        #expect(try t.store.sleep(dayKey: "2026-10-19")?.end == lastNight.end)
+        t.clock.set(jst("2026-10-20T04:00"))
+        m.reload()
+        #expect(await m.rereadSleepFromHealth() == .replaced)
+        #expect(try t.store.sleep(dayKey: "2026-10-20")?.end == tonight.end)
+        #expect(try t.store.sleep(dayKey: "2026-10-19")?.end == lastNight.end)
+    }
+
+    /// シートを開いたまま4:00を過ぎてから押したら、前の日も新しい日も置き換えず、新しい日の睡眠を出す
+    @Test func rereadAfterFourWithTheSheetOpenReplacesNothing() async throws {
+        let t = try TestStore(now: jst("2026-10-20T03:50"))
+        try t.seeded()
+        let source = NoSleepSource(isAvailable: true)
+        let m = model(t, source: source)
+        #expect(m.sleep?.dayKey == "2026-10-19")
+        t.clock.set(jst("2026-10-20T04:10"))
+        source.intervals = [lastNight, DateInterval(start: jst("2026-10-19T23:30"), end: jst("2026-10-20T03:50"))]
+        #expect(await m.rereadSleepFromHealth() == .notReplaced)
+        #expect(try t.store.sleep(dayKey: "2026-10-19")?.source == .setting)
+        #expect(try t.store.sleep(dayKey: "2026-10-20")?.source == .setting)
+        #expect(m.sleep?.dayKey == "2026-10-20")
+    }
 }

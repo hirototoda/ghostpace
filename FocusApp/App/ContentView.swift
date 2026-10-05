@@ -104,7 +104,7 @@ private struct MainView: View {
             SleepRowModel(line: line, needsHealth: model.healthNeedsRequest,
                           onEdit: { model.setSleepManually(start: $0, end: $1) },
                           onRequestHealth: { Task { await model.requestHealthAccess() } },
-                          onReread: model.canRereadHealth ? { await model.rereadSleepFromHealth() == .replaced } : nil)
+                          onReread: model.canRereadHealth ? { await model.rereadSleepFromHealth() != .noRecord } : nil)
         }
     }
 

@@ -326,4 +326,27 @@ final class ScreenTourUITests: XCTestCase {
         for _ in 0..<10 where !(picker.exists && picker.isHittable) { settings.swipeUp() }
         shoot("sleep-settings")
     }
+
+    /// 睡眠をヘルスケアから読み直す（DTX-02、2026-10-03）：直す画面のボタン、記録がないとき、読み直して閉じたあとの行
+    func testSleepReread() {
+        let empty = demo("gamePlan", "2026-10-19T07:30:00", ["-noHealthSleep"])
+        XCTAssertTrue(empty.buttons["sleepRow"].waitForExistence(timeout: timeout))
+        empty.buttons["sleepRow"].tap()
+        let emptyButton = empty.buttons["sleepRereadButton"]
+        XCTAssertTrue(emptyButton.waitForExistence(timeout: timeout))
+        sleep(1)
+        shoot("sleep-reread-sheet")
+        emptyButton.tap()
+        XCTAssertTrue(empty.staticTexts["sleepNoRecordText"].waitForExistence(timeout: timeout))
+        shoot("sleep-reread-norecord")
+
+        let app = demo("gamePlan", "2026-10-19T07:30:00")
+        XCTAssertTrue(app.buttons["sleepRow"].waitForExistence(timeout: timeout))
+        app.buttons["sleepRow"].tap()
+        XCTAssertTrue(app.buttons["sleepRereadButton"].waitForExistence(timeout: timeout))
+        app.buttons["sleepRereadButton"].tap()
+        XCTAssertTrue(app.buttons["sleepSaveButton"].waitForNonExistence(timeout: timeout))
+        sleep(1)
+        shoot("sleep-reread-done")
+    }
 }
