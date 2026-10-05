@@ -44,6 +44,13 @@ struct DailyPlanView: View {
     var templateEditor: ((PlanTemplate) -> AnyView)?
     /// その日の朝に終わった睡眠（DTX-02）。nil なら行を出さない
     var sleep: SleepRowModel?
+    /// その日に当てはめた習慣（PLN-08）。テンプレートを読み込んでも残す
+    var habitDraft = PlanDraft()
+    /// 足せる候補（PLN-09）。今の計画を渡して求める
+    var candidates: (PlanDraft) -> [PlanCandidate] = { _ in [] }
+    /// タブ：「習慣」の行（中身と、押したときに開く画面）。nil なら出さない
+    var habits: PlanHabits?
+    var habitsEditor: (() -> AnyView)?
     @State private var editsSleep = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -67,6 +74,8 @@ struct DailyPlanView: View {
     }
 
     var body: some View {
+        // 候補は描くたびに1回だけ求める（昨日・先週の計画を読むため）
+        let shown = self.candidates(plan)
         NavigationStack {
             List {
                 Section {
@@ -109,6 +118,19 @@ struct DailyPlanView: View {
                 } footer: {
                     if mode == .tab {
                         Text("直すとすぐ保存します。朝に確定した計画は、振り返りのためにそのまま残ります。")
+                    }
+                }
+                if !shown.isEmpty {
+                    candidateSection(shown)
+                }
+                if mode == .tab, let habits, let habitsEditor {
+                    Section {
+                        NavigationLink {
+                            habitsEditor()
+                        } label: {
+                            HabitsRow(habits: habits)
+                        }
+                        .accessibilityIdentifier("habitsRow")
                     }
                 }
                 if mode == .tab, let templateEditor {
@@ -256,7 +278,8 @@ struct DailyPlanView: View {
 
     private func load(_ template: PlanTemplate) {
         let previous = plan
-        var loaded = template.draft(dayStart: dayStart, calendar: calendar)
+        // 習慣のブロックは残す（PLN-08、2026-10-05 オーナー決定）
+        var loaded = plan.loading(template.draft(dayStart: dayStart, calendar: calendar), keeping: habitDraft)
         loaded.goalSeconds = nil
         plan = loaded
         // 確認は出さず、「元に戻す」を6秒出す（Q17、2026-10-01 決定）
@@ -268,8 +291,38 @@ struct DailyPlanView: View {
     /// 日中にテンプレートで進める：今から先だけを置き換える（2026-10-01 オーナー要望）
     private func applyFuture(_ template: PlanTemplate) {
         let previous = plan
-        plan = plan.replacingFuture(with: template.draft(dayStart: dayStart, calendar: calendar), now: now)
+        plan = plan.replacingFuture(with: template.draft(dayStart: dayStart, calendar: calendar), now: now, keeping: habitDraft)
         undo = TemplateUndo(message: "「\(template.name)」で進めます", previous: previous)
+    }
+
+    // MARK: 候補（PLN-09）
+
+    /// 一覧の下に、候補を1行ずつ（押すと足す。2026-10-05 オーナー決定：横に並べる案と比べた）
+    private func candidateSection(_ candidates: [PlanCandidate]) -> some View {
+        Section {
+            ForEach(candidates) { candidate in
+                Button {
+                    plan.upsert(candidate.blockToAdd)
+                } label: {
+                    HStack(spacing: 10) {
+                        PlanBlockRow(block: candidate.block, isPast: false, note: candidate.sourceLabel)
+                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(Theme.focus)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("同じ時刻で計画に足します")
+            }
+        } header: {
+            Text("候補から足す")
+        } footer: {
+            Text("昨日・先週の\(weekdayName)曜日・テンプレートから。押すと同じ時刻・長さで足します。")
+        }
+        .accessibilityIdentifier("candidateSection")
+    }
+
+    private var weekdayName: String {
+        ["日", "月", "火", "水", "木", "金", "土"][(calendar.component(.weekday, from: dayStart) - 1) % 7]
     }
 
     // MARK: ゲーム・SNS の時間（BLK-10）
@@ -415,6 +468,8 @@ struct DailyPlanView: View {
 struct PlanBlockRow: View {
     let block: PlanBlockDraft
     let isPast: Bool
+    /// 名前の下に添える出どころ（候補の「昨日」など、PLN-09）
+    var note: String?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -451,8 +506,9 @@ struct PlanBlockRow: View {
             } else {
                 Text(block.title).font(.headline)
             }
-            if block.project != nil {
-                Text(block.category.name).font(.caption).foregroundStyle(.secondary)
+            if block.project != nil || note != nil {
+                Text([block.project != nil ? block.category.name : nil, note].compactMap { $0 }.joined(separator: "・"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }

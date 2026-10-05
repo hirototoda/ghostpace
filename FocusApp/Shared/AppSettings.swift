@@ -28,6 +28,10 @@ protocol AppSettings: AnyObject {
     /// 睡眠の時刻（0:00 からの分。初期値 0:00〜7:00、DTX-02）。ヘルスケアに記録がない日に使う
     var sleepStartMinutes: Int { get set }
     var sleepEndMinutes: Int { get set }
+    /// 習慣（PLN-08）。テンプレートのブロックと同じ形の JSON。nil はまだ決めていない（すでに使っている端末は起動時に作る）
+    var habitsJSON: Data? { get set }
+    /// 習慣の最初の案内を出す途中か（初めて使う端末。決める前に閉じても、次の起動でまた出す）
+    var habitIntroPending: Bool { get set }
 }
 
 enum SettingsDefaults {
@@ -59,6 +63,8 @@ final class UserDefaultsSettings: AppSettings {
         static let lastBlockingAuthorizedAt = "lastBlockingAuthorizedAt"
         static let sleepStartMinutes = "sleepStartMinutes"
         static let sleepEndMinutes = "sleepEndMinutes"
+        static let habits = "habits"
+        static let habitIntroPending = "habitIntroPending"
     }
 
     var reviewMinutes: Int {
@@ -130,6 +136,16 @@ final class UserDefaultsSettings: AppSettings {
         set { defaults.set(newValue, forKey: Key.sleepEndMinutes) }
     }
 
+    var habitsJSON: Data? {
+        get { defaults.data(forKey: Key.habits) }
+        set { defaults.set(newValue, forKey: Key.habits) }
+    }
+
+    var habitIntroPending: Bool {
+        get { defaults.bool(forKey: Key.habitIntroPending) }
+        set { defaults.set(newValue, forKey: Key.habitIntroPending) }
+    }
+
     /// 0:00 からの分（1日の中に収める）
     private static func minutes(_ value: Any?) -> Int? {
         (value as? Int).map { (($0 % 1440) + 1440) % 1440 }
@@ -152,6 +168,8 @@ final class MemorySettings: AppSettings {
     var lastBlockingAuthorizedAt: Date?
     var sleepStartMinutes = SettingsDefaults.sleepStartMinutes
     var sleepEndMinutes = SettingsDefaults.sleepEndMinutes
+    var habitsJSON: Data?
+    var habitIntroPending = false
 
     init(didShowNotificationIntro: Bool = false) {
         self.didShowNotificationIntro = didShowNotificationIntro

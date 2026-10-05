@@ -120,10 +120,13 @@ struct PlanDraft: Hashable {
     /// 始まった・終わったブロックは残し、まだ始まっていないブロックを外して、テンプレートのうち今より後に始まり、
     /// 残したブロックと重ならないものを入れる。目標はそのまま。
     /// ゲーム・SNS の時間（BLK-10）もテンプレートのものに置き換える（1日3つまで）。
-    func replacingFuture(with template: PlanDraft, now: Date) -> PlanDraft {
+    /// これからの習慣どおりのブロック（PLN-08）も残す
+    func replacingFuture(with template: PlanDraft, now: Date, keeping habits: PlanDraft = PlanDraft()) -> PlanDraft {
         var result = self
-        result.blocks = blocks.filter { $0.start <= now }
-        for block in template.sortedBlocks where block.start > now && !result.blocks.contains(where: block.overlaps) {
+        let kept = habitBlocks(habits)
+        result.blocks = blocks.filter { block in block.start <= now || kept.contains { $0.id == block.id } }
+        for block in template.sortedBlocks where block.start > now
+            && !result.blocks.contains(where: { $0.matches(block) || block.overlaps($0) }) {
             if block.isUnblock, result.unblockCount >= Self.unblockLimit { continue }
             result.blocks.append(block)
         }

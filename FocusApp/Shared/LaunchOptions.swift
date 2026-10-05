@@ -16,6 +16,7 @@ import Foundation
 /// - `-openAddCategory`: 起動したら「カテゴリを追加」をデトックスで開く（グループの一覧の撮影用）
 /// - `-noHealthSleep`: 見本のヘルスケアに睡眠の記録がないことにする（「ヘルスケアから読み直す」で記録がないときの撮影用、DTX-02）
 /// - `-liveActivity`: 見本データでも本物のロック画面・画面上部に出す（シミュレーターでの確認用）
+/// - `-habitIntro`: 初めて使う端末の習慣の画面（PLN-08）を出して始める（撮影・UI テスト用）
 /// - `-openHold [unlocked]`: 起動したら長押しの画面を開く（`unlocked` なら15分開けたあと）。`-holdProgress 0.6`: 押している途中の見た目で始める
 struct LaunchOptions: Hashable {
     var fixedNow: Date?
@@ -59,6 +60,8 @@ struct LaunchOptions: Hashable {
     var openStartSheet = false
     /// 見本データでも本物のロック画面・画面上部に出す
     var liveActivity = false
+    /// 習慣の最初の案内を出して始める（撮影・UI テスト用）
+    var habitIntro = false
     /// `-storeName` のファイルを置く場所（テストで一時フォルダに差し替える）
     var storeDirectory: URL = .applicationSupportDirectory
 
@@ -146,6 +149,8 @@ struct LaunchOptions: Hashable {
                 options.noHealthSleep = true
             case "-liveActivity":
                 options.liveActivity = true
+            case "-habitIntro":
+                options.habitIntro = true
             case "-holdProgress":
                 if let value = next(), let progress = Double(value) {
                     options.holdProgress = min(max(progress, 0), 1)

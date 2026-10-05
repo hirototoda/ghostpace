@@ -55,6 +55,10 @@ final class AppModel {
     private(set) var projects: [ProjectOption] = []
     /// 計画のテンプレート（PLN-07）
     private(set) var templates: [PlanTemplate] = []
+    /// 習慣（PLN-08）。アーカイブしたカテゴリ・ブロック名のブロックは入れない
+    private(set) var habits = PlanHabits()
+    /// 初めて使う端末で、朝の計画の前に出す習慣の画面（PLN-08）
+    private(set) var showsHabitIntro = false
     var endTimeCheck: EndTimeCheck?
     /// 短い知らせ（ホームの上に2秒出す）
     var notice: String?
@@ -108,7 +112,8 @@ final class AppModel {
          settings: any AppSettings = MemorySettings(), notifications: any NotificationScheduling = NoNotifications(),
          blocking: any BlockingControlling = NoBlocking(), blockStore: any BlockStoring = MemoryBlockStore(),
          blockLog: any BlockEventLogging = MemoryBlockEventLog(),
-         liveActivity: any LiveActivityControlling = NoLiveActivity(), sleepSource: any SleepSource = NoSleepSource()) {
+         liveActivity: any LiveActivityControlling = NoLiveActivity(), sleepSource: any SleepSource = NoSleepSource(),
+         offersHabitIntro: Bool = false) {
         self.store = store
         self.sleepSource = sleepSource
         self.clock = clock
@@ -128,6 +133,8 @@ final class AppModel {
         let now = clock.now()
         snapshot = HomeSnapshot.make(now: now, calendar: .app(timeZone: timeZone()), todaySessions: [], plan: PlanDraft(),
                                      lastWeekSessions: [])
+        // カテゴリが1つもない＝初めて使う端末（習慣の最初の案内を出すか決める、PLN-08）
+        let isFreshInstall = (try? store.allCategories().isEmpty) ?? false
         perform { try store.seedDefaultsIfNeeded() }
         // 掃除・料理・瞑想を家事・休みのブロック名に1回だけ組み替える（CAT-01、settings.md「カテゴリの組み替え」）。
         // 失敗したら覚えず、次の起動でやり直す
@@ -138,6 +145,7 @@ final class AppModel {
         if !settings.didSeedTemplates, perform({ _ = try store.seedTemplatesIfNeeded() }) {
             settings.didSeedTemplates = true
         }
+        setUpHabits(isFreshInstall: isFreshInstall, offersIntro: offersHabitIntro)
         reload()
         // 終了していた状態から開いたときも、シールドの「開く」から2分以内なら長押しの画面を出す（BLK-08）
         checkUnlockRequest()
@@ -189,6 +197,7 @@ final class AppModel {
             categories = try store.categories()
             projects = try store.projects()
             templates = try store.templates()
+            habits = storedHabits()
 
             let stored = try store.plan(dayKey: dayKey)
             plan = stored?.status == .skipped ? nil : (stored?.draft ?? PlanDraft())
@@ -221,8 +230,9 @@ final class AppModel {
 
             // 実行中のタイマーがあればタイマーを優先し、終了後に出す。開いている朝の計画は置き換えない
             let needsPlan = stored == nil || stored?.status == .draft
-            if running == nil, needsPlan, morningPlan == nil {
-                let draft = try stored?.draft ?? carriedDraft(dayStart: dayStart, calendar: calendar)
+            // 初めて使う端末は、習慣を決めてから朝の計画を出す（PLN-08）
+            if running == nil, needsPlan, morningPlan == nil, !showsHabitIntro {
+                let draft = stored?.draft ?? newDraft(dayStart: dayStart)
                 morningPlan = MorningPlan(dayKey: dayKey, dayStart: dayStart, draft: draft)
             }
         }
@@ -290,13 +300,18 @@ final class AppModel {
             if let stored = try store.plan(dayKey: dayKey) {
                 if stored.status == .draft { draft = stored.draft }
             } else {
-                draft = try carriedDraft(dayStart: tomorrow, calendar: calendar)
+                draft = newDraft(dayStart: tomorrow)
             }
         }
         return MorningPlan(dayKey: dayKey, dayStart: tomorrow, draft: draft)
     }
 
-    /// 新しく作る下書き。前の日のゲーム・SNS の時間（日中に直したあとの形）を引き継ぐ（BLK-10、2026-10-02 オーナー決定）。
+    /// 新しく作る下書き。習慣のブロックが最初から入る（PLN-08、2026-10-05 に前の日からの引き継ぎから変更）
+    private func newDraft(dayStart: Date) -> PlanDraft {
+        habits.draft(dayStart: dayStart, calendar: calendar)
+    }
+
+    /// それまでの「前の日から引き継ぐ」ゲーム・SNS の時間（BLK-10、2026-10-02）。すでに使っている端末の最初の習慣に使う。
     /// 前の日に確定した計画がなければ、7日前までさかのぼって最後に確定した日から。その日に1つもなければ、なし
     private func carriedDraft(dayStart: Date, calendar: Calendar) throws -> PlanDraft {
         for offset in 1...7 {
@@ -770,9 +785,8 @@ final class AppModel {
         let now = clock.now()
         let calendar = self.calendar
         let dayStart = DayBoundary.dayStart(containing: now, calendar: calendar)
-        // 計画なし日に決めた目標は、作る計画に引き継ぐ（GHO-10）。ゲーム・SNS の時間は前の日から（BLK-10）
-        var draft = PlanDraft()
-        perform(reportsError: false) { draft = try carriedDraft(dayStart: dayStart, calendar: calendar) }
+        // 計画なし日に決めた目標は、作る計画に引き継ぐ（GHO-10）。習慣のブロックが最初から入る（PLN-08）
+        var draft = newDraft(dayStart: dayStart)
         draft.goalSeconds = noPlanGoalSeconds
         morningPlan = MorningPlan(dayKey: DayBoundary.dayKey(containing: now, calendar: calendar),
                                   dayStart: dayStart, draft: draft)
@@ -794,6 +808,79 @@ final class AppModel {
             projects = try store.projects()
         }
         return project
+    }
+
+    // MARK: 習慣と候補（PLN-08・09）
+
+    /// 習慣を保存する（端末の設定なので失敗しない）。次に作る下書きから効く（今日の計画は変えない）
+    func saveHabits(_ habits: PlanHabits) {
+        settings.habitsJSON = TemplateBlockValue.encode(habits.blocks.map(TemplateBlockValue.init))
+        self.habits = storedHabits()
+    }
+
+    /// 習慣の最初の案内を閉じる。nil は「あとで」（習慣なしで始め、計画のタブで決める）
+    func finishHabitIntro(_ habits: PlanHabits?) {
+        saveHabits(habits ?? PlanHabits())
+        settings.habitIntroPending = false
+        showsHabitIntro = false
+        reload()
+    }
+
+    /// その日に足せる候補。昨日・先週の同じ曜日の確定した計画と、テンプレートのブロック。
+    /// `excludingEnded`（計画のタブ）なら終わった時間のものを出さない。アーカイブしたカテゴリ・ブロック名のものは出さない
+    func candidates(for plan: PlanDraft, dayStart: Date, excludingEnded: Bool) -> [PlanCandidate] {
+        let calendar = self.calendar
+        var result: [PlanCandidate] = []
+        perform(reportsError: false) {
+            var sources: [PlanCandidates.SourcePlan] = []
+            for (source, offset) in [(PlanCandidate.Source.yesterday, -1), (.lastWeek, -7)] {
+                guard let start = calendar.date(byAdding: .day, value: offset, to: dayStart),
+                      let stored = try store.plan(dayKey: DayBoundary.dayKey(containing: start, calendar: calendar)),
+                      stored.status == .confirmed || stored.status == .unknown else { continue }
+                sources.append(.init(source: source, plan: stored.draft, dayStart: start))
+            }
+            result = PlanCandidates.make(plan: plan, dayStart: dayStart, calendar: calendar, sources: sources, templates: templates,
+                                         notEndedBy: excludingEnded ? clock.now() : nil)
+                .filter { isActive($0.block.category, $0.block.project) }
+        }
+        return result
+    }
+
+    /// 初めて使う端末なら最初の案内を出す。すでに使っている端末で習慣がまだなければ、引き継いでいた時刻で作る
+    private func setUpHabits(isFreshInstall: Bool, offersIntro: Bool) {
+        if settings.habitsJSON == nil {
+            if isFreshInstall && offersIntro {
+                settings.habitIntroPending = true
+                settings.habitsJSON = TemplateBlockValue.encode([])
+            } else {
+                let calendar = self.calendar
+                let dayStart = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+                // 読めなければ覚えず、次の起動でやり直す
+                perform(reportsError: false) {
+                    let carried = try carriedDraft(dayStart: dayStart, calendar: calendar)
+                    settings.habitsJSON = TemplateBlockValue.encode(PlanHabits(plan: carried, calendar: calendar).blocks
+                        .map(TemplateBlockValue.init))
+                }
+            }
+        }
+        showsHabitIntro = offersIntro && settings.habitIntroPending
+    }
+
+    /// 保存した習慣。アーカイブしたカテゴリ・ブロック名のブロックは入れない
+    private func storedHabits() -> PlanHabits {
+        guard let data = settings.habitsJSON else { return PlanHabits() }
+        let categoryMap = Dictionary(categories.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let projectMap = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return PlanHabits(blocks: TemplateBlockValue.decode(data).compactMap { value in
+            guard let category = value.categoryId == CategoryOption.gameSNS.id ? .gameSNS : categoryMap[value.categoryId] else { return nil }
+            let project = value.projectId.flatMap { projectMap[$0] }
+            if value.projectId != nil, project == nil { return nil }
+            return PlanTemplate.Block(hour: value.hour, minute: value.minute, minutes: value.minutes, category: category, project: project)
+        })
+    }
+
+    private func isActive(_ category: CategoryOption, _ project: ProjectOption?) -> Bool {
+        categories.contains(category) && (project.map(projects.contains) ?? true)
     }
 
     /// 失敗したら「保存できませんでした」を出す。成功なら true。

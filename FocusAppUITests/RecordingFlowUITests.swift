@@ -598,6 +598,65 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["confirmPlanButton"].isEnabled)
     }
 
+    /// 習慣（PLN-08）：初めて使う端末で習慣の画面が先に出て、決めたゲーム・SNS の時間が朝の計画に最初から入る。
+    /// 開き直しても習慣の画面はもう出ない
+    func testHabitIntroFillsTheMorningPlan() {
+        let app = launch(store("habits", at: "07:00:00", reset: true) + ["-habitIntro"])
+        let add = app.buttons["addHabitButton"]
+        XCTAssertTrue(add.waitForExistence(timeout: timeout))
+        XCTAssertFalse(app.buttons["finishHabitsButton"].isEnabled)
+        add.tap()
+        let chip = app.buttons["unblockChip"]
+        XCTAssertTrue(chip.waitForExistence(timeout: timeout))
+        chip.tap()
+        app.buttons["blockSaveButton"].tap()
+        let finish = app.buttons["finishHabitsButton"]
+        XCTAssertTrue(finish.waitForExistence(timeout: timeout))
+        finish.tap()
+        XCTAssertTrue(app.buttons["confirmPlanButton"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.staticTexts["ゲーム・SNS"].exists)
+
+        app.terminate()
+        let again = launch(store("habits", at: "07:05:00", reset: false) + ["-habitIntro"])
+        XCTAssertTrue(again.buttons["confirmPlanButton"].waitForExistence(timeout: timeout))
+        XCTAssertFalse(again.buttons["addHabitButton"].exists)
+    }
+
+    /// 候補（PLN-09）を押すと計画に足され、候補から消える。計画のタブから習慣を直すとすぐ行に出る（PLN-08）
+    func testAddCandidateAndEditHabits() {
+        let app = launch(["-seedDemoData", "habits", "-fixedNow", "2026-10-19T07:00:00+09:00"])
+        let list = app.collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: timeout))
+        // 先週の月曜だけにある 12:30 の掃除
+        let cleaning = app.buttons.containing(label("先週の月曜")).firstMatch
+        for _ in 0..<6 where !(cleaning.exists && cleaning.isHittable) { list.swipeUp() }
+        XCTAssertTrue(cleaning.isHittable)
+        cleaning.tap()
+        XCTAssertFalse(app.buttons.containing(label("先週の月曜")).firstMatch.exists)
+        // 足したブロックは上の計画の一覧に入る（一覧は見えている行だけ読めるので、上へ戻して探す）
+        let added = app.buttons.containing(label("12:30–13:00")).firstMatch
+        for _ in 0..<6 where !added.exists { list.swipeDown() }
+        XCTAssertTrue(added.exists)
+
+        app.buttons["confirmPlanButton"].tap()
+        let later = app.buttons["あとで"]
+        if later.waitForExistence(timeout: 3) { later.tap() }
+        app.tabBars.buttons["計画"].tap()
+        let row = app.descendants(matching: .any)["habitsRow"].firstMatch
+        for _ in 0..<6 where !(row.exists && row.isHittable) { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertTrue(row.label.contains("ゲーム・SNS 2つ"))
+        row.tap()
+        let add = app.buttons["addHabitButton"]
+        XCTAssertTrue(add.waitForExistence(timeout: timeout))
+        add.tap()
+        app.buttons["unblockChip"].tap()
+        app.buttons["blockSaveButton"].tap()
+        XCTAssertTrue(app.staticTexts.containing(label("あと0つ")).firstMatch.waitForExistence(timeout: timeout))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(row.waitForExistence(timeout: timeout))
+        XCTAssertTrue(row.label.contains("ゲーム・SNS 3つ"))
+    }
+
     private func label(_ text: String) -> NSPredicate { NSPredicate(format: "label CONTAINS %@", text) }
 
     /// 前倒しで始める（TMR-10）：10:40、次は 11:00–13:00 のゼミ準備 → ［今から始める］で 13:00 までのカウントダウン
