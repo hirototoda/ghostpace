@@ -53,7 +53,7 @@ struct RaceChart: View {
         VStack(spacing: 8) {
             header
             AnimatedProgress(progress: motionProgress) { progress in
-                chart(motion: motion.map { MotionFrame(kind: $0.kind, now: $0.now, frame: $0.frame(progress)) })
+                chart(motion: motion, progress: progress)
             }
             legend
         }
@@ -169,8 +169,8 @@ struct RaceChart: View {
 
     // MARK: - グラフ
 
-    private func chart(motion: MotionFrame?) -> some View {
-        let intro = motion?.frame
+    private func chart(motion: Motion?, progress: Double) -> some View {
+        let intro = motion?.frame(progress)
         let pieces = pieces(intro: intro)
         let range = visibleRange(intro: intro)
         // 開いたときの動きは、縦の目盛りを止まったときと同じにしておく（線が伸びても目盛りは動かない）
@@ -220,6 +220,8 @@ struct RaceChart: View {
         .chartOverlay { proxy in
             Rectangle().fill(.clear).contentShape(Rectangle())
                 .gesture(pan(plotWidth: proxy.plotSize.width))
+                // 滑っている途中に押したら止めるだけ（裏返さない）
+                .gesture(glideTask == nil ? nil : TapGesture().onEnded { stopGlide() })
                 .allowsHitTesting(intro == nil && !showsWholeDay)
         }
         .chartXAxis {
@@ -301,16 +303,21 @@ struct RaceChart: View {
     private func pan(plotWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
-                // 縦の動きのほうが大きいときはずらさない（ホームの縦スクロールのため）
-                guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                // 触ったら滑りは止める
                 stopGlide()
+                // 縦の動きのほうが大きいときはずらさない（ホームの縦スクロールのため）
+                guard abs(value.translation.width) >= abs(value.translation.height) else {
+                    dragAnchor = nil
+                    return
+                }
                 let anchor = dragAnchor.flatMap { $0.location == value.startLocation ? $0 : nil }
                     ?? (location: value.startLocation, start: scrollStart ?? layout.homeWindow.lowerBound)
                 dragAnchor = anchor
                 scrollStart = layout.panned(from: anchor.start, by: value.translation.width, plotWidth: plotWidth)
             }
             .onEnded { value in
-                let wasPanning = dragAnchor != nil
+                // このずらしで横に動かしていたときだけ滑らせる（前のずらしの残りでは滑らせない）
+                let wasPanning = dragAnchor?.location == value.startLocation
                 dragAnchor = nil
                 guard wasPanning else { return }
                 glide(velocity: value.velocity.width, plotWidth: plotWidth)
@@ -432,7 +439,7 @@ struct RaceChart: View {
         motionProgress = 0
         replayTask = Task {
             // 0 にした進みが描かれてから動かし始める
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled else { return }
             let seconds = replay.layout.replaySeconds
             withAnimation(.linear(duration: seconds)) {
@@ -482,13 +489,6 @@ private struct Motion {
         case .replay: layout.replayFrame(progress)
         }
     }
-}
-
-/// 1コマぶんの動きの形
-private struct MotionFrame {
-    var kind: Motion.Kind
-    var now: Date
-    var frame: RaceChartLayout.Frame
 }
 
 /// 進み（0〜1）をアニメーションで1コマずつ渡す（線の先と見えている範囲をコマごとに作るため）
