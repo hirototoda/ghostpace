@@ -64,6 +64,8 @@ final class AppModel {
     /// 自己ベストと休み明けの判定の材料（記録の数が変わったときだけ数え直す）
     private var historyCache: (revision: Int, today: Date, byDay: [Date: Int])?
     private var timeMapCache: (revision: Int, today: Date, map: TimeMap)?
+    /// 過ぎた日のポイント（分析）。保存したとき・日が変わったときだけ数え直す（全期間の自己ベストで毎回全部の日を数えない）
+    private var pastPointsCache: (revision: Int, today: Date, events: Int, days: [Date: DayPoints])?
     var endTimeCheck: EndTimeCheck?
     /// 短い知らせ（ホームの上に2秒出す）
     var notice: String?
@@ -613,24 +615,59 @@ final class AppModel {
         return snapshot
     }
 
-    /// 直近 `days` 日（今日を含む、古い日が先）のポイントと、先週の同じ曜日のポイント
-    func pointsHistory(days: Int) -> [DayPoints] {
+    /// `days` 日（古い日が先）のポイントと、先週の同じ曜日のポイント。`page` は0が今日を右の端にした期間で、
+    /// 1つ増えるごとに `days` 日ずつ前へさかのぼる（ANA-04）
+    func pointsHistory(days: Int, page: Int = 0) -> [DayPoints] {
+        let calendar = self.calendar
+        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        let last = max(page, 0) * days
+        return pointsHistory(dayStarts: (last..<last + max(days, 0)).reversed().compactMap {
+            calendar.date(byAdding: .day, value: -$0, to: today)
+        })
+    }
+
+    /// ‹ でもう1期間前へ行けるか：今見ている期間より前に、一番古いタイマーの記録の日がある
+    func canGoBack(days: Int, page: Int) -> Bool {
+        let calendar = self.calendar
+        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        guard let oldest = oldestRecordDay(calendar: calendar),
+              let first = calendar.date(byAdding: .day, value: -(max(page, 0) * days + days - 1), to: today) else { return false }
+        return oldest < first
+    }
+
+    /// 一番古いタイマーの記録の日の 4:00
+    private func oldestRecordDay(calendar: Calendar) -> Date? {
+        (try? store.allSessions())?.first.map { DayBoundary.dayStart(containing: $0.startAt, calendar: calendar) }
+    }
+
+    /// 指定した日（その日の 4:00、古い日が先）のポイントと、先週の同じ曜日のポイント
+    private func pointsHistory(dayStarts: [Date]) -> [DayPoints] {
         let now = clock.now()
         let calendar = self.calendar
         let today = DayBoundary.dayStart(containing: now, calendar: calendar)
         // ブロックの記録は1回だけ読む
         let events = (try? blockLog.all()) ?? []
-        // 途中の1日が読めなくても全体は欠かさず、その日だけ記録なしにする
-        return (0..<max(days, 0)).reversed().compactMap { daysAgo -> DayPoints? in
-            guard let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { return nil }
-            let isToday = daysAgo == 0
-            guard let snapshot = try? daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar),
-                  let recorded = try? isToday || hasRecord(dayStart: dayStart, snapshot: snapshot, calendar: calendar), recorded else {
-                return DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday)
-            }
-            return DayPoints(dayStart: dayStart, points: snapshot.points,
-                             lastWeek: snapshot.opponentPoints(.lastWeek, at: snapshot.now), isToday: isToday)
+        // ブロックの記録はあとから届くことがある（ブロックの画面の拡張が書く）ので、件数が変わっても数え直す
+        if pastPointsCache?.revision != store.revision || pastPointsCache?.today != today || pastPointsCache?.events != events.count {
+            pastPointsCache = (store.revision, today, events.count, [:])
         }
+        // 途中の1日が読めなくても全体は欠かさず、その日だけ記録なしにする
+        return dayStarts.filter { $0 <= today }.map { dayStart -> DayPoints in
+            let isToday = dayStart == today
+            if !isToday, let cached = pastPointsCache?.days[dayStart] { return cached }
+            let day = dayPoints(dayStart: dayStart, isToday: isToday, now: now, events: events, calendar: calendar)
+            if !isToday { pastPointsCache?.days[dayStart] = day }
+            return day
+        }
+    }
+
+    private func dayPoints(dayStart: Date, isToday: Bool, now: Date, events: [BlockEvent], calendar: Calendar) -> DayPoints {
+        guard let snapshot = try? daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar),
+              let recorded = try? isToday || hasRecord(dayStart: dayStart, snapshot: snapshot, calendar: calendar), recorded else {
+            return DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday)
+        }
+        return DayPoints(dayStart: dayStart, points: snapshot.points,
+                         lastWeek: snapshot.opponentPoints(.lastWeek, at: snapshot.now), isToday: isToday)
     }
 
     /// その日に何か記録があるか：タイマーの記録・計画（下書き・確定・計画なし）・ブロックが効いていた時間のどれか。
@@ -811,17 +848,40 @@ final class AppModel {
         return byDay
     }
 
-    /// 自己ベストのポイント（ANA-06）：記録のある日のうち一番多い1日の合計と、その日の 4:00。今日は入れない。
-    /// 毎回数え直すので重い。分析の画面を開いたときだけ使う（使い始めから最大180日）
-    func bestPointsDay() -> (points: Double, dayStart: Date)? {
+    /// 自己ベスト（ANA-06）：全期間・今月・今週の、一番多い1日のポイントと集中した時間。今日は入れない。
+    /// 記録のある日がない期間は入らない。全期間は使い始めの日から全部。過ぎた日のポイントは覚えるので、重いのは最初に開いたときだけ
+    func periodBests() -> [BestPeriod: PeriodBest] {
         let calendar = self.calendar
         let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
-        guard let first = (try? store.allSessions())?.first.map({ DayBoundary.dayStart(containing: $0.startAt, calendar: calendar) }) else {
-            return nil
+        guard let first = oldestRecordDay(calendar: calendar), first < today else { return [:] }
+        let count = calendar.dateComponents([.day], from: first, to: today).day ?? 0
+        let history = pointsHistory(dayStarts: (1...max(count, 1)).reversed().compactMap {
+            calendar.date(byAdding: .day, value: -$0, to: today)
+        })
+        let byDay = (try? focusByDay(calendar: calendar, today: today)) ?? [:]
+        var result: [BestPeriod: PeriodBest] = [:]
+        for period in BestPeriod.allCases {
+            let start = BestPeriods.start(period, today: today, calendar: calendar) ?? .distantPast
+            // 同じ値なら新しい日（集中した時間のベストと同じ決まり）
+            guard let points = history.filter({ $0.dayStart >= start }).compactMap({ day in day.points.map { ($0, day.dayStart) } })
+                .max(by: { ($0.0, $0.1) < ($1.0, $1.1) }) else { continue }
+            result[period] = PeriodBest(points: points.0, pointsDay: points.1,
+                                        focus: DailyFocus.best(byDay.filter { $0.key >= start }, before: today))
         }
-        let days = min(180, max(1, (calendar.dateComponents([.day], from: first, to: today).day ?? 0) + 1))
-        return pointsHistory(days: days).filter { !$0.isToday }.compactMap { day in day.points.map { ($0, day.dayStart) } }
-            .max { $0.0 < $1.0 }
+        return result
+    }
+
+    func periodBest(_ period: BestPeriod) -> PeriodBest? { periodBests()[period] }
+
+    /// 今日と、ポイントのベストの日（`bestDay` の 4:00）の比べとラップ表（ANA-06）
+    func bestComparison(bestDay: Date) -> BestComparison? {
+        let calendar = self.calendar
+        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        guard bestDay < today, let mine = daySnapshot(of: today), let best = daySnapshot(of: bestDay) else { return nil }
+        let elapsed = mine.now.timeIntervalSince(mine.dayStart)
+        return BestComparison(today: mine.points, bestAtSameTime: best.myPoints(until: best.dayStart.addingTimeInterval(elapsed)),
+                              rows: BestLaps.make(today: mine.myPoints(until:), todayStart: mine.dayStart, now: mine.now,
+                                                  best: best.myPoints(until:), bestStart: best.dayStart))
     }
 
     /// 時間帯の地図（ANA-07）：直近4週の曜日×2時間の集中の平均

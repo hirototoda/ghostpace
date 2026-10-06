@@ -7,6 +7,7 @@ import Foundation
 /// - `-storeName <名前>`: 別名のファイルに保存する（UI テストで再起動をまたぐ確認に使う）。`-resetStore` で開く前に消す
 /// - `-failSave`: 保存を毎回失敗させる。`-failStoreOpen`: ストアを開けなかったことにする（画面の確認用）
 /// - `-openAnalysis`: 起動したら分析のタブを開く。`-openTimeline`: 分析のタブのタイムラインを開く。`-openPoints`: 分析のタブのポイントの推移を開く（`-openDay <何日前>` でその日のグラフまで）
+/// - `-openBest [all|month|week]`: 分析のタブの自己ベストを、その期間で開く（ANA-06 の撮影用）。`-pointsPage <n>`: ポイントの推移を n 期間前で開く（ANA-04 の撮影用）
 /// - `-openReview`: 起動したら夜の振り返りを開く。`-openSettings`: 設定を開く。`-openPlan`: 計画のタブを開く
 /// - `-openStartSheet`: 起動したら計画外で開始のシートを開く
 /// - `-flipRace`: ホームの円を裏（グラフ）で始める（GHO-13 の撮影用）
@@ -35,6 +36,10 @@ struct LaunchOptions: Hashable {
     var openPoints = false
     /// ポイントの推移から開くその日のグラフ（何日前）
     var openDay: Int?
+    /// 自己ベストを開く期間。nil なら開かない
+    var openBest: BestPeriod?
+    /// ポイントの推移を何期間前で開くか
+    var pointsPage = 0
     var openReview = false
     var openSettings = false
     var openPlan = false
@@ -114,6 +119,20 @@ struct LaunchOptions: Hashable {
                 if let value = next(), let days = Int(value) {
                     options.openPoints = true
                     options.openDay = days
+                    index += 1
+                }
+            case "-openBest":
+                let periods: [String: BestPeriod] = ["all": .all, "month": .month, "week": .week]
+                if let value = next(), let period = periods[value] {
+                    options.openBest = period
+                    index += 1
+                } else {
+                    options.openBest = .all
+                }
+            case "-pointsPage":
+                if let value = next(), let page = Int(value) {
+                    options.openPoints = true
+                    options.pointsPage = page
                     index += 1
                 }
             case "-openReview":

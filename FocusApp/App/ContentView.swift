@@ -29,6 +29,8 @@ struct ContentView: View {
         .environment(\.raceStartsFlipped, launcher.options.raceStartsFlipped)
         .environment(\.raceStartsWholeDay, launcher.options.raceStartsWholeDay)
         .environment(\.raceStartsReplay, launcher.options.raceStartsReplay)
+        .environment(\.bestStartsPeriod, launcher.options.openBest)
+        .environment(\.pointsStartsPage, launcher.options.pointsPage)
         .environment(\.opensStartSheet, launcher.options.openStartSheet)
         .overlay(alignment: .top) {
             if launcher.options.demoScene != nil || launcher.options.liveGallery {
@@ -65,9 +67,10 @@ private struct MainView: View {
 
     init(model: AppModel, options: LaunchOptions) {
         self.model = model
-        let opensAnalysis = options.openAnalysis || options.openTimeline || options.openPoints
+        let opensAnalysis = options.openAnalysis || options.openTimeline || options.openPoints || options.openBest != nil
         _tab = State(initialValue: opensAnalysis ? .analysis : options.openPlan ? .plan : .timer)
         _analysisPath = State(initialValue: options.openTimeline ? [.timeline]
+                              : options.openBest != nil ? [.best]
                               : options.openPoints ? [.points] + (options.openDay.map { days in
                                   let today = DayBoundary.dayStart(containing: model.clock.now(), calendar: model.calendar)
                                   return [.day(model.calendar.date(byAdding: .day, value: -days, to: today) ?? today)]

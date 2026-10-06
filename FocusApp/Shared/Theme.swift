@@ -16,6 +16,9 @@ enum Theme {
     static let ghost = Color.gray
     /// ゲーム・SNS の時間（BLK-10）。集中・デトックスと見分けがつく、明るい色
     static let play = Color.orange
+    /// 自己ベストのラップ表で今日が上回った数字（ANA-06、2026-10-06 オーナー決定）。
+    /// 陸上の速報で記録を赤く出すのと同じ「勝っている」の印。責める意味では使わない
+    static let record = Color.red
 
     static func diffColor(_ seconds: Int) -> Color {
         seconds >= 0 ? lead : behind
