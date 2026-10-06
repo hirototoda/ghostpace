@@ -138,8 +138,8 @@ private struct MainView: View {
             .accessibilityIdentifier("analysisTab")
         }
         .overlay(alignment: .top) { noticeBanner }
-        // ラップ・中間地点の帯は軽く振動させる（GHO-06）
-        .sensoryFeedback(.impact(weight: .light), trigger: model.raceNoticeCount)
+        // ラップ・中間地点の帯は軽く振動させる（GHO-06）。タイマー中は前のタイマーの画面が鳴らす
+        .sensoryFeedback(trigger: model.raceNoticeCount) { _, _ in model.running == nil ? .impact(weight: .light) : nil }
         // 計画・分析のタブは、それぞれの画面が自分で知らせを出す
         .saveErrorAlert($model.errorMessage, when: tab == .timer && isHomeTopmost)
         .fullScreenCover(item: Binding(get: { model.morningPlan }, set: { _ in })) { morning in
@@ -190,6 +190,9 @@ private struct MainView: View {
                     }
                     .saveErrorAlert($model.errorMessage, when: model.endTimeCheck == nil)
                     .holdUnlockCover(model: model, when: model.endTimeCheck == nil)
+                    // 計画どおりの点（GHO-16）はタイマーの画面にも出す
+                    .overlay(alignment: .top) { noticeBanner }
+                    .sensoryFeedback(.impact(weight: .light), trigger: model.raceNoticeCount)
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -271,7 +274,9 @@ private struct MainView: View {
                           habits: model.habits, habitsEditor: { AnyView(HabitsView(model: model)) },
                           awake: model.awakeRange(dayStart: model.snapshot.dayStart),
                           declarationProblem: { model.declarationProblem(for: $0, end: $1) },
-                          onDeclare: { model.declare($0, end: $1) })
+                          onDeclare: { model.declare($0, end: $1) },
+                          canStartLate: { model.canStartLate($0) },
+                          onStartLate: { model.startLate($0) })
                 .id(model.snapshot.dayStart)
         } else {
             NoPlanTab(model: model)

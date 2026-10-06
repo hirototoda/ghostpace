@@ -94,7 +94,8 @@ struct WidgetPublishTests {
         m.reload()
         m.startPlanned(block: try #require(m.snapshot.currentBlock))
         #expect(widgets.published.last?.runningStart == jst("2026-10-19T11:05"))
-        #expect(widgets.published.last?.runningEnd == jst("2026-10-19T13:00"))
+        // 5分遅れて始めたので終わりも5分後ろ（TMR-15）
+        #expect(widgets.published.last?.runningEnd == jst("2026-10-19T13:05"))
     }
 
     @Test func pausedTimerStopsCountingAndPlanChangesArePublished() throws {

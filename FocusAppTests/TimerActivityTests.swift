@@ -249,7 +249,7 @@ struct TimerActivityTests {
         #expect(t.clock.now() > jst("2026-10-20T04:00"))
     }
 
-    /// 計画ブロックから始めたものは、ブロックの終わりまで数え下げる
+    /// 計画ブロックから始めたものは、タイマーの終わりまで数え下げる（遅れて始めたので計画の長さぶん後ろ、TMR-15）
     @Test func plannedStartShowsBlockEnd() throws {
         let t = try TestStore(now: jst("2026-10-19T09:00"))
         try t.seeded()
@@ -259,7 +259,7 @@ struct TimerActivityTests {
         t.clock.set(jst("2026-10-19T09:20"))
         m.reload()
         m.startPlanned(block: try #require(m.snapshot.currentBlock))
-        #expect(live.shown?.state.caption == "10:10 まで")
-        #expect(live.shown?.state.reading == .countdown(to: jst("2026-10-19T10:10")))
+        #expect(live.shown?.state.caption == "10:30 まで")
+        #expect(live.shown?.state.reading == .countdown(to: jst("2026-10-19T10:30")))
     }
 }

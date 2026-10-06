@@ -25,6 +25,8 @@ struct BlockEditorSheet: View {
     var problem: ((PlanBlockDraft) -> String?)?
     /// 押し忘れの申告（TMR-13）。終わった朝の計画のブロックで記録がないときだけ渡す
     var declaration: DeclarationOption?
+    /// 終わったブロックを今から遅れて始める（TMR-15）。開始から1時間以内で記録がないときだけ渡す
+    var onStartNow: (() -> Void)?
 
     let onSave: (PlanBlockDraft) -> Void
     let onDelete: () -> Void
@@ -41,6 +43,16 @@ struct BlockEditorSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if let onStartNow {
+                        Button(action: onStartNow) {
+                            Label("今から始める（\(timeRange(now, now.addingTimeInterval(Double(original.minutes * 60)))))",
+                                  systemImage: "play.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .accessibilityIdentifier("startLateButton")
+                    }
                     if let declaration { DeclarationCard(block: original, option: declaration) }
                     whatSection
                     timeSection

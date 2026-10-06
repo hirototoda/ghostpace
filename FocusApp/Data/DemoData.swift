@@ -21,6 +21,8 @@ enum DemoScene: String, CaseIterable, Hashable {
     case offPlanAtBlock
     /// 朝の計画に習慣（7:00 瞑想・20:00 と 20:30 のゲーム・SNS）が入り、昨日・先週・テンプレートの候補が出る（PLN-08・09）
     case habits
+    /// day と同じ＋10:30–11:00 の読書（記録なし）。11:15 ごろなら「さっき」「今」「次」の3行が出る（TMR-15）
+    case missed
 
     var label: String {
         switch self {
@@ -33,6 +35,7 @@ enum DemoScene: String, CaseIterable, Hashable {
         case .gamePlan: "ゲーム・SNS の時間"
         case .offPlanAtBlock: "計画外のまま計画の時刻"
         case .habits: "習慣と候補"
+        case .missed: "さっきのブロック"
         }
     }
 }
@@ -220,6 +223,12 @@ enum DemoData {
         case .day, .firstweek:
             try store.confirm(todayPlan, dayKey: todayKey, timeZone: timeZone)
             insertToday(todayItems, until: now, plan: todayPlan)
+        case .missed:
+            var plan = todayPlan
+            plan.blocks.append(PlanBlockDraft(start: time(todayStart, Item(hour: 10, minute: 30, minutes: 30, category: 2)),
+                                              minutes: 30, category: categories[2]))
+            try store.confirm(plan, dayKey: todayKey, timeZone: timeZone)
+            insertToday(todayItems, until: now, plan: plan)
         case .running:
             try store.confirm(todayPlan, dayKey: todayKey, timeZone: timeZone)
             let start = now.addingTimeInterval(-23 * 60)

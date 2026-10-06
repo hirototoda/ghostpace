@@ -331,9 +331,12 @@ struct PointsRulesTests {
     }
 
     /// 計画どおりに過ごした自分（開けた記録を足せる）
+    /// タイマーは計画ブロックから始めたので、計画どおりの点（GHO-16）も3つ付く
     private func followedPlan(now: String, events: [BlockEvent]) -> HomeSnapshot {
-        let today = [session("2026-10-19T09:00", "2026-10-19T11:00"), session("2026-10-19T14:00", "2026-10-19T16:00"),
+        let plan = examplePlan
+        var today = [session("2026-10-19T09:00", "2026-10-19T11:00"), session("2026-10-19T14:00", "2026-10-19T16:00"),
                      session("2026-10-19T18:00", "2026-10-19T19:00", category: c[5])]
+        for index in today.indices { today[index].planBlockId = plan.blocks[index].id }
         let segments = today.flatMap { $0.activeSegments(now: jst(now)) }
         let mine = DetoxDay.make(.init(
             dayStart: dayStart, dayEnd: dayEnd, until: jst(now), events: [event(.started, "2026-10-01T09:00")] + events,
@@ -341,23 +344,25 @@ struct PointsRulesTests {
             detoxTimers: segments.filter { !$0.countsAsFocus }.map { DetoxTimer(interval: DateInterval(start: $0.start, end: $0.end),
                                                                                   group: $0.detoxGroup) },
             sleep: sleep, gameWindows: []))
-        return HomeSnapshot.make(now: jst(now), calendar: calendar, todaySessions: today, plan: examplePlan,
-                                 lastWeekSessions: [], detox: mine, sleep: sleep)
+        return HomeSnapshot.make(now: jst(now), calendar: calendar, todaySessions: today, plan: plan,
+                                 lastWeekSessions: [], detox: mine, sleep: sleep,
+                                 onPlan: OnPlanContext(morningBlockIds: Set(plan.blocks.map(\.id))))
     }
 
-    @Test func exampleDayIsNinetyFourAndHalf() {
+    @Test func exampleDayIsNinetySevenAndHalf() {
+        // 94.5 ＋ 計画どおりの点 3（GHO-16、2026-10-06）
         let s = followedPlan(now: "2026-10-20T03:59:59", events: [])
-        #expect(s.myPoints(until: dayEnd).isApprox(94.5, tolerance: 0.01))
+        #expect(s.myPoints(until: dayEnd).isApprox(97.5, tolerance: 0.01))
     }
 
     @Test func openingDuringFocusCostsMoreThanOutside() {
-        // 1日の例で、集中中の 10:00 に15分開けた → 94.5 − 1.5（集中の15分）− 1 ＝ 92.0。円の集中時間は減らない
+        // 1日の例で、集中中の 10:00 に15分開けた → 97.5 − 1.5（集中の15分）− 1 ＝ 95.0。円の集中時間は減らない
         let s = followedPlan(now: "2026-10-20T03:59:59", events: opened("2026-10-19T10:00", minutes: 15))
-        #expect(s.myPoints(until: dayEnd).isApprox(92.0, tolerance: 0.01))
+        #expect(s.myPoints(until: dayEnd).isApprox(95.0, tolerance: 0.01))
         #expect(s.focusSeconds == 4 * 3600)
-        // ブロック中の 12:00 に15分開けた → 94.5 − 0.75 − 1 ＝ 92.75（集中中のほうが損）
+        // ブロック中の 12:00 に15分開けた → 97.5 − 0.75 − 1 ＝ 95.75（集中中のほうが損）
         let outside = followedPlan(now: "2026-10-20T03:59:59", events: opened("2026-10-19T12:00", minutes: 15))
-        #expect(outside.myPoints(until: dayEnd).isApprox(92.75, tolerance: 0.01))
+        #expect(outside.myPoints(until: dayEnd).isApprox(95.75, tolerance: 0.01))
     }
 
     @Test func lastWeekOpenedDuringFocusEarnsNothingToo() throws {
@@ -375,9 +380,10 @@ struct PointsRulesTests {
     }
 
     @Test func goalGhostIsThreePointsBelowAPerfectDay() throws {
+        // 2回開ける分（−3）を引き、計画どおりの点3つは自分と同じにもらう：97.5 − 3 ＝ 94.5
         let s = followedPlan(now: "2026-10-19T12:00", events: [])
         let whole = try #require(s.opponentPoints(.goal, at: dayEnd))
-        #expect(whole.isApprox(91.5))
+        #expect(whole.isApprox(94.5))
     }
 
     @Test func goalGhostOpensAtThirdsOfTheWakingDay() throws {
@@ -430,14 +436,14 @@ struct PointsRulesTests {
     }
 
     @Test func goalPlannedDetoxBlocksUseTheCap() throws {
-        // 計画の掃除2時間 → ゴーストも1時間だけ0.75（4.5＋3.0）
+        // 計画の掃除2時間 → ゴーストも1時間だけ0.75（4.5＋3.0）。掃除の計画どおりの点 +1（14:36、GHO-16）
         let plan = PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T09:00"), minutes: 60, category: c[0]),
                                       PlanBlockDraft(start: jst("2026-10-19T13:00"), minutes: 120, category: c[3])])
         let s = HomeSnapshot.make(now: jst("2026-10-19T09:00"), calendar: calendar, todaySessions: [], plan: plan,
                                   lastWeekSessions: [], sleep: sleep)
         let at13 = try #require(s.opponentPoints(.goal, at: jst("2026-10-19T13:00")))
         let at15 = try #require(s.opponentPoints(.goal, at: jst("2026-10-19T15:00")))
-        #expect((at15 - at13).isApprox(7.5))
+        #expect((at15 - at13).isApprox(8.5))
     }
 
     // MARK: 目標を上げればゴーストの点も上がる（2026-10-03）

@@ -35,6 +35,8 @@ enum Opponent: String, Hashable, CaseIterable {
 struct RingHero: View {
     let snapshot: HomeSnapshot
     @Binding var opponent: Opponent
+    /// カードの高さの上限。下のボタンの帯が高い（「今」と「次」の2行など）ときに、差と予想ゴールの行が帯の裏に隠れないよう縮める
+    var maxCardHeight: CGFloat = .infinity
     @State private var showsPicker = false
     /// 開いたときのアニメーションの進み（0〜1、GHO-12）
     @State private var runFraction = 0.0
@@ -149,8 +151,8 @@ struct RingHero: View {
         }
         // 横幅いっぱいで、縦は横の1.25倍（グラフの差を大きく見せる。2026-10-03 オーナー決定、1.1倍と比べた）。
         // 文字の大きい設定では前の大きさ（正方形・最大320）に戻し、下の差の行がボタンの裏に隠れないようにする（Claude 補足）
-        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? 320 : 440)
         .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1 : 1 / 1.25, contentMode: .fit)
+        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? 320 : 440, maxHeight: maxCardHeight)
         .contentShape(Rectangle())
         .onTapGesture(perform: flip)
         .accessibilityAction(named: flipAngle < 90 ? "グラフに裏返す" : "円に戻す", flip)
