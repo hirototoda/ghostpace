@@ -420,6 +420,17 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '10月19日'")).firstMatch.exists)
         XCTAssertTrue(app.descendants(matching: .any)["日ごとのポイントのグラフ"].exists)
 
+        // ‹ で7日前の期間へ、› で戻る（ANA-04、1b-49）。今の期間では › は押せない
+        let range = app.staticTexts["pointsPageRange"]
+        let next = app.buttons["pointsNextPage"]
+        XCTAssertEqual(range.label, "10月13日〜10月19日")
+        XCTAssertFalse(next.isEnabled)
+        app.buttons["pointsPreviousPage"].tap()
+        XCTAssertTrue(app.staticTexts["10月6日〜10月12日"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(next.isEnabled)
+        next.tap()
+        XCTAssertTrue(app.staticTexts["10月13日〜10月19日"].waitForExistence(timeout: timeout))
+
         // 昨日を押すと、その日のグラフが1日全体で始まる（動かないので［3時間］がすぐ押せる）
         let yesterday = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '10月18日'")).firstMatch
         XCTAssertTrue(yesterday.waitForExistence(timeout: timeout))
@@ -756,6 +767,31 @@ final class RecordingFlowUITests: XCTestCase {
         // 鳴らしたまま少し待っても落ちていない
         Thread.sleep(forTimeInterval: 2)
         XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// 自己ベストの期間・今日と比べる・ラップ表（ANA-06、1b-50）。月曜は今週のベストの日がないので、今日の行と表を出さない
+    func testPersonalBestPeriodsAndLaps() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00"])
+        let tab = app.tabBars.buttons["分析"]
+        XCTAssertTrue(tab.waitForExistence(timeout: timeout))
+        tab.tap()
+        app.buttons["analysisBestRow"].tap()
+        let picker = app.segmentedControls["bestPeriodPicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: timeout))
+        XCTAssertTrue(picker.buttons["全期間"].isSelected)
+        let today = app.descendants(matching: .any)["bestTodayRow"].firstMatch
+        XCTAssertTrue(today.waitForExistence(timeout: timeout))
+        XCTAssertTrue(today.label.contains("ベストの日の同じ時刻"))
+        XCTAssertTrue(app.descendants(matching: .any)["bestLapTable"].firstMatch.exists)
+
+        picker.buttons["今週"].tap()
+        XCTAssertTrue(app.staticTexts["今週はまだ記録なし（今日が終わると入ります）"].waitForExistence(timeout: timeout))
+        XCTAssertFalse(today.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["bestLapTable"].firstMatch.exists)
+
+        // 今月は前の週の日がベストになり、表がまた出る
+        picker.buttons["今月"].tap()
+        XCTAssertTrue(today.waitForExistence(timeout: timeout))
     }
 
     /// 今のブロックの最中でもタイマーがなければ次を前倒しで始められる（TMR-15）。計画どおりの点の帯（2秒）は単体テストで確かめる
