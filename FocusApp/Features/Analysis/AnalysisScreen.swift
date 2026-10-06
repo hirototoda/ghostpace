@@ -63,7 +63,7 @@ struct AnalysisScreen: View {
                 case .timeline: TimelineScreen(model: model)
                 case .day(let dayStart): DayGraphView(model: model, dayStart: dayStart)
                 case .best: PersonalBestView(model: model)
-                case .timeMap: TimeMapView(map: model.timeMap())
+                case .timeMap: TimeMapView(map: map ?? model.timeMap())
                 }
             }
         }

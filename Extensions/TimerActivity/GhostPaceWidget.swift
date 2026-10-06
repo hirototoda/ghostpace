@@ -17,7 +17,7 @@ struct GhostPaceWidget: Widget {
 
 struct GhostPaceProvider: TimelineProvider {
     private var snapshot: WidgetSnapshot? {
-        WidgetSnapshot.load(from: UserDefaults(suiteName: "group.com.hirototoda.focusapp"))
+        WidgetSnapshot.load(from: UserDefaults(suiteName: WidgetSnapshot.appGroup))
     }
 
     func placeholder(in context: Context) -> GhostPaceEntry {

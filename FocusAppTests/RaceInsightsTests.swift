@@ -44,6 +44,19 @@ struct RaceInsightsTests {
         #expect(Laps.reachTime(0, mine: mine, now: jst("2026-10-19T12:00")) == nil)
     }
 
+    @Test func lapsAroundFourAm() {
+        // 3:59 は前の日の最後の区間（翌2:00–翌4:00）の途中、4:00 は新しい日の最初の区間
+        let late = Laps.make(mine: [seg("02:30", "03:30", day: "2026-10-20")], opponent: { _ in 0 }, dayStart: dayStart,
+                             now: jst("2026-10-20T03:59"))
+        #expect(late.count == 12)
+        #expect(late.last?.isCurrent == true)
+        #expect(late.last?.mine == 3600)
+        let next = Laps.make(mine: [], opponent: { _ in 0 }, dayStart: jst("2026-10-20T04:00"), now: jst("2026-10-20T04:00"))
+        #expect(next.isEmpty)
+        let justAfter = Laps.make(mine: [], opponent: { _ in 0 }, dayStart: jst("2026-10-20T04:00"), now: jst("2026-10-20T04:01"))
+        #expect(justAfter.count == 1)
+    }
+
     // MARK: 予想ゴール・追いつく
 
     private func block(_ from: String, _ to: String, focus: Bool = true) -> PlanBlockSummary {
@@ -101,6 +114,32 @@ struct RaceInsightsTests {
         #expect(best.status(todayFocus: 4 * 3600) == nil)
         #expect(best.status(todayFocus: 6 * 3600 + 1) == .beaten)
         #expect(DailyFocus.best([:], before: jst("2026-10-19T04:00")) == nil)
+    }
+
+    @Test func bestEdges() throws {
+        let best = try #require(DailyFocus.best([jst("2026-10-18T04:00"): 3 * 3600], before: dayStart))
+        // 同じなら更新ではない、60分ちょうどは近い
+        #expect(best.status(todayFocus: 3 * 3600) == nil)
+        #expect(best.status(todayFocus: 2 * 3600) == .near(minutes: 60))
+        #expect(best.status(todayFocus: 2 * 3600 - 1) == nil)
+        // 同じ長さの日が2つなら早い日
+        let tie = try #require(DailyFocus.best([jst("2026-10-17T04:00"): 3600, jst("2026-10-18T04:00"): 3600], before: dayStart))
+        #expect(tie.focusDay == jst("2026-10-17T04:00"))
+    }
+
+    @Test func focusSplitAtThreeFiftyNineAndFourAm() {
+        let byDay = DailyFocus.byDay([seg("03:59", "04:01", day: "2026-10-19")], calendar: tokyoCalendar)
+        #expect(byDay[jst("2026-10-18T04:00")] == 60)
+        #expect(byDay[jst("2026-10-19T04:00")] == 60)
+    }
+
+    @Test func timeMapKeepsExactlyFourWeeks() {
+        // 28日前（10-21 から見て 9-23）は入り、29日前は入らない
+        let map = TimeMap.make([seg("10:00", "11:00", day: "2026-09-23"), seg("10:00", "12:00", day: "2026-09-22")],
+                               today: jst("2026-10-21T04:00"), calendar: tokyoCalendar)
+        // 9-23 は水曜（2）、9-22 は火曜（1）
+        #expect(map.averages[2][3] == 3600)
+        #expect(map.averages[1].allSatisfy { $0 == 0 })
     }
 
     // MARK: 時間帯の地図
@@ -179,5 +218,35 @@ struct RaceInsightsModelTests {
         // 先週（10-12）の記録はないが、それより前にある → 休み明け
         #expect(m.snapshot.ghost == nil)
         #expect(m.snapshot.hasOlderHistory)
+    }
+
+    @Test func noLapNoticeWhileATimerRuns() throws {
+        let t = try TestStore(now: jst("2026-10-12T09:00"))
+        let c = try t.seeded()
+        try session(t, c, from: "2026-10-12T09:00", to: "2026-10-12T09:30")
+        try session(t, c, from: "2026-10-19T08:30", to: "2026-10-19T09:40")
+        t.clock.set(jst("2026-10-19T10:05"))
+        let settings = MemorySettings()
+        let m = model(t, settings: settings)
+        m.skipPlan()
+        m.notice = nil
+        m.startUnplanned(category: c[0], minutes: nil)
+        t.clock.set(jst("2026-10-19T12:05"))
+        m.reload()
+        // 10:00–12:00 が終わってもタイマー中は出さない
+        #expect(m.notice == nil || m.notice == "中間地点を通過")
+        #expect(!(settings.lastRaceNotice ?? "").contains("\(Int(jst("2026-10-19T10:00").timeIntervalSinceReferenceDate))"))
+    }
+
+    @Test func emptySectionsAreNeverAnnounced() throws {
+        let t = try TestStore(now: jst("2026-10-12T09:00"))
+        let c = try t.seeded()
+        try session(t, c, from: "2026-10-12T09:00", to: "2026-10-12T09:30")
+        t.clock.set(jst("2026-10-19T08:05"))
+        let m = model(t)
+        m.skipPlan()
+        // 6:00–8:00 は自分も先週も0分なので出さない
+        #expect(m.notice == nil)
+        #expect(m.raceNoticeCount == 0)
     }
 }

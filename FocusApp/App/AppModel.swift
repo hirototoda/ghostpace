@@ -62,7 +62,8 @@ final class AppModel {
     /// ラップ・中間地点の帯を出した回数（ホームで軽く振動させる合図、GHO-06）
     private(set) var raceNoticeCount = 0
     /// 自己ベストと休み明けの判定の材料（記録の数が変わったときだけ数え直す）
-    private var historyCache: (count: Int, today: Date, byDay: [Date: Int])?
+    private var historyCache: (revision: Int, today: Date, byDay: [Date: Int])?
+    private var timeMapCache: (revision: Int, today: Date, map: TimeMap)?
     var endTimeCheck: EndTimeCheck?
     /// 短い知らせ（ホームの上に2秒出す）
     var notice: String?
@@ -775,14 +776,13 @@ final class AppModel {
         snapshot.hasOlderHistory = byDay.keys.contains { $0 < lastWeekStart }
     }
 
-    /// 日ごとの集中（記録の数が変わったときだけ数え直す）
+    /// 日ごとの集中。保存したとき・日が変わったときだけ読み直す（毎分の読み直しで全件を読まない）。
+    /// タイマーが動いている間は今の分が毎分変わるので、覚えない
     private func focusByDay(calendar: Calendar, today: Date) throws -> [Date: Int] {
+        if let cache = historyCache, cache.revision == store.revision, cache.today == today { return cache.byDay }
         let sessions = try store.allSessions()
-        if let cache = historyCache, cache.count == sessions.count, cache.today == today, sessions.allSatisfy({ !$0.isRunning }) {
-            return cache.byDay
-        }
         let byDay = DailyFocus.byDay(sessions.flatMap { $0.activeSegments(now: clock.now()) }, calendar: calendar)
-        historyCache = (sessions.count, today, byDay)
+        if sessions.allSatisfy({ !$0.isRunning }) { historyCache = (store.revision, today, byDay) }
         return byDay
     }
 
@@ -803,8 +803,12 @@ final class AppModel {
     func timeMap() -> TimeMap {
         let calendar = self.calendar
         let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        // 今日は入れないので、保存したとき・日が変わったときだけ数え直す
+        if let cache = timeMapCache, cache.revision == store.revision, cache.today == today { return cache.map }
         let segments = ((try? store.allSessions()) ?? []).flatMap { $0.activeSegments(now: clock.now()) }
-        return TimeMap.make(segments, today: today, calendar: calendar)
+        let map = TimeMap.make(segments, today: today, calendar: calendar)
+        timeMapCache = (store.revision, today, map)
+        return map
     }
 
     /// 区間の区切り・中間地点を過ぎて開いたとき、帯と軽い振動で知らせる（1日に同じものは1回だけ、GHO-06）。
@@ -829,7 +833,6 @@ final class AppModel {
         let style = Date.FormatStyle.dateTime.hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits)
         return "\(lap.interval.start.formatted(style))–\(lap.interval.end.formatted(style))"
     }
-
 
     // MARK: 押し忘れの申告（TMR-13）
 

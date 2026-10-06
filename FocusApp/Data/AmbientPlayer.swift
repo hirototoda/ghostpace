@@ -30,12 +30,15 @@ final class EngineAmbientPlayer: AmbientPlaying {
     private var current: AmbientSound?
     private var fadeTask: Task<Void, Never>?
     private var target = 0.0
+    /// 止めている途中（音量を変えても止めるのをやめない）
+    private var stopping = false
 
     static let fadeSeconds = 1.0
 
     func play(_ sound: AmbientSound, volume: Double) {
         guard sound != .none else { return stop() }
         target = volume
+        stopping = false
         if current == sound, engine.isRunning { return fade(to: volume) }
         tearDown()
         let session = AVAudioSession.sharedInstance()
@@ -67,11 +70,14 @@ final class EngineAmbientPlayer: AmbientPlaying {
 
     func setVolume(_ volume: Double) {
         target = volume
-        if engine.isRunning { fade(to: volume) }
+        if engine.isRunning, !stopping { fade(to: volume) }
     }
 
+    /// 鳴っていなければ何もしない（毎分の読み直しで、ほかのアプリの音に関わらないように）
     func stop() {
+        guard current != nil || engine.isRunning else { return }
         guard engine.isRunning else { return tearDown() }
+        stopping = true
         fadeTask?.cancel()
         fadeTask = Task { [weak self] in
             await self?.ramp(to: 0)
@@ -97,6 +103,7 @@ final class EngineAmbientPlayer: AmbientPlaying {
     }
 
     private func tearDown() {
+        stopping = false
         engine.stop()
         if let source { engine.detach(source) }
         source = nil

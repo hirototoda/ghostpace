@@ -11,6 +11,8 @@ struct WidgetSnapshot: Codable, Equatable {
     }
 
     static let key = "widgetSnapshot"
+    /// 本体とウィジェットで共有する場所（BlockShared.appGroup と同じ）
+    static let appGroup = "group.com.hirototoda.focusapp"
     /// 先週の集中の進み方の刻み（秒）
     static let curveStep: TimeInterval = 10 * 60
 

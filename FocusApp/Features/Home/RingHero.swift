@@ -263,7 +263,8 @@ struct RingHero: View {
             GhostDiffLine(seconds: diff, prefix: current.diffPrefix)
         } else {
             // 休み明け（先週はなく、それより前に記録がある）は使い始めとは別の言葉（GHO-15）
-            Text(snapshot.hasOlderHistory ? "おかえりなさい。先週はお休みでした。目標と対戦できます" : "来週から先週の自分と対戦できます")
+            Text(snapshot.hasOlderHistory ? "おかえりなさい。先週はお休みでした。" + (snapshot.goal == nil ? "今日の目標を決めると対戦できます" : "目標と対戦できます")
+                                          : "来週から先週の自分と対戦できます")
                 .font(.subheadline).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }

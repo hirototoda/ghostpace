@@ -96,4 +96,29 @@ struct WidgetPublishTests {
         #expect(widgets.published.last?.runningStart == jst("2026-10-19T11:05"))
         #expect(widgets.published.last?.runningEnd == jst("2026-10-19T13:00"))
     }
+
+    @Test func pausedTimerStopsCountingAndPlanChangesArePublished() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let widgets = MemoryWidgetPublisher()
+        let settings = MemorySettings()
+        settings.didShowBlockingIntro = true
+        let m = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings, widgets: widgets)
+        m.confirmPlan(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T09:00"), minutes: 60, category: c[0])]))
+        t.clock.set(jst("2026-10-19T09:05"))
+        m.reload()
+        m.startPlanned(block: try #require(m.snapshot.currentBlock))
+        m.pause()
+        // 一時停止中は数え始めを渡さない（差が進まない）
+        let paused = try #require(widgets.published.last)
+        #expect(paused.runningStart == nil)
+        #expect(paused.entry(at: jst("2026-10-19T09:30")).focusSeconds == paused.focusSeconds)
+        // 計画を変えると渡し直す
+        var plan = try #require(m.plan)
+        plan.upsert(PlanBlockDraft(start: jst("2026-10-19T14:00"), minutes: 60, category: c[2]))
+        m.savePlanChanges(plan)
+        #expect(widgets.published.last?.blocks.count == 2)
+        // 先週の記録がなければ差は出さない
+        #expect(widgets.published.last?.entry(at: jst("2026-10-19T10:00")).diffSeconds == nil)
+    }
 }

@@ -74,4 +74,34 @@ struct AmbientModelTests {
         reopened.setAmbientSound(.none)
         #expect(next.playing == nil)
     }
+
+    @Test func reopeningFollowsTheTimerState() throws {
+        let t = try TestStore(now: jst("2026-10-19T09:00"))
+        let c = try t.seeded()
+        let settings = MemorySettings()
+        settings.didShowBlockingIntro = true
+        settings.ambientSound = AmbientSound.brown.rawValue
+        let first = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings, ambient: SilentAmbientPlayer())
+        first.skipPlan()
+        first.startUnplanned(category: c[0], minutes: nil)
+        // 開き直すと、動いているタイマーなら流す
+        let running = SilentAmbientPlayer()
+        _ = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings, ambient: running)
+        #expect(running.playing == .brown)
+        // 一時停止中に開き直すと流さない
+        first.pause()
+        let paused = SilentAmbientPlayer()
+        _ = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings, ambient: paused)
+        #expect(paused.playing == nil)
+    }
+
+    @Test func volumeIsKeptBetweenZeroAndOne() throws {
+        let t = try TestStore(now: jst("2026-10-19T09:00"))
+        try t.seeded()
+        let m = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: MemorySettings())
+        m.setAmbientVolume(2)
+        #expect(m.ambientVolume == 1)
+        m.setAmbientVolume(-1)
+        #expect(m.ambientVolume == 0)
+    }
 }

@@ -19,7 +19,7 @@ final class AppGroupWidgetPublisher: WidgetPublishing {
     private let defaults: UserDefaults?
     private var lastKey: WidgetSnapshot?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: BlockShared.appGroup)) {
+    init(defaults: UserDefaults? = UserDefaults(suiteName: WidgetSnapshot.appGroup)) {
         self.defaults = defaults
     }
 
