@@ -8,7 +8,7 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 オーナーはコードを読まず、docs と画面（スクショ・実機）だけで判断する。週5〜10時間の個人開発なので、確認の回数は変更の大きさに合わせて絞る。
 
 ## 0. 始める前に
-- `CLAUDE.md`、`docs/README.md`、関係する `docs/product/features/*.md`・`requirements.md`・`design/data-model.md` を読む
+- `docs/README.md`、関係する `docs/product/features/*.md`・`requirements.md`・`design/data-model.md` を読む（CLAUDE.md は読み込み済みなので読み直さない）
 - 作業は公開リポジトリ ghostpace（`~/Desktop/ghostpace`）で行う。報告と判断の表は非公開の focus-app に書く（ADR-0021）。`~/Desktop/focus-app-private` はオーナーが読む場所なので main のまま置き、書くときは自分用の作業場所を作る：`git -C ~/Desktop/focus-app-private worktree add ../focus-app-private-<名前> origin/main`
 - `git status` と `git worktree list` を見る。自分のものでない未コミットの変更があれば、別のセッションが作業中。触らずに `git worktree add -b <branch> ../ghostpace-<名前> origin/main` で別の作業場所を作る
 - 大きさを決める
@@ -41,12 +41,17 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 - `/review-3` を docs の変更に1回。critical・major は docs に反映する。判断が割れるものだけオーナーに聞く
 - review-3 の3体には「`.claude/rules/review-checklist.md` をグローバルのチェックリストより優先せよ」と必ず伝える（グローバルの項目は Web アプリ向け）
 
-### 区切る（中以上）
-段階1〜3で決めたことは docs にあるので、実装の前に会話を軽くする。長い会話のまま実装に入ると、以降のやりとりが毎回重くなる。
-- `.claude/state/session-notes.md` を書く：要望、大きさ、選ばれた画面案、直した docs のファイル、review-3 で直したこと・見送ったことと理由、作業ブランチ・worktree、「次は段階4から」
-- オーナーに「ここで一度区切ります。`/compact` と打ち、終わったら『続けて』と送ってください」と伝えて止まる（Claude は自分で compact できない）。`/clear` や新しいセッションにはしない（session-notes が自動で戻るのは compact のときだけ）
-- 再開したら、session-notes と変更した docs を読み直してから段階4へ進む
-- 段階5で手間取って会話が長くなったときも、段階6の前に同じように区切ってよい
+### 実装は別のエージェントに任せる（中以上）
+段階1〜3で決めたことは docs にあるので、段階4・5は Agent ツールで新しいエージェント（`general-purpose`）に任せ、この会話には結果の要約だけを戻す。長い会話のまま実装に入ると、以降のやりとりが毎回重くなる。オーナーに `/compact` を頼んで止まらない。
+- 先に `.claude/state/session-notes.md` を書く：要望、大きさ、選ばれた画面案、直した docs のファイル、review-3 で直したこと・見送ったことと理由、作業ブランチ・worktree、「段階4・5はエージェントに任せた」
+- エージェントへの指示に入れること（エージェントはこの会話を見られない）
+  - 作業場所の絶対パスとブランチ。まず session-notes と、直した docs のファイルを読む
+  - この SKILL.md の段階4・5と `.claude/skills/verify-ios/SKILL.md` を Read して従う（手順9の報告は書かない。報告は段階7でこちらが書く）
+  - オーナーには聞けない。仕様で迷ったら実装で決めず、そこで止めて質問として返す
+  - サブエージェントは使えないので review-3 はしない。PR は作るが、自動マージの予約はしない
+  - 返す内容（20行程度）：PR 番号、変えたファイル、足したテストと手元で通したもの、撮った画像のパス、直した崩れ、オーナーに聞きたいこと
+- エージェントの結果を受けたら、質問があれば AskUserQuestion で聞き、答えを渡して `SendMessage` で同じエージェントに続けさせる。終わったら session-notes を更新して段階6へ進む
+- 小さな変更はエージェントに任せず、この会話でそのまま進める
 
 ## 4. テストを先に書いて実装する
 - Swift Testing でテストを先に書き、失敗を確かめてから実装する。テストを弱めて通すのは禁止
