@@ -59,6 +59,23 @@ final class ScreenTourUITests: XCTestCase {
         shoot("habit-intro")
     }
 
+    /// 押し忘れの申告（TMR-13）：計画のタブの申告の画面と、遅れて始めるときの聞き方
+    func testDeclaration() {
+        var app = demo("day", "2026-10-19T15:20:00", ["-openPlan"])
+        let zemi = app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", "ゼミ準備 ")).firstMatch
+        XCTAssertTrue(zemi.waitForExistence(timeout: timeout))
+        zemi.tap()
+        XCTAssertTrue(app.buttons["declareButton"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("declare-sheet")
+        app.terminate()
+        app = demo("day", "2026-10-19T11:20:00")
+        app.buttons["startButton"].tap()
+        XCTAssertTrue(app.buttons["今から始める"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("late-start-dialog")
+    }
+
     /// 時間の格子（PLN-10）：計画のタブ（今の線、終わったブロックは薄い）と、長押しで動かしている途中
     func testPlanGrid() {
         let app = demo("day", "2026-10-19T11:20:00", ["-openPlan"])
@@ -209,6 +226,9 @@ final class ScreenTourUITests: XCTestCase {
     func testShortSession() {
         let app = demo("day", "2026-10-19T11:20:00")
         app.buttons["startButton"].tap()
+        // 今のブロックを遅れて始めるので「いつから」を聞かれる（TMR-13）
+        let now = app.buttons["今から始める"]
+        if now.waitForExistence(timeout: 3) { now.tap() }
         app.buttons["endButton"].tap()
         XCTAssertTrue(app.staticTexts["notice"].waitForExistence(timeout: timeout))
         shoot("short-notice")

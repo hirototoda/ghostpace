@@ -53,6 +53,9 @@ struct DailyPlanView: View {
     var habitsEditor: (() -> AnyView)?
     /// 起きている時間（格子で寝ている時間を灰色にする、PLN-10）。nil なら1日全部
     var awake: ClosedRange<Date>?
+    /// 押し忘れの申告（TMR-13、計画のタブだけ）：申告できない理由と、申告する操作
+    var declarationProblem: ((PlanBlockDraft, Date) -> Declaration.Problem?)?
+    var onDeclare: ((PlanBlockDraft, Date) -> Bool)?
     @State private var gridProblem: String?
     @State private var editsSleep = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -169,7 +172,8 @@ struct DailyPlanView: View {
                                  onEndNow: {
                                      plan.endUnblock(id: target.block.id, now: now)
                                      editing = nil
-                                 }) { saved in
+                                 },
+                                 declaration: target.isNew ? nil : declarationOption(for: target.block)) { saved in
                     plan.upsert(saved)
                     editing = nil
                 } onDelete: {
@@ -226,6 +230,18 @@ struct DailyPlanView: View {
                 Divider()
                 saveAsTemplateButton.padding(.vertical, 10)
             }
+        }
+    }
+
+    /// 押し忘れの申告を出すか（終わった朝の計画のブロックで記録がないとき。重なりなどで申告できないときも理由を出す）
+    private func declarationOption(for block: PlanBlockDraft) -> DeclarationOption? {
+        guard mode == .tab, let declarationProblem, let onDeclare else { return nil }
+        let shown: Set<Declaration.Problem?> = [nil, .invalidEnd, .overlapsRecord, .opened]
+        guard shown.contains(declarationProblem(block, block.end)) else { return nil }
+        return DeclarationOption(problem: { declarationProblem(block, $0) }) { end in
+            guard onDeclare(block, end) else { return false }
+            editing = nil
+            return true
         }
     }
 

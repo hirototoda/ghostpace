@@ -398,7 +398,7 @@ final class SwiftDataStore: RecordStore {
                             project: record.projectId.flatMap { projects[$0] }, planBlockId: record.planBlockId,
                             startAt: record.startAt, endAt: record.endAt, plannedEndAt: record.plannedEndAt,
                             plannedDurationSec: record.plannedDurationSec, pauses: PauseInterval.decode(record.pausesJSON),
-                            originalEndAt: record.originalEndAt)
+                            originalEndAt: record.originalEndAt, isDeclared: record.isDeclared ?? false)
     }
 
     private func value(_ record: FocusSessionRecord) throws -> FocusSession {
@@ -427,6 +427,23 @@ final class SwiftDataStore: RecordStore {
                 categoryId: request.category.id, countsAsFocus: request.category.countsAsFocus,
                 projectId: request.project?.id, startAt: now,
                 plannedEndAt: request.plannedEndAt, plannedDurationSec: request.plannedDurationSec, at: now)
+            context.insert(record)
+            return try value(record)
+        }
+    }
+
+    /// 押し忘れの申告（TMR-13）。終わった記録として、申告の印を付けて足す。できるかどうかは呼ぶ側で確かめる
+    func declare(_ request: DeclareRequest) throws -> FocusSession {
+        try write {
+            guard request.end > request.start else { throw SessionError.invalidEnd }
+            let record = FocusSessionRecord(
+                dayKey: DayBoundary.dayKey(containing: request.start, calendar: .app(timeZone: request.timeZone)),
+                timeZoneId: request.timeZone.identifier, planBlockId: request.planBlockId,
+                categoryId: request.category.id, countsAsFocus: request.category.countsAsFocus,
+                projectId: request.project?.id, startAt: request.start,
+                plannedEndAt: request.plannedEndAt, plannedDurationSec: nil, at: clock.now())
+            record.endAt = request.end
+            record.isDeclared = true
             context.insert(record)
             return try value(record)
         }

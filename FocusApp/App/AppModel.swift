@@ -526,7 +526,8 @@ final class AppModel {
             dayStart: dayStart, dayEnd: dayEnd, until: until, events: events,
             focus: segments.filter(\.countsAsFocus).map { DateInterval(start: $0.start, end: max($0.start, $0.end)) },
             detoxTimers: segments.filter { !$0.countsAsFocus }.map {
-                DetoxTimer(interval: DateInterval(start: $0.start, end: max($0.start, $0.end)), group: $0.detoxGroup)
+                DetoxTimer(interval: DateInterval(start: $0.start, end: max($0.start, $0.end)), group: $0.detoxGroup,
+                           isDeclared: $0.isDeclared)
             },
             // その日の朝に終わった睡眠と、その夜の睡眠（翌朝決まるまでは設定の時刻で仮に数える）
             sleep: sleep.map(\.interval),
@@ -696,6 +697,64 @@ final class AppModel {
     func startUnplanned(category: CategoryOption, project: ProjectOption? = nil, minutes: Int?) {
         start(StartRequest(category: category, project: project, planBlockId: nil, plannedEndAt: nil,
                            plannedDurationSec: minutes.map { $0 * 60 }, timeZone: timeZone()))
+    }
+
+    // MARK: 押し忘れの申告（TMR-13）
+
+    /// 今日の計画のブロックを `end` まで申告できないときの理由。できるなら nil
+    func declarationProblem(for block: PlanBlockDraft, end: Date) -> Declaration.Problem? {
+        guard let context = declarationContext() else { return .notInMorningPlan }
+        return Declaration.problem(block: block, end: end, morningBlockIds: context.morning, sessions: context.sessions,
+                                   opened: context.opened, now: clock.now())
+    }
+
+    /// 終わったブロックを「やった」と申告する。できたら true
+    @discardableResult
+    func declare(_ block: PlanBlockDraft, end: Date) -> Bool {
+        guard declarationProblem(for: block, end: end) == nil else { return false }
+        let saved = perform {
+            _ = try store.declare(DeclareRequest(category: block.category, project: block.project, planBlockId: block.id,
+                                                 start: block.start, end: end, plannedEndAt: block.end, timeZone: timeZone()))
+        }
+        reload()
+        return saved
+    }
+
+    /// 今のブロックを始めるとき「開始から始めていた」にできる開始（ブロックの開始）。聞かないときは nil
+    func lateStart(for block: PlanBlockSummary) -> Date? {
+        guard running == nil, let draft = plan?.blocks.first(where: { $0.id == block.id }),
+              let context = declarationContext() else { return nil }
+        return Declaration.lateStart(block: draft, morningBlockIds: context.morning, sessions: context.sessions,
+                                     opened: context.opened, now: clock.now())
+    }
+
+    /// 計画ブロックを始める。`fromBlockStart` ならブロックの開始〜今を申告にしてから、今からタイマーを動かす。
+    /// 申告を保存できなかったときはタイマーも始めない（「保存できませんでした」を出す）。聞いている間に申告できなくなったら今から始める
+    func startPlanned(block: PlanBlockSummary, fromBlockStart: Bool) {
+        if fromBlockStart, let start = lateStart(for: block), let draft = plan?.blocks.first(where: { $0.id == block.id }) {
+            let now = clock.now()
+            let declared = perform {
+                _ = try store.declare(DeclareRequest(category: draft.category, project: draft.project, planBlockId: draft.id,
+                                                     start: start, end: now, plannedEndAt: draft.end, timeZone: timeZone()))
+            }
+            guard declared else { return }
+        }
+        startPlanned(block: block)
+    }
+
+    /// 申告の判定の材料：今日の朝の計画のブロック、今日の記録、開けていた時間
+    private func declarationContext() -> (morning: Set<UUID>, sessions: [FocusSession], opened: [DateInterval])? {
+        let now = clock.now()
+        let calendar = self.calendar
+        let dayStart = DayBoundary.dayStart(containing: now, calendar: calendar)
+        let dayKey = DayBoundary.dayKey(containing: now, calendar: calendar)
+        var result: (Set<UUID>, [FocusSession], [DateInterval])?
+        perform(reportsError: false) {
+            guard let snapshot = try store.snapshot(dayKey: dayKey) else { return }
+            let opened = (try? detoxDays(now: now, dayStart: dayStart, calendar: calendar).today.openedIntervals) ?? []
+            result = (Set(snapshot.map(\.blockId)), try store.sessions(dayKey: dayKey), opened)
+        }
+        return result
     }
 
     /// 計画外のタイマー中に始まった計画ブロックに切り替える（TMR-11）。計画外の記録を今で終え、そのブロックを始める。

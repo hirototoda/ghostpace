@@ -26,6 +26,8 @@ struct DetoxDay: Hashable {
         var kind: Kind
         /// タイマーのグループ（detoxTimer のとき。nil なら上乗せなし）
         var group: DetoxGroup? = nil
+        /// 押し忘れの申告（detoxTimer のとき、TMR-13）。上乗せは0.8倍（ブロック中より下げない）
+        var isDeclared = false
         /// 寝た時刻（asleep のとき）。寝てからの時間で点を変える
         var sleepStart: Date? = nil
         /// 手で直す前より長くした所（asleep のとき）。0.5pt と睡眠の点の低いほうで数える
@@ -97,7 +99,9 @@ struct DetoxDay: Hashable {
                 if let group = piece.group {
                     let boosted = min(seconds, max(0, group.dailyCap - used[group, default: 0]))
                     used[group, default: 0] += boosted
-                    earned = Self.timerPerSecond * boosted + Self.detoxPerSecond * (seconds - boosted)
+                    // 申告した分は0.8倍。ブロック中の0.5pt より下げない（TMR-13）
+                    let rate = piece.isDeclared ? max(Self.timerPerSecond * FocusPoints.declaredFactor, Self.detoxPerSecond) : Self.timerPerSecond
+                    earned = rate * boosted + Self.detoxPerSecond * (seconds - boosted)
                 } else {
                     earned = Self.detoxPerSecond * seconds
                 }
@@ -184,6 +188,7 @@ extension DetoxDay {
             } else if let timer = inputs.detoxTimers.first(where: { $0.interval.contains(mid) }) {
                 piece.kind = .detoxTimer
                 piece.group = timer.group
+                piece.isDeclared = timer.isDeclared
             } else if let sleep = inputs.sleep.first(where: { $0.contains(mid) }) {
                 piece.kind = .asleep
                 piece.sleepStart = sleep.start
@@ -206,6 +211,8 @@ extension DetoxDay.Kind {
 struct DetoxTimer: Hashable {
     var interval: DateInterval
     var group: DetoxGroup?
+    /// 押し忘れの申告（TMR-13）
+    var isDeclared = false
 }
 
 /// 目標のゴーストが空き時間に少しずつ集中する区間。`share` はその間の集中の割合（0〜1）。

@@ -100,12 +100,13 @@ private func color(_ countsAsFocus: Bool) -> Color { countsAsFocus ? Theme.focus
 
 private let hm = Date.FormatStyle.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)
 
-/// 記録の説明（時刻・集中した時間・中断回数・実行中・修正済み）
-private func sessionCaption(_ s: FocusSession, now: Date) -> String {
+/// 記録の説明（時刻・集中した時間・中断回数・実行中・申告・修正済み）
+func sessionCaption(_ s: FocusSession, now: Date) -> String {
     var parts = ["\(s.startAt.formatted(hm))–\(s.endAt.map { $0.formatted(hm) } ?? "")"]
     parts.append(DurationFormat.japanese(s.activeSeconds(at: now)))
     if s.pauseCount > 0 { parts.append("中断\(s.pauseCount)回") }
     if s.isRunning { parts.append("実行中") }
+    if s.isDeclared { parts.append("申告") }
     if s.originalEndAt != nil { parts.append("修正済み") }
     return parts.joined(separator: "・")
 }

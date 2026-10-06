@@ -669,12 +669,6 @@ final class RecordingFlowUITests: XCTestCase {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T11:20:00+09:00", "-openPlan"])
         let zemi = planBlock(app, "ゼミ準備"), thesis = planBlock(app, "卒論")
         XCTAssertTrue(thesis.waitForExistence(timeout: timeout))
-        // 格子の上でも、すぐのドラッグは画面を上下に送る
-        let before = thesis.frame.minY
-        app.swipeUp(velocity: .slow)
-        XCTAssertLessThan(thesis.frame.minY, before - 50)
-        app.swipeDown(velocity: .slow)
-        Thread.sleep(forTimeInterval: 1)  // 送り終わるのを待つ（動いている間に押すと止まるだけ）
         // 13:00〜14:00 の空きの上の方（13:10 ごろ）を押す → 13:00 に切り下げて1時間
         let origin = app.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: thesis.frame.midX, dy: zemi.frame.maxY + 10)).tap()
@@ -697,6 +691,40 @@ final class RecordingFlowUITests: XCTestCase {
         let from = exercise.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
         from.press(forDuration: 0.6, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 60)))
         XCTAssertTrue(planBlock(app, "運動").label.contains("17:00–18:00"))
+
+        // 格子の上でも、すぐのドラッグは画面を上下に送る（最後に確かめる。送ったあとの位置で押すと下のタブに隠れることがある）
+        let before = planBlock(app, "読書").frame.minY
+        app.swipeUp(velocity: .slow)
+        XCTAssertNotEqual(planBlock(app, "読書").frame.minY, before)
+    }
+
+    /// 押し忘れの申告（TMR-13）：計画のタブで記録のない終わったブロックを押すと「やった（申告）」で記録になり、二度は出ない
+    func testDeclareForgottenBlock() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00", "-openPlan"])
+        let zemi = planBlock(app, "ゼミ準備")
+        XCTAssertTrue(zemi.waitForExistence(timeout: timeout))
+        zemi.tap()
+        let declare = app.buttons["declareButton"]
+        XCTAssertTrue(declare.waitForExistence(timeout: timeout))
+        XCTAssertTrue(declare.isEnabled)
+        declare.tap()
+        XCTAssertFalse(declare.waitForExistence(timeout: 2))
+        zemi.tap()
+        XCTAssertTrue(app.buttons["blockSaveButton"].waitForExistence(timeout: timeout))
+        XCTAssertFalse(app.buttons["declareButton"].exists)
+    }
+
+    /// ブロックの最中に始めるとき（TMR-13、案A）：「11:00 から始めていた（申告）」を選ぶとタイマーが始まる
+    func testStartLateFromBlockStart() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T11:20:00+09:00"])
+        let start = app.buttons["startButton"]
+        XCTAssertTrue(start.waitForExistence(timeout: timeout))
+        start.tap()
+        let fromStart = app.buttons["11:00 から始めていた（申告）"]
+        XCTAssertTrue(fromStart.waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["今から始める"].exists)
+        fromStart.tap()
+        XCTAssertTrue(app.buttons["endButton"].waitForExistence(timeout: timeout))
     }
 
     /// 計画の時間の格子のブロック（PLN-10）。読み上げは「名前 時刻」

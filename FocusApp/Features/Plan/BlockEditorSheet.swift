@@ -23,6 +23,8 @@ struct BlockEditorSheet: View {
     var onEndNow: (() -> Void)?
     /// 保存できない理由（習慣の画面はほかのブロックの数も見る、PLN-08）。nil なら計画の決まり
     var problem: ((PlanBlockDraft) -> String?)?
+    /// 押し忘れの申告（TMR-13）。終わった朝の計画のブロックで記録がないときだけ渡す
+    var declaration: DeclarationOption?
 
     let onSave: (PlanBlockDraft) -> Void
     let onDelete: () -> Void
@@ -39,6 +41,7 @@ struct BlockEditorSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if let declaration { DeclarationCard(block: original, option: declaration) }
                     whatSection
                     timeSection
                     if isOngoingUnblock {
@@ -268,5 +271,61 @@ struct StepTimePicker: UIViewRepresentable {
         var date: Binding<Date>
         init(date: Binding<Date>) { self.date = date }
         @objc func changed(_ picker: UIDatePicker) { date.wrappedValue = picker.date }
+    }
+}
+
+/// 押し忘れの申告（TMR-13）を出すときの値。
+struct DeclarationOption {
+    /// `end` まで申告できないときの理由
+    var problem: (Date) -> Declaration.Problem?
+    /// 申告する。できたら true（画面を閉じる）
+    var onDeclare: (Date) -> Bool
+}
+
+/// 編集の画面の上に出す「やった（申告）」。終わりは早めることだけできる（5分きざみ）
+struct DeclarationCard: View {
+    let block: PlanBlockDraft
+    let option: DeclarationOption
+    @State private var end: Date
+
+    init(block: PlanBlockDraft, option: DeclarationOption) {
+        self.block = block
+        self.option = option
+        _end = State(initialValue: block.end)
+    }
+
+    var body: some View {
+        let problem = option.problem(end)
+        VStack(alignment: .leading, spacing: 10) {
+            Label("このブロックの記録がありません", systemImage: "questionmark.circle")
+                .font(.subheadline.bold())
+            Text(block.category.countsAsFocus
+                 ? "タイマーを押し忘れたけれどやったときは、申告できます。集中した時間に入り、点は0.8倍です。"
+                 : "タイマーを押し忘れたけれどやったときは、申告できます。点は10分0.6pt です（タイマーは0.75pt）。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("終わり").font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                StepTimePicker(date: $end, minuteInterval: PlanDraft.minuteStep)
+                    .accessibilityLabel("申告の終わり")
+                    .accessibilityIdentifier("declareEndPicker")
+            }
+            if let problem {
+                Label(problem.message, systemImage: "exclamationmark.circle")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Button {
+                _ = option.onDeclare(end)
+            } label: {
+                Label("やった（申告）", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(problem != nil)
+            .accessibilityIdentifier("declareButton")
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.focus.opacity(0.08)))
     }
 }
