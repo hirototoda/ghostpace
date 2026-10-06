@@ -61,6 +61,7 @@ struct RingHero: View {
         VStack(spacing: 20) {
             raceCard
             diffArea
+            if let current { RaceInsightLines(snapshot: snapshot, opponent: current) }
             if let opened = snapshot.opened { OpenedLabel(opened: opened) }
         }
         .sheet(isPresented: $showsPicker) { opponentPicker }
@@ -261,8 +262,47 @@ struct RingHero: View {
         if let current, let diff = snapshot.opponentDiffSeconds(current) {
             GhostDiffLine(seconds: diff, prefix: current.diffPrefix)
         } else {
-            Text("来週から先週の自分と対戦できます")
+            // 休み明け（先週はなく、それより前に記録がある）は使い始めとは別の言葉（GHO-15）
+            Text(snapshot.hasOlderHistory ? "おかえりなさい。先週はお休みでした。目標と対戦できます" : "来週から先週の自分と対戦できます")
                 .font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+}
+
+/// 差の下の短い行（GHO-15）：1行目は予想ゴール、2行目は「追いつく」か「自己ベスト」
+struct RaceInsightLines: View {
+    let snapshot: HomeSnapshot
+    let opponent: Opponent
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if let finish = finishText { Text(finish).accessibilityIdentifier("predictedFinish") }
+            if let second = secondText {
+                Text(second).fontWeight(.semibold).foregroundStyle(Theme.focus).accessibilityIdentifier("raceHint")
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+
+    /// 例：計画どおりなら今日 5時間・先週は 4時間20分
+    private var finishText: String? {
+        guard let finish = snapshot.predictedFinish, finish > 0 else { return nil }
+        let head = (snapshot.isNoPlanDay ? "このペースなら今日 " : "計画どおりなら今日 ") + DurationFormat.japanese(finish)
+        guard let whole = snapshot.opponentWholeDaySeconds(opponent) else { return head }
+        return head + (opponent == .goal ? "・目標は " : "・先週は ") + DurationFormat.japanese(whole)
+    }
+
+    /// 遅れているときは追いつくまで、そうでなければ自己ベストまで
+    private var secondText: String? {
+        if let minutes = snapshot.catchUpMinutes(opponent) { return "あと\(DurationFormat.japanese(minutes * 60))集中すると追いつく" }
+        switch snapshot.bestStatus {
+        case .near(let minutes): return "あと\(DurationFormat.japanese(minutes * 60))で自己ベスト"
+        case .beaten: return "自己ベスト更新"
+        case nil: return nil
         }
     }
 }

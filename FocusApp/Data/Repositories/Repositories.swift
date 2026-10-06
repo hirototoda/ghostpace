@@ -113,6 +113,8 @@ protocol SessionRepository {
     /// reportedEnd が nil なら今で終える
     func end(id: UUID, reportedEnd: Date?) throws -> EndResult
     func sessions(dayKey: String) throws -> [FocusSession]
+    /// すべての記録（古い順）。自己ベスト・時間帯の地図（ANA-06・07）に使う
+    func allSessions() throws -> [FocusSession]
     /// 終わった記録の終了時刻を早める（TMR-08）。直せる日かどうかは呼ぶ側で確かめる
     func shortenEnd(id: UUID, to newEnd: Date) throws
     /// 押し忘れの申告（TMR-13）。申告の印を付けた終わった記録を足す

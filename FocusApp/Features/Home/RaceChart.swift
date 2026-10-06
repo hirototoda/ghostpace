@@ -200,12 +200,47 @@ struct RaceChart: View {
                         .interpolationMethod(.linear)
                 }
             }
-            // 線の先に2人の点（今いる場所）
+            // 区間のカテゴリのアイコンと開けた鍵（自分の線の上、GHO-15）。動いている間は出さない
+            if intro == nil, let mine = pieces.first(where: { !$0.kind.isOpponent }) {
+                ForEach(markers(on: mine, in: range), id: \.id) { marker in
+                    PointMark(x: .value("時刻", marker.date), y: .value("量", marker.value))
+                        .symbol {
+                            Image(systemName: marker.symbol)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(marker.isUnlock ? Theme.ghost : Theme.focus)
+                                .padding(3)
+                                .background(Circle().fill(Color(.systemBackground).opacity(0.9)))
+                                .offset(y: -14)
+                        }
+                }
+            }
+            // ラップの旗：2時間の区切りと中間地点（GHO-06）
+            if intro == nil {
+                ForEach(flags(in: range), id: \.date) { flag in
+                    RuleMark(x: .value("区切り", flag.date))
+                        .foregroundStyle(Color.secondary.opacity(0.25))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                        .annotation(position: .top, alignment: .center, spacing: 2) {
+                            HStack(spacing: 2) {
+                                Image(systemName: "flag.fill").font(.system(size: 9))
+                                if let text = flag.text { Text(text).font(.caption2.monospacedDigit()) }
+                            }
+                            .foregroundStyle(flag.color)
+                            .dynamicTypeSize(...DynamicTypeSize.large)
+                        }
+                }
+            }
+            // 線の先に2人（今いる場所）。自分は走る人、相手はおばけ（表の円と同じ）
             ForEach(pieces.filter { !$0.isFuture }, id: \.name) { piece in
                 if let last = piece.values.last, range.contains(last.date) {
                     PointMark(x: .value("時刻", last.date), y: .value("量", last.value))
-                        .foregroundStyle(color(piece.kind))
-                        .symbolSize(piece.kind.isOpponent ? 40 : 60)
+                        .symbol {
+                            if piece.kind.isOpponent {
+                                GhostShape().fill(Theme.ghost).frame(width: 11, height: 13)
+                            } else {
+                                Image(systemName: "figure.run").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.focus)
+                            }
+                        }
                 }
             }
             // 過ぎた日は「今」がないので線を引かない
@@ -367,6 +402,51 @@ struct RaceChart: View {
         if hours > 12 { return 4 }
         if hours > 4 { return 2 }
         return 1
+    }
+
+    // MARK: - 印と旗（GHO-06・15）
+
+    private struct Marker {
+        var id: String
+        var date: Date
+        var value: Double
+        var symbol: String
+        var isUnlock: Bool
+    }
+
+    private struct Flag {
+        var date: Date
+        var text: String?
+        var color: Color
+    }
+
+    /// 自分の線の上のアイコン（タイマーを始めた所）と開けた鍵。線の値は近い点から取る
+    private func markers(on mine: Piece, in range: ClosedRange<Date>) -> [Marker] {
+        func value(at date: Date) -> Double? {
+            mine.values.last(where: { $0.date <= date })?.value ?? mine.values.first?.value
+        }
+        let icons = snapshot.sessionIcons.filter { range.contains($0.start) && $0.start <= snapshot.now }.compactMap { icon in
+            value(at: icon.start).map { Marker(id: "i\($0)\(icon.start)", date: icon.start, value: $0, symbol: icon.symbol, isUnlock: false) }
+        }
+        let unlocks = (snapshot.detox?.unlockStarts ?? []).filter { range.contains($0) && $0 <= snapshot.now }.compactMap { date in
+            value(at: date).map { Marker(id: "u\(date)", date: date, value: $0, symbol: "lock.open.fill", isUnlock: true) }
+        }
+        return icons + unlocks
+    }
+
+    /// 2時間の区切り（そこまでの区間の差）と中間地点。見えている範囲だけ。3時間の窓では数字も出す
+    private func flags(in range: ClosedRange<Date>) -> [Flag] {
+        guard let opponent else { return [] }
+        let laps = snapshot.laps(opponent).filter { !$0.isCurrent }
+        let showsText = !showsWholeDay
+        var result = laps.filter { range.contains($0.interval.end) }.map { lap in
+            Flag(date: lap.interval.end, text: showsText && !lap.isEmpty ? DurationFormat.signed(lap.diff) : nil,
+                 color: lap.isEmpty ? .secondary : Theme.diffColor(lap.diff))
+        }
+        if let half = snapshot.halfwayTime(opponent), range.contains(half) {
+            result.append(Flag(date: half, text: showsText ? "中間" : nil, color: Theme.focus))
+        }
+        return result
     }
 
     // MARK: - 線のデータ

@@ -505,6 +505,13 @@ final class SwiftDataStore: RecordStore {
         }
     }
 
+    func allSessions() throws -> [FocusSession] {
+        let categories = try categoryMap()
+        let projects = try projectMap()
+        return try context.fetch(FetchDescriptor<FocusSessionRecord>(sortBy: [SortDescriptor(\.startAt)]))
+            .map { value($0, categories: categories, projects: projects) }
+    }
+
     func sessions(dayKey: String) throws -> [FocusSession] {
         let categories = try categoryMap()
         let projects = try projectMap()

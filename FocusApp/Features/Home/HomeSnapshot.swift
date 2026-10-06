@@ -34,6 +34,14 @@ struct HomeSnapshot {
     var ghostDetox: DetoxDay? = nil
     /// 目標のゴーストのデトックス：計画どおりに進み、一度も開けない理想の日（2026-10-02 オーナー決定）
     var goalDetox: DetoxDay? = nil
+    /// タイマーを始めた所とカテゴリのアイコン（裏のグラフ、GHO-15）。続けて同じカテゴリのときは最初だけ
+    var sessionIcons: [SessionIcon] = []
+    /// 自己ベスト（今日より前、GHO-15・ANA-06）。AppModel が入れる
+    var personalBest: PersonalBest? = nil
+    /// 先週より前に記録がある（休み明けの文言、GHO-15）。AppModel が入れる
+    var hasOlderHistory = false
+    /// 起きている時間（計画なし日のペース）。AppModel が入れる
+    var awake: ClosedRange<Date>? = nil
 
     var focusSeconds: Int { sessions.focusSeconds(until: now) }
     /// 今日開けた時間と回数（DTX-05）。今日ブロックが一度も効いていなければ nil（出さない）
@@ -74,6 +82,47 @@ struct HomeSnapshot {
     func opponentDiffSeconds(_ opponent: Opponent) -> Int? {
         opponentFocusSeconds(opponent).map { focusSeconds - $0 }
     }
+
+    // MARK: ラップ・予想ゴール・追いつく・自己ベスト（GHO-06・15）
+
+    /// 相手が `date` までに集中した時間。相手がいなければ nil
+    func opponentFocus(_ opponent: Opponent) -> ((Date) -> Int)? {
+        switch opponent {
+        case .lastWeek: ghost.map { ghost in { ghost.focusSeconds(at: $0) } }
+        case .goal: goal.map { goal in { goal.focusSeconds(at: $0) } }
+        }
+    }
+
+    /// 今までに始まった区間のラップ。相手がいなければ空
+    func laps(_ opponent: Opponent) -> [Lap] {
+        guard let focus = opponentFocus(opponent) else { return [] }
+        return Laps.make(mine: sessions, opponent: focus, dayStart: dayStart, now: now)
+    }
+
+    /// 中間地点（相手の1日分の半分）に届いた時刻
+    func halfwayTime(_ opponent: Opponent) -> Date? {
+        opponentWholeDaySeconds(opponent).flatMap { Laps.reachTime($0 / 2, mine: sessions, now: now) }
+    }
+
+    /// 予想ゴール：計画どおりなら（計画なし日は今までのペースで）今日の集中。出せなければ nil
+    var predictedFinish: Int? {
+        if !isNoPlanDay { return RacePace.plannedFinish(focusNow: focusSeconds, blocks: planBlocks, now: now) }
+        guard let awake else { return nil }
+        return RacePace.paceFinish(focusNow: focusSeconds, wake: awake.lowerBound, bed: awake.upperBound, now: now)
+    }
+
+    /// 休まず集中して相手に追いつくまでの分
+    func catchUpMinutes(_ opponent: Opponent) -> Int? {
+        opponentFocus(opponent).flatMap { RacePace.catchUpMinutes(focusNow: focusSeconds, opponent: $0, now: now, dayEnd: dayEnd) }
+    }
+
+    var bestStatus: PersonalBest.Status? { personalBest?.status(todayFocus: focusSeconds) }
+}
+
+/// 裏のグラフのアイコン（GHO-15）
+struct SessionIcon: Hashable {
+    var start: Date
+    var symbol: String
 }
 
 extension HomeSnapshot {
@@ -110,8 +159,21 @@ extension HomeSnapshot {
                 ?? dayStart,
             detox: detox,
             ghostDetox: lastWeekDetox.flatMap { $0.isComplete ? $0.shifted(by: dayStart.timeIntervalSince(lastWeekStart)) : nil },
-            goalDetox: goal.map { idealDetox($0, plan: plan, sleep: sleep, sleepCaps: sleepCaps, dayStart: dayStart, dayEnd: dayEnd) }
+            goalDetox: goal.map { idealDetox($0, plan: plan, sleep: sleep, sleepCaps: sleepCaps, dayStart: dayStart, dayEnd: dayEnd) },
+            sessionIcons: icons(todaySessions, dayStart: dayStart, now: now)
         )
+    }
+
+    /// タイマーを始めた所のアイコン。続けて同じカテゴリのときは最初だけ。前の日から続くタイマーは 4:00 に置く
+    static func icons(_ sessions: [FocusSession], dayStart: Date, now: Date) -> [SessionIcon] {
+        var result: [SessionIcon] = []
+        var last: UUID?
+        for session in sessions.sorted(by: { $0.startAt < $1.startAt }) where (session.endAt ?? now) > dayStart && session.startAt <= now {
+            defer { last = session.category.id }
+            guard session.category.id != last else { continue }
+            result.append(SessionIcon(start: max(session.startAt, dayStart), symbol: CategoryIcon.symbol(for: session.category)))
+        }
+        return result
     }
 
     /// 目標のゴーストのデトックス：計画どおりに進み、2回だけ（0分）開ける日（GHO-10、2026-10-03）。
