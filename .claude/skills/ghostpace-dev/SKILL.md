@@ -30,16 +30,19 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 - 公開側（このリポジトリ）には、個人の情報・値段・自分の数字・秘密の情報を書かない（ADR-0021）
 
 ## 2. 画面の案を選ぶ（画面が変わるとき）
+- 案づくりと撮影は Agent ツールで新しいエージェント（`general-purpose`）に任せ、この会話には画像のパスと各案の説明（数行）だけを戻す。指示には作業場所の絶対パス・ブランチ、決まった仕様（直した docs のファイル）、この段階の手順を入れ、「オーナーには聞かない」「画像は並べた1枚だけ Read で確かめる」と伝える
 - SwiftUI で2〜3案を作る。HTML のモックは作らない
 - 見本データと DEBUG の「見本 ▾」メニューで、案・場面を切り替えられるようにする
 - シミュレーターで撮る：`scripts/sim-shot.sh <出力.png> -fixedNow <日時> ...`。時刻の表示は `xcrun simctl status_bar <UDID> override --time "HH:MM"` で合わせる
 - 案を `scripts/shot-grid.py` で横に並べ、非公開側の `~/Desktop/focus-app-private/docs/reports/assets/` に置き、**`open` で開いて**から聞く。仕様（features）から画像を参照するときは、見本データの画面だけを公開側の `docs/product/assets/` に写す。Claude が Read した画像はオーナーには見えない
 - シミュレーターも切り替えられる状態で起動しておき、「見本 ▾」の使い方を伝える
-- 選ばれなかった案のコードは消す
+- 選ばれなかった案のコードは消す（同じエージェントに `SendMessage` で頼む）
 
 ## 3. 仕様のレビュー（中以上）
-- `/review-3` を docs の変更に1回。critical・major は docs に反映する。判断が割れるものだけオーナーに聞く
-- review-3 の3体には「`.claude/rules/review-checklist.md` をグローバルのチェックリストより優先せよ」と必ず伝える（グローバルの項目は Web アプリ向け）
+- 中：Agent ツールで `review-design` を1体だけ docs の変更に回す
+- データの形が変わる：`/review-3` を docs の変更に1回
+- critical・major は docs に反映する。判断が割れるものだけオーナーに聞く
+- レビューするエージェントには「`.claude/rules/review-checklist.md` をグローバルのチェックリストより優先せよ」と必ず伝える（グローバルの項目は Web アプリ向け）
 
 ### 実装は別のエージェントに任せる（中以上）
 段階1〜3で決めたことは docs にあるので、段階4・5は Agent ツールで新しいエージェント（`general-purpose`）に任せ、この会話には結果の要約だけを戻す。長い会話のまま実装に入ると、以降のやりとりが毎回重くなる。オーナーに `/compact` を頼んで止まらない。

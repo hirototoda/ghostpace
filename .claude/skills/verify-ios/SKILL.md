@@ -10,9 +10,9 @@ description: 実装後の動作確認と報告。機能を実装・修正した�
 ## 手順
 1. `xcodegen generate` でプロジェクトを作り直す
 2. XcodeBuildMCP でビルドする（最初に `session_show_defaults`）。失敗したら直してからやり直す
-   - 別の作業場所（git worktree）にいるときは、MCP の既定のプロジェクトが本体を指している。`xcodebuild build -project FocusApp.xcodeproj -scheme FocusApp -destination 'id=<シミュレーターのUDID>' -derivedDataPath <scratchpad>` を使う
+   - 別の作業場所（git worktree）にいるときは、MCP の既定のプロジェクトが本体を指している。`xcodebuild build -project FocusApp.xcodeproj -scheme FocusApp -destination 'id=<シミュレーターのUDID>' -derivedDataPath <scratchpad> -quiet 2>&1 | tail -40` を使う（そのままだと数千行出て会話が重くなる。失敗したら `grep -E 'error:|warning:.*FocusApp'` で原因の行だけ見る）
 3. テストは **push して GitHub Actions で回す**（docs/verification/strategy.md「テストの回し方」、ADR-0021）。PR を出す・push するたびに、ユニットテスト全件と UI テスト全件が回る（約20〜30分）
-   - 待つあいだは別の作業を進める。結果は `gh pr checks <番号> --watch`（Bash の `run_in_background` で）。件数は `gh run view <run> --log` の「成功」の行
+   - 待つあいだは別の作業を進める。結果は `gh pr checks <番号> --watch`（Bash の `run_in_background` で）。件数は `gh run view <run> --log | grep 成功` で見る（`--log` をそのまま出さない。失敗したときは `gh run view <run> --log-failed | tail -80`）
    - 失敗したら `gh run download <run> -n test-results-<塊>` でログと xcresult を取り、原因を直して push する。「やり直して通った UI テスト」の警告が出たら、報告に書く
    - 急ぎのときだけ、この Mac で `scripts/test.sh` を使う（Mac 全体の順番待ち。同時に2つまで。始める前に `uptime` で負荷を確かめ、`run_in_background` で実行）。例 `scripts/test.sh ui RecordingFlowUITests/testPauseResumeEnd OpenedTimeUITests`。別の作業場所では `--sim <自分用のシミュレーターのUDID>` を付ける
    - `xcodebuild test` と XcodeBuildMCP の `test_sim` はフックで止まる（例外は下の実機の待ち時間テストだけ）
@@ -23,7 +23,7 @@ description: 実装後の動作確認と報告。機能を実装・修正した�
    - 過去データが必要な項目は `-seedDemoData <場面>` で入れる（day / morning / noplan / running / forgot / firstweek。メモリ内なので本物のデータに触れない）
    - タップが必要な場面は `FocusAppUITests/ScreenTourUITests` に足し、`scripts/test.sh tour ScreenTourUITests/<テスト名>` で実行する。画像は、最後に表示される場所の xcresult から `xcrun xcresulttool export attachments` で取り出す
    - 場面を切り替える起動引数は `LaunchOptions.swift` の冒頭に一覧がある
-   - 各基準について操作し、スクリーンショットを撮って自分で目で確かめる
+   - 各基準について操作し、スクリーンショットを撮って自分で目で確かめる。Read するのは `scripts/shot-grid.py` で並べた1枚だけにし、1枚ずつ Read しない（画像1枚ごとにトークンを使う）
 6. 主要画面をライト・ダーク・文字サイズ最大でも撮る
    - ダーク：`xcrun simctl ui <UDID> appearance dark`（戻す：`light`）
    - 文字サイズ最大：`xcrun simctl ui <UDID> content_size accessibility-extra-extra-extra-large`（戻す：`large`）
