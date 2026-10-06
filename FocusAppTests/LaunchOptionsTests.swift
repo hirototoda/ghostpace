@@ -126,6 +126,19 @@ struct LaunchOptionsTests {
         #expect(unknown.demoScene == .day)
     }
 
+    /// 自己ベストを期間つきで開く・ポイントの推移を前の期間で開く（ANA-04・06 の撮影用）
+    @Test func parsesBestAndPointsPage() {
+        #expect(LaunchOptions.parse([]).openBest == nil)
+        #expect(LaunchOptions.parse(["-openBest", "week"]).openBest == .week)
+        // 期間がなければ全期間。次の引数は読み飛ばさない
+        let plain = LaunchOptions.parse(["-openBest", "-seedDemoData", "day"])
+        #expect(plain.openBest == .all)
+        #expect(plain.demoScene == .day)
+        let page = LaunchOptions.parse(["-pointsPage", "2"])
+        #expect(page.openPoints)
+        #expect(page.pointsPage == 2)
+    }
+
     /// 見本データの今日の目標（計画より多い目標の撮影用、GHO-10）
     @Test func parsesDemoGoalMinutes() {
         #expect(LaunchOptions.parse([]).demoGoalMinutes == nil)
