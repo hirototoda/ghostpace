@@ -40,8 +40,8 @@ enum OnPlanPoints {
     }
 
     /// 計画ブロックを `start` に始めたときのタイマーの終わり。遅れて始めたら長さぶんずらす（それ以外はブロックの終わり）
-    static func plannedEnd(block: PlanBlockDraft, startingAt start: Date) -> Date {
-        start > block.start ? start.addingTimeInterval(Double(block.minutes * 60)) : block.end
+    static func plannedEnd(blockStart: Date, blockEnd: Date, startingAt start: Date) -> Date {
+        start > blockStart ? start.addingTimeInterval(max(60, blockEnd.timeIntervalSince(blockStart))) : blockEnd
     }
 
     static func isTarget(_ block: PlanBlockDraft) -> Bool {

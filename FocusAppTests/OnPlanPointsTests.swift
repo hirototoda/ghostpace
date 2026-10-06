@@ -97,10 +97,10 @@ struct OnPlanPointsTests {
 
     @Test func lateStartShiftsTheEndByTheLength() {
         let b = block("09:00", 30)
-        #expect(OnPlanPoints.plannedEnd(block: b, startingAt: jst("2026-10-19T09:12")) == jst("2026-10-19T09:42"))
+        #expect(OnPlanPoints.plannedEnd(blockStart: b.start, blockEnd: b.end, startingAt: jst("2026-10-19T09:12")) == jst("2026-10-19T09:42"))
         // 開始前・開始ちょうどはブロックの終わり（前倒しも今までどおり）
-        #expect(OnPlanPoints.plannedEnd(block: b, startingAt: jst("2026-10-19T08:40")) == jst("2026-10-19T09:30"))
-        #expect(OnPlanPoints.plannedEnd(block: b, startingAt: jst("2026-10-19T09:00")) == jst("2026-10-19T09:30"))
+        #expect(OnPlanPoints.plannedEnd(blockStart: b.start, blockEnd: b.end, startingAt: jst("2026-10-19T08:40")) == jst("2026-10-19T09:30"))
+        #expect(OnPlanPoints.plannedEnd(blockStart: b.start, blockEnd: b.end, startingAt: jst("2026-10-19T09:00")) == jst("2026-10-19T09:30"))
     }
 }
 
@@ -142,6 +142,28 @@ struct OnPlanModelTests {
         t.clock.set(jst("2026-10-19T09:40"))
         m.reload()
         #expect(m.notice == nil)
+    }
+
+    @Test func pointsEarnedWhileClosedAreAnnouncedOnce() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let m = confirmed(t, c)
+        // アプリを開かずに2つのブロックをやり終える
+        for (from, to) in [("09:00", "09:30"), ("10:00", "11:00")] {
+            let block = try #require(m.plan?.sortedBlocks.first { $0.start == jst("2026-10-19T\(from)") })
+            t.clock.set(jst("2026-10-19T\(from)"))
+            _ = try t.store.start(StartRequest(category: c[0], planBlockId: block.id, plannedEndAt: block.end,
+                                               plannedDurationSec: block.minutes * 60, timeZone: tokyo))
+            t.clock.set(jst("2026-10-19T\(to)"))
+            _ = try t.store.end(id: try #require(try t.store.runningSession()).id, reportedEnd: nil)
+        }
+        m.reload()
+        #expect(m.snapshot.planAwards.count == 2)
+        #expect(m.notice == "計画どおり +1pt（今日 2/3）")
+        m.notice = nil
+        t.clock.set(jst("2026-10-19T11:01"))
+        m.reload()
+        #expect(m.notice?.hasPrefix("計画どおり") != true)
     }
 
     @Test func nextBlockStartingDuringALateTimerOffersTheSwitch() throws {

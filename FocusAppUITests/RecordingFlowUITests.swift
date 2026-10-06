@@ -765,6 +765,26 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["endButton"].exists)
     }
 
+    /// 終わったブロックを遅れて始める（TMR-15）：ホームの「さっき」の行から。計画のタブの編集の画面にも［今から始める］
+    func testStartMissedBlockLate() {
+        var app = launch(["-seedDemoData", "missed", "-fixedNow", "2026-10-19T11:15:00+09:00"])
+        let missed = app.buttons["startMissedButton"]
+        XCTAssertTrue(missed.waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["startEarlyButton"].exists)
+        missed.tap()
+        XCTAssertTrue(app.buttons["endButton"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.staticTexts.containing(label("11:45 終了予定")).firstMatch.waitForExistence(timeout: timeout))
+        app.terminate()
+        app = launch(["-seedDemoData", "missed", "-fixedNow", "2026-10-19T11:15:00+09:00", "-openPlan"])
+        let block = app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", "読書 10:30")).firstMatch
+        XCTAssertTrue(block.waitForExistence(timeout: timeout))
+        block.tap()
+        let start = app.buttons["startLateButton"]
+        XCTAssertTrue(start.waitForExistence(timeout: timeout))
+        start.tap()
+        XCTAssertTrue(app.buttons["endButton"].waitForExistence(timeout: timeout))
+    }
+
     /// 計画の時間の格子のブロック（PLN-10）。読み上げは「名前 時刻」
     private func planBlock(_ app: XCUIApplication, _ name: String) -> XCUIElement {
         app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", name + " ")).firstMatch

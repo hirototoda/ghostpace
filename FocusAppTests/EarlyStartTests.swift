@@ -106,12 +106,17 @@ struct EarlyStartTests {
         #expect(timer(session("2026-10-19T11:00", nil), blocks: [block]).switchableBlock(at: jst("2026-10-19T11:20")) == nil)
     }
 
-    /// 2026-10-06 から、ほかの計画ブロックのタイマー中に次のブロックの時刻が来ても切り替えを出す（TMR-15）。ゲーム・SNS には出さない
-    @Test func switchableFromAnotherBlockButNotForGameTime() {
+    /// 2026-10-06 から、遅れて始めて終わりをずらした計画ブロックのタイマー中に次のブロックの時刻が来たら切り替えを出す（TMR-15）。
+    /// 終わりをずらしていない（定刻に始めて超過している）タイマーとゲーム・SNS には出さない
+    @Test func switchableOnlyFromAShiftedBlockButNotForGameTime() {
         let block = summary("2026-10-19T11:00", 120)
-        var planned = session("2026-10-19T10:30", nil, plannedEnd: "2026-10-19T11:30")
-        planned.planBlockId = UUID()
-        #expect(timer(planned, blocks: [block]).switchableBlock(at: jst("2026-10-19T11:05")) == block)
+        let earlier = summary("2026-10-19T10:00", 60)
+        var shifted = session("2026-10-19T10:30", nil, plannedEnd: "2026-10-19T11:30")
+        shifted.planBlockId = earlier.id
+        #expect(timer(shifted, blocks: [earlier, block]).switchableBlock(at: jst("2026-10-19T11:05")) == block)
+        var onTime = session("2026-10-19T10:00", nil, plannedEnd: "2026-10-19T11:00")
+        onTime.planBlockId = earlier.id
+        #expect(timer(onTime, blocks: [earlier, block]).switchableBlock(at: jst("2026-10-19T11:05")) == nil)
         // そのブロック自身のタイマーには出さない
         var own = session("2026-10-19T11:05", nil, plannedEnd: "2026-10-19T13:00")
         own.planBlockId = block.id

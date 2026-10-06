@@ -231,7 +231,7 @@ final class AppModel {
                                          plan: plan, lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
                                          reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
                                          detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps,
-                                         onPlan: try onPlanContext(dayStart: dayStart, calendar: calendar))
+                                         onPlan: try onPlanContext(dayStart: dayStart, today: stored, calendar: calendar))
 
             try addHistory(to: &snapshot, calendar: calendar)
             snapshot.awake = awakeRange(dayStart: dayStart)
@@ -307,7 +307,7 @@ final class AppModel {
                                          lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
                                          reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
                                          detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps,
-                                         onPlan: try onPlanContext(dayStart: dayStart, calendar: calendar))
+                                         onPlan: try onPlanContext(dayStart: dayStart, today: stored, calendar: calendar))
             try addHistory(to: &home, calendar: calendar)
             // 確定した日だけ朝の計画と比べる。下書きのまま・計画なし日は計画なしとして扱う
             let confirmed = stored?.status == .confirmed || stored?.status == .unknown
@@ -659,7 +659,7 @@ final class AppModel {
             lastWeekDetox: try detoxDay(dayStart: DayBoundary.sameDayLastWeek(dayStart, calendar: calendar),
                                         until: .distantFuture, events: events, calendar: calendar),
             sleep: sleep.map(\.interval), sleepCaps: sleep.compactMap(\.extendedPart), dayStart: dayStart,
-            onPlan: try onPlanContext(dayStart: dayStart, calendar: calendar))
+            onPlan: try onPlanContext(dayStart: dayStart, today: stored, calendar: calendar))
     }
 
     // MARK: タイムライン
@@ -723,7 +723,7 @@ final class AppModel {
         guard !block.category.isUnblock else { return }
         let length = max(60, Int(block.end.timeIntervalSince(block.start)))
         let now = clock.now()
-        let end = endsAtBlockEnd || now <= block.start ? block.end : now.addingTimeInterval(Double(length))
+        let end = endsAtBlockEnd ? block.end : OnPlanPoints.plannedEnd(blockStart: block.start, blockEnd: block.end, startingAt: now)
         start(StartRequest(category: block.category, project: block.project, planBlockId: block.id,
                            plannedEndAt: end, plannedDurationSec: length, timeZone: timeZone()))
     }
@@ -735,14 +735,14 @@ final class AppModel {
 
     // MARK: 計画どおりの点（GHO-16）
 
-    /// その日と先週の同じ曜日の、計画どおりの点の材料（確定した計画だけ）
-    private func onPlanContext(dayStart: Date, calendar: Calendar) throws -> OnPlanContext {
-        func confirmed(_ start: Date) throws -> (plan: StoredPlan, morning: Set<UUID>)? {
+    /// その日と先週の同じ曜日の、計画どおりの点の材料（確定した計画だけ）。その日の計画は読み済みのものを渡す
+    private func onPlanContext(dayStart: Date, today stored: StoredPlan?, calendar: Calendar) throws -> OnPlanContext {
+        func confirmed(_ start: Date, _ loaded: StoredPlan?? = nil) throws -> (plan: StoredPlan, morning: Set<UUID>)? {
             let key = DayBoundary.dayKey(containing: start, calendar: calendar)
-            guard let stored = try store.plan(dayKey: key), stored.status == .confirmed || stored.status == .unknown else { return nil }
-            return (stored, Set((try store.snapshot(dayKey: key) ?? []).map(\.blockId)))
+            guard let plan = try loaded ?? store.plan(dayKey: key), plan.status == .confirmed || plan.status == .unknown else { return nil }
+            return (plan, Set((try store.snapshot(dayKey: key) ?? []).map(\.blockId)))
         }
-        let today = try confirmed(dayStart)
+        let today = try confirmed(dayStart, .some(stored))
         let lastWeek = try confirmed(DayBoundary.sameDayLastWeek(dayStart, calendar: calendar))
         return OnPlanContext(morningBlockIds: today?.morning ?? [], addedAt: today?.plan.addedAt ?? [:],
                              lastWeekPlan: lastWeek?.plan, lastWeekMorningBlockIds: lastWeek?.morning ?? [])
@@ -839,11 +839,11 @@ final class AppModel {
     /// 計画どおりの点（GHO-16）が付いたら「計画どおり +1pt（今日 2/3）」を出す（ブロックごとに1回）。出したら true
     private func announcePlanPoint(dayKey: String) -> Bool {
         let shown = Set((settings.lastRaceNotice ?? "").split(separator: ",").map(String.init).filter { $0.hasPrefix(dayKey + "|") })
-        let awards = snapshot.planAwards
-        guard let index = awards.firstIndex(where: { !shown.contains("\(dayKey)|plan|\($0.blockId)") }) else { return false }
-        let key = "\(dayKey)|plan|\(awards[index].blockId)"
-        settings.lastRaceNotice = shown.union([key]).sorted().joined(separator: ",")
-        notice = "計画どおり +1pt（今日 \(index + 1)/\(OnPlanPoints.dailyLimit)）"
+        let keys = snapshot.planAwards.map { "\(dayKey)|plan|\($0.blockId)" }
+        guard keys.contains(where: { !shown.contains($0) }) else { return false }
+        // 開いていない間に2つ以上付いていても、出すのは今日の数の1回だけ（全部を出したことにする）
+        settings.lastRaceNotice = shown.union(keys).sorted().joined(separator: ",")
+        notice = "計画どおり +1pt（今日 \(keys.count)/\(OnPlanPoints.dailyLimit)）"
         raceNoticeCount += 1
         return true
     }

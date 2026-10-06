@@ -26,6 +26,11 @@ struct HomeView: View {
     /// 「〜から始めていた（申告）」：ブロックの開始〜今を申告にして、今から始める
     var onStartFromBlockStart: (PlanBlockSummary) -> Void = { _ in }
 
+    /// 円のカードの下と上に残す高さ：日付の行・差・予想ゴールの2行・開けた時間・間（実測で約240pt）。
+    /// 下の帯（計画の行が最大3行）は safeAreaInset で別に引かれるので、ここでは数えない
+    static let linesUnderCard: CGFloat = 240
+    static let minCardHeight: CGFloat = 260
+
     @State private var showsStartSheet = false
     /// 遅れて始めるときに聞いているブロックと、その開始
     @State private var lateChoice: LateChoice?
@@ -46,8 +51,8 @@ struct HomeView: View {
                 VStack(spacing: 24) {
                     header
                     Spacer(minLength: 0)
-                    // 日付・差・予想ゴールの行の分（約240pt）を残してカードを収める
-                    RingHero(snapshot: snapshot, opponent: $opponent, maxCardHeight: max(260, proxy.size.height - 240))
+                    RingHero(snapshot: snapshot, opponent: $opponent,
+                             maxCardHeight: max(Self.minCardHeight, proxy.size.height - Self.linesUnderCard))
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 20)
