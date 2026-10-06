@@ -29,6 +29,7 @@ struct ContentView: View {
         .environment(\.raceStartsFlipped, launcher.options.raceStartsFlipped)
         .environment(\.raceStartsWholeDay, launcher.options.raceStartsWholeDay)
         .environment(\.raceStartsReplay, launcher.options.raceStartsReplay)
+        .environment(\.raceIntroScale, launcher.options.slowRaceIntro ? 5 : 1)
         .environment(\.bestStartsPeriod, launcher.options.openBest)
         .environment(\.pointsStartsPage, launcher.options.pointsPage)
         .environment(\.opensStartSheet, launcher.options.openStartSheet)

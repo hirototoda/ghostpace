@@ -12,7 +12,7 @@ import Foundation
 /// - `-openStartSheet`: 起動したら計画外で開始のシートを開く
 /// - `-flipRace`: ホームの円を裏（グラフ）で始める（GHO-13 の撮影用）
 /// - `-goalMinutes <分>`: 見本データの今日の計画の目標（計画より多い目標の撮影用、GHO-10）
-/// - `-opponent lastWeek|goal`: 見本データで比べる相手を選んで始める。`-raceWholeDay`: 裏のグラフを1日全体で始める。`-raceReplay`: 裏が見えたら［▶］で1日を流し始める（GHO-13 の撮影用）
+/// - `-opponent lastWeek|goal`: 見本データで比べる相手を選んで始める。`-raceWholeDay`: 裏のグラフを1日全体で始める。`-raceReplay`: 裏が見えたら［▶］で1日を流し始める（GHO-13 の撮影用）。`-slowRaceIntro`: 開いたときの動きを5倍に伸ばす（遅い CI の UI テスト用）
 /// - `-liveGallery`: 起動したらロック画面と画面上部の見本を出す（画面の確認用）
 /// - `-openAddCategory`: 起動したら「カテゴリを追加」をデトックスで開く（グループの一覧の撮影用）
 /// - `-noHealthSleep`: 見本のヘルスケアに睡眠の記録がないことにする（「ヘルスケアから読み直す」で記録がないときの撮影用、DTX-02）
@@ -56,6 +56,7 @@ struct LaunchOptions: Hashable {
     var demoGoalMinutes: Int?
     /// 裏のグラフを1日全体で始める（撮影用）
     var raceStartsWholeDay = false
+    var slowRaceIntro = false
     /// 裏が見えたら［▶］で1日を流し始める（撮影用）
     var raceStartsReplay = false
     /// ロック画面と画面上部の見本を出す
@@ -155,6 +156,8 @@ struct LaunchOptions: Hashable {
                 options.raceStartsWholeDay = true
             case "-raceReplay":
                 options.raceStartsReplay = true
+            case "-slowRaceIntro":
+                options.slowRaceIntro = true
             case "-goalMinutes":
                 if let value = next(), let minutes = Int(value) {
                     options.demoGoalMinutes = minutes

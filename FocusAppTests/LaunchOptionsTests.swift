@@ -106,6 +106,8 @@ struct LaunchOptionsTests {
         #expect(options.demoScene == .day)
         #expect(!options.raceStartsReplay)
         #expect(LaunchOptions.parse(["-raceReplay", "-flipRace"]).raceStartsReplay)
+        #expect(LaunchOptions.parse(["-slowRaceIntro"]).slowRaceIntro)
+        #expect(!LaunchOptions.parse([]).slowRaceIntro)
     }
 
     /// 分析のタブを開いて始める（NAV-01・ANA-04・05 の撮影用）
