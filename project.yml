@@ -146,6 +146,8 @@ targets:
       - path: FocusApp/Shared/LiveActivity
       - path: FocusApp/Shared/Theme.swift
       - path: FocusApp/Shared/DurationFormat.swift
+      - path: FocusApp/Shared/Widget
+      - path: FocusApp/Shared/AppClock.swift
     info:
       path: Extensions/TimerActivity/Info.plist
       properties:
@@ -159,6 +161,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.hirototoda.focusapp.TimerActivity
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) TIMER_WIDGET
+        # ホーム画面・ロック画面のウィジェット（WID-01）が本体の材料を App Group から読む
+        CODE_SIGN_ENTITLEMENTS: Config/Widget.entitlements
 
   FocusAppTests:
     type: bundle.unit-test

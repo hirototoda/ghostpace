@@ -112,6 +112,11 @@ final class AppLauncher {
         return isReal || options.liveActivity ? ActivityKitLiveActivity(clock: clock) : NoLiveActivity()
     }
 
+    /// ウィジェット（WID-01）。本物の保存先だけ App Group に書く（見本データ・UI テストで本物のウィジェットを書き換えない）
+    static func widgets(_ options: LaunchOptions) -> any WidgetPublishing {
+        options.storeURL != nil && options.storeName == nil ? AppGroupWidgetPublisher() : MemoryWidgetPublisher()
+    }
+
     /// 初めて使う端末に習慣の最初の案内を出すか（PLN-08）。本物の保存先だけ。UI テスト・見本データでは `-habitIntro` のときだけ
     static func offersHabitIntro(_ options: LaunchOptions) -> Bool {
         (options.storeURL != nil && options.storeName == nil) || options.habitIntro
@@ -149,7 +154,8 @@ final class AppLauncher {
                                  blocking: blocking, blockStore: blockStore, blockLog: blockLog,
                                  liveActivity: Self.liveActivity(options, clock: clock),
                                  sleepSource: Self.sleepSource(options, clock: clock),
-                                 offersHabitIntro: Self.offersHabitIntro(options))
+                                 offersHabitIntro: Self.offersHabitIntro(options),
+                                 widgets: Self.widgets(options))
             state = .ready(model)
         } catch {
             container = nil

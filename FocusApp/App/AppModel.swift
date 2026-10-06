@@ -101,6 +101,8 @@ final class AppModel {
     private let notifications: any NotificationScheduling
     /// ロック画面と画面上部のタイマー（TMR-06）
     private let liveActivity: any LiveActivityControlling
+    /// ウィジェット（WID-01）に材料を渡す
+    let widgets: any WidgetPublishing
     let blocking: any BlockingControlling
     let blockStore: any BlockStoring
     let blockLog: any BlockEventLogging
@@ -117,7 +119,8 @@ final class AppModel {
          blocking: any BlockingControlling = NoBlocking(), blockStore: any BlockStoring = MemoryBlockStore(),
          blockLog: any BlockEventLogging = MemoryBlockEventLog(),
          liveActivity: any LiveActivityControlling = NoLiveActivity(), sleepSource: any SleepSource = NoSleepSource(),
-         offersHabitIntro: Bool = false) {
+         offersHabitIntro: Bool = false, widgets: any WidgetPublishing = MemoryWidgetPublisher()) {
+        self.widgets = widgets
         self.store = store
         self.sleepSource = sleepSource
         self.clock = clock
@@ -228,6 +231,7 @@ final class AppModel {
                 running = nil
                 endTimeCheck = nil
             }
+            widgets.publish(widgetSnapshot(now: now, isConfirmed: isConfirmed))
             // ロック画面と画面上部のタイマー（TMR-06）。開き直したときも、実行中なら出し直す
             liveActivity.show(running.map { TimerActivity.make($0.session, now: now, timeZone: calendar.timeZone) })
             refreshNotifications()
@@ -706,6 +710,25 @@ final class AppModel {
     func startUnplanned(category: CategoryOption, project: ProjectOption? = nil, minutes: Int?) {
         start(StartRequest(category: category, project: project, planBlockId: nil, plannedEndAt: nil,
                            plannedDurationSec: minutes.map { $0 * 60 }, timeZone: timeZone()))
+    }
+
+    // MARK: ウィジェット（WID-01）
+
+    /// ウィジェットに渡すその日の材料。予定は確定した今日の計画（下書き・計画なし日は空）
+    func widgetSnapshot(now: Date, isConfirmed: Bool) -> WidgetSnapshot {
+        let blocks = isConfirmed ? (plan?.sortedBlocks ?? []).map {
+            WidgetSnapshot.Block(title: $0.title, start: $0.start, end: $0.end, isGameTime: $0.isUnblock)
+        } : []
+        let session = running?.session
+        let counting = session.map { $0.category.countsAsFocus && !$0.isPaused } ?? false
+        let ghostCurve = snapshot.ghost.map { ghost in
+            (0...Int(snapshot.dayEnd.timeIntervalSince(snapshot.dayStart) / WidgetSnapshot.curveStep)).map {
+                ghost.focusSeconds(at: snapshot.dayStart.addingTimeInterval(Double($0) * WidgetSnapshot.curveStep))
+            }
+        } ?? []
+        return WidgetSnapshot(generatedAt: now, dayStart: snapshot.dayStart, dayEnd: snapshot.dayEnd, blocks: blocks,
+                              focusSeconds: snapshot.focusSeconds, runningStart: counting ? now : nil,
+                              runningEnd: counting ? session?.plannedEnd(at: now) : nil, ghostCurve: ghostCurve)
     }
 
     // MARK: 自己ベスト・休み明け・ラップの帯（GHO-06・15、ANA-06）

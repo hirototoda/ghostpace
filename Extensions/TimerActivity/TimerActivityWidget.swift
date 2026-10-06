@@ -8,6 +8,7 @@ import WidgetKit
 struct TimerActivityBundle: WidgetBundle {
     var body: some Widget {
         TimerActivityWidget()
+        GhostPaceWidget()
     }
 }
 
