@@ -30,6 +30,8 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSSupportsLiveActivities: YES
+        # 環境音（TMR-14）を、画面を消しても・ほかのアプリに移っても流す（配列の項目は生成できないので、この plist を足し合わせる）
+        INFOPLIST_FILE: Config/AppInfo.plist
         # 睡眠の時刻をヘルスケアから読む（DTX-02）。書かない
         INFOPLIST_KEY_NSHealthShareUsageDescription: 寝た時刻と起きた時刻をヘルスケアから読み、寝ている間のポイントを数えます。書き込みはしません。
         # 書き込みはしないが、ヘルスケアの許可を持つアプリには必要（App Store の確認で求められた、2026-10-02）

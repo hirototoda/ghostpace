@@ -178,7 +178,10 @@ private struct MainView: View {
             // 実行中のタイマーは、朝の計画とは別の階層から出す（全画面の表示は1つの View に1つまで）
             Color.clear.fullScreenCover(item: Binding(get: { model.running }, set: { _ in })) { timer in
                 TimerRunningView(timer: timer, opponent: model.opponent, onPause: model.pause, onResume: model.resume,
-                                 onEnd: model.requestEnd, onSwitch: model.switchToBlock)
+                                 onEnd: model.requestEnd, onSwitch: model.switchToBlock,
+                                 ambient: AmbientControl(sound: model.ambientSound, volume: model.ambientVolume,
+                                                         onSelect: { model.setAmbientSound($0) },
+                                                         onVolume: { model.setAmbientVolume($0) }))
                     .sheet(item: $model.endTimeCheck) { check in
                         EndTimeSheet(check: check) { model.end(reportedEnd: $0) }
                             .saveErrorAlert($model.errorMessage)

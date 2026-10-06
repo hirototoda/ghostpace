@@ -103,6 +103,11 @@ final class AppModel {
     private let liveActivity: any LiveActivityControlling
     /// ウィジェット（WID-01）に材料を渡す
     let widgets: any WidgetPublishing
+    /// 環境音を鳴らす（TMR-14）
+    let ambient: any AmbientPlaying
+    /// 選んだ環境音と音量（前回の音を覚えて、次から自動で流す）
+    private(set) var ambientSound: AmbientSound = .none
+    private(set) var ambientVolume = SettingsDefaults.ambientVolume
     let blocking: any BlockingControlling
     let blockStore: any BlockStoring
     let blockLog: any BlockEventLogging
@@ -119,8 +124,12 @@ final class AppModel {
          blocking: any BlockingControlling = NoBlocking(), blockStore: any BlockStoring = MemoryBlockStore(),
          blockLog: any BlockEventLogging = MemoryBlockEventLog(),
          liveActivity: any LiveActivityControlling = NoLiveActivity(), sleepSource: any SleepSource = NoSleepSource(),
-         offersHabitIntro: Bool = false, widgets: any WidgetPublishing = MemoryWidgetPublisher()) {
+         offersHabitIntro: Bool = false, widgets: any WidgetPublishing = MemoryWidgetPublisher(),
+         ambient: any AmbientPlaying = SilentAmbientPlayer()) {
         self.widgets = widgets
+        self.ambient = ambient
+        ambientSound = AmbientSound(stored: settings.ambientSound)
+        ambientVolume = settings.ambientVolume
         self.store = store
         self.sleepSource = sleepSource
         self.clock = clock
@@ -232,6 +241,7 @@ final class AppModel {
                 endTimeCheck = nil
             }
             widgets.publish(widgetSnapshot(now: now, isConfirmed: isConfirmed))
+            syncAmbient()
             // ロック画面と画面上部のタイマー（TMR-06）。開き直したときも、実行中なら出し直す
             liveActivity.show(running.map { TimerActivity.make($0.session, now: now, timeZone: calendar.timeZone) })
             refreshNotifications()
@@ -710,6 +720,30 @@ final class AppModel {
     func startUnplanned(category: CategoryOption, project: ProjectOption? = nil, minutes: Int?) {
         start(StartRequest(category: category, project: project, planBlockId: nil, plannedEndAt: nil,
                            plannedDurationSec: minutes.map { $0 * 60 }, timeZone: timeZone()))
+    }
+
+    // MARK: 環境音（TMR-14）
+
+    /// 環境音を選ぶ。覚えて、タイマーが動いていればすぐ流す（「なし」なら止める）
+    func setAmbientSound(_ sound: AmbientSound) {
+        ambientSound = sound
+        settings.ambientSound = sound.rawValue
+        syncAmbient()
+    }
+
+    func setAmbientVolume(_ volume: Double) {
+        ambientVolume = min(max(volume, 0), 1)
+        settings.ambientVolume = ambientVolume
+        ambient.setVolume(ambientVolume)
+    }
+
+    /// タイマーが動いていれば流し、一時停止・終了・タイマーなしなら止める
+    private func syncAmbient() {
+        if let running, !running.session.isPaused, ambientSound != .none {
+            ambient.play(ambientSound, volume: ambientVolume)
+        } else {
+            ambient.stop()
+        }
     }
 
     // MARK: ウィジェット（WID-01）
