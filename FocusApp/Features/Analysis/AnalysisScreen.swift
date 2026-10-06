@@ -490,12 +490,18 @@ struct PersonalBestView: View {
 /// 今日が上回った数字と、前にいる累計の差は赤。文字が大きくて入らないときは区間ごとに縦に並べる
 struct BestLapTable: View {
     let rows: [BestLapRow]
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            grid
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(rows) { stackedRow($0) }
+        // ViewThatFits で選ぶと、リストの行の高さが表のぶん残って上に空白ができるので、文字サイズで分ける。
+        // 5列が入るのは「特大」の一つ手前まで（iPhone の幅で確かめた）
+        Group {
+            if typeSize >= .xxxLarge {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(rows) { stackedRow($0) }
+                }
+            } else {
+                grid
             }
         }
         .accessibilityIdentifier("bestLapTable")
@@ -539,28 +545,46 @@ struct BestLapTable: View {
     }
 
     private func stackedRow(_ row: BestLapRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(Self.rangeText(row) + (row.isCurrent ? "（途中）" : "")).font(.subheadline.bold())
-            HStack(spacing: 4) {
-                Text("今日")
-                number(row.today, wins: row.todayWins)
-                Text("累計")
-                number(row.todayTotal, wins: row.totalWins)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    pair("今日", number(row.today, wins: row.todayWins))
+                    pair("累計", number(row.todayTotal, wins: row.totalWins))
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    pair("今日", number(row.today, wins: row.todayWins))
+                    pair("今日の累計", number(row.todayTotal, wins: row.totalWins))
+                }
             }
-            HStack(spacing: 4) {
-                Text("ベストの日")
-                number(row.best, wins: false)
-                Text("累計")
-                number(row.bestTotal, wins: false)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    pair("ベストの日", number(row.best, wins: false))
+                    pair("累計", number(row.bestTotal, wins: false))
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    pair("ベストの日", number(row.best, wins: false))
+                    pair("ベストの日の累計", number(row.bestTotal, wins: false))
+                }
             }
-            .foregroundStyle(.secondary)
-            HStack(spacing: 4) {
-                Text("累計の差")
-                gap(row)
-            }
+            pair("累計の差", gap(row))
         }
         .font(.subheadline.monospacedDigit())
         .accessibilityElement(children: .combine)
+    }
+
+    /// 見出しと数字の組。横に入らなければ見出しの下に数字（文字が大きいとき、見出しや数字を途中で折り返さない）
+    private func pair(_ label: LocalizedStringKey, _ value: some View) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                Text(label).foregroundStyle(.secondary)
+                value
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Text(label).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                value
+            }
+        }
     }
 
     /// 0.1pt の数字。空の欄（まだ来ていない区間）は「—」

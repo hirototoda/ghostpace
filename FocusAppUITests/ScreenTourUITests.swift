@@ -119,6 +119,19 @@ final class ScreenTourUITests: XCTestCase {
         shoot("widget-gallery")
     }
 
+    /// 自己ベストのラップ表（ANA-06）：表の全体が見えるまで送って撮る（見た目と文字サイズはシミュレーターの設定のまま）
+    func testPersonalBestLaps() {
+        let app = demo("day", "2026-10-22T15:20:00", ["-openBest", "all"])
+        XCTAssertTrue(app.segmentedControls["bestPeriodPicker"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("best-top")
+        for index in 1...8 {
+            app.swipeUp(velocity: .slow)
+            Thread.sleep(forTimeInterval: 1)
+            shoot("best-scrolled-\(index)")
+        }
+    }
+
     /// 押し忘れの申告（TMR-13）：計画のタブの申告の画面と、遅れて始めるときの聞き方
     func testDeclaration() {
         var app = demo("day", "2026-10-19T15:20:00", ["-openPlan"])
