@@ -7,6 +7,8 @@ extension EnvironmentValues {
     @Entry var raceStartsWholeDay = false
     /// 見本の撮影用：裏が見えたら［▶］で1日を流し始める（`-raceReplay`）
     @Entry var raceStartsReplay = false
+    /// UI テスト用：開いたときの動きを何倍に伸ばすか（`-slowRaceIntro`。遅い CI でも動いている間を確かめられるように）
+    @Entry var raceIntroScale = 1.0
 }
 #endif
 
@@ -28,6 +30,7 @@ struct RaceChart: View {
     #if DEBUG
     @Environment(\.raceStartsWholeDay) private var startsWholeDay
     @Environment(\.raceStartsReplay) private var startsReplay
+    @Environment(\.raceIntroScale) private var introScale
     #endif
     /// 1日全体を出しているか
     @State private var showsWholeDay = false
@@ -504,7 +507,10 @@ struct RaceChart: View {
         // 裏返る途中から見え始めるので、回りきるのを少し待つ
         try? await Task.sleep(for: .seconds(RaceChartLayout.flipWaitSeconds))
         guard !Task.isCancelled else { return }
-        let seconds = opening.layout.introSeconds
+        var seconds = opening.layout.introSeconds
+        #if DEBUG
+        seconds *= introScale
+        #endif
         withAnimation(.linear(duration: seconds)) {
             motionProgress = 1
         }
