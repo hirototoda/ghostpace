@@ -16,6 +16,7 @@ import Foundation
 /// - `-openAddCategory`: 起動したら「カテゴリを追加」をデトックスで開く（グループの一覧の撮影用）
 /// - `-noHealthSleep`: 見本のヘルスケアに睡眠の記録がないことにする（「ヘルスケアから読み直す」で記録がないときの撮影用、DTX-02）
 /// - `-liveActivity`: 見本データでも本物のロック画面・画面上部に出す（シミュレーターでの確認用）
+/// - `-realAmbient`: 見本データ・テストでも本物の環境音を鳴らす（音のスレッドで落ちないかの UI テスト用、TMR-14）
 /// - `-widgetGallery`: 起動したらウィジェットの見本を出す（画面の確認用、WID-01）
 /// - `-habitIntro`: 初めて使う端末の習慣の画面（PLN-08）を出して始める（撮影・UI テスト用）
 /// - `-openHold [unlocked]`: 起動したら長押しの画面を開く（`unlocked` なら15分開けたあと）。`-holdProgress 0.6`: 押している途中の見た目で始める
@@ -24,6 +25,7 @@ struct LaunchOptions: Hashable {
     /// nil ならデモデータを入れない
     var demoScene: DemoScene?
     var inMemoryStore = false
+    var realAmbient = false
     var storeName: String?
     var resetStore = false
     var failSave = false
@@ -89,6 +91,8 @@ struct LaunchOptions: Hashable {
                 }
             case "-inMemoryStore":
                 options.inMemoryStore = true
+            case "-realAmbient":
+                options.realAmbient = true
             case "-storeName":
                 if let value = next() {
                     options.storeName = value

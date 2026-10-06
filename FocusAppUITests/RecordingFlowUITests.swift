@@ -740,7 +740,8 @@ final class RecordingFlowUITests: XCTestCase {
         app.buttons["analysisTimeMapRow"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["timeMapGrid"].waitForExistence(timeout: timeout))
         app.terminate()
-        app = launch(["-seedDemoData", "running", "-fixedNow", "2026-10-19T11:20:00+09:00"])
+        // 本物の音で鳴らす（音のスレッドで落ちないこと。実機で落ちた不具合の再発防止）
+        app = launch(["-seedDemoData", "running", "-fixedNow", "2026-10-19T11:20:00+09:00", "-realAmbient"])
         let ambient = app.buttons["ambientButton"]
         XCTAssertTrue(ambient.waitForExistence(timeout: timeout))
         XCTAssertEqual(ambient.value as? String, "なし")
@@ -752,6 +753,9 @@ final class RecordingFlowUITests: XCTestCase {
         app.buttons["完了"].tap()
         XCTAssertTrue(ambient.waitForExistence(timeout: timeout))
         XCTAssertEqual(ambient.value as? String, "雨")
+        // 鳴らしたまま少し待っても落ちていない
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertEqual(app.state, .runningForeground)
     }
 
     /// 今のブロックの最中でもタイマーがなければ次を前倒しで始められる（TMR-15）。計画どおりの点の帯（2秒）は単体テストで確かめる

@@ -114,7 +114,7 @@ final class AppLauncher {
 
     /// 環境音（TMR-14）。本物の保存先だけ音を鳴らす（UI テスト・見本データでは鳴らさない）
     static func ambient(_ options: LaunchOptions) -> any AmbientPlaying {
-        options.storeURL != nil && options.storeName == nil ? EngineAmbientPlayer() : SilentAmbientPlayer()
+        options.realAmbient || (options.storeURL != nil && options.storeName == nil) ? EngineAmbientPlayer() : SilentAmbientPlayer()
     }
 
     /// ウィジェット（WID-01）。本物の保存先だけ App Group に書く（見本データ・UI テストで本物のウィジェットを書き換えない）

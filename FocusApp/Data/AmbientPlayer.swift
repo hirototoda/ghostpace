@@ -47,17 +47,7 @@ final class EngineAmbientPlayer: AmbientPlaying {
         try? session.setActive(true)
         let format = engine.outputNode.inputFormat(forBus: 0)
         let sampleRate = format.sampleRate > 0 ? format.sampleRate : 44_100
-        let box = GeneratorBox(NoiseGenerator(sound: sound, sampleRate: sampleRate, seed: UInt64.random(in: 1...UInt64.max)))
-        let node = AVAudioSourceNode { _, _, frameCount, audioBufferList -> OSStatus in
-            let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            for frame in 0..<Int(frameCount) {
-                let value = box.next()
-                for buffer in buffers {
-                    buffer.mData?.assumingMemoryBound(to: Float.self)[frame] = value
-                }
-            }
-            return noErr
-        }
+        let node = Self.makeSource(sound, sampleRate: sampleRate, seed: UInt64.random(in: 1...UInt64.max))
         let mono = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: mono)
@@ -99,6 +89,22 @@ final class EngineAmbientPlayer: AmbientPlaying {
             guard !Task.isCancelled else { return }
             engine.mainMixerNode.outputVolume = Float(start + (volume - start) * Double(step) / Double(steps))
             try? await Task.sleep(for: .seconds(Self.fadeSeconds / Double(steps)))
+        }
+    }
+
+    /// 音を作るノード。音を作る処理は音のスレッドで呼ばれる。MainActor の中で作ると、その処理がメインのスレッド専用と
+    /// みなされ、音のスレッドから呼ばれた瞬間に Swift 6 の実行時の検査で落ちる（実機で落ちた）。だから nonisolated で作る
+    nonisolated static func makeSource(_ sound: AmbientSound, sampleRate: Double, seed: UInt64) -> AVAudioSourceNode {
+        let box = GeneratorBox(NoiseGenerator(sound: sound, sampleRate: sampleRate, seed: seed))
+        return AVAudioSourceNode { _, _, frameCount, audioBufferList -> OSStatus in
+            let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            for frame in 0..<Int(frameCount) {
+                let value = box.next()
+                for buffer in buffers {
+                    buffer.mData?.assumingMemoryBound(to: Float.self)[frame] = value
+                }
+            }
+            return noErr
         }
     }
 
