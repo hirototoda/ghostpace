@@ -57,11 +57,20 @@ struct AppLauncherTests {
             guard case .ready = first.state else { Issue.record("開けなかった"); return }
         }
         let file = directory.appending(path: "keep.store")
-        let before = try Data(contentsOf: file)
+        // 1回目のストアは閉じたあとも後片付けで書き込むことがあり、中身の比較では揺れる（CI で落ちた）。
+        // だから「消したり作り直したりしない」を、同じファイル（ファイル番号）のままで、もう一度開けることで確かめる
+        func fileNumber() throws -> Int? {
+            try FileManager.default.attributesOfItem(atPath: file.path(percentEncoded: false))[.systemFileNumber] as? Int
+        }
+        let before = try fileNumber()
+        #expect(before != nil)
 
         let launcher = AppLauncher(options: options, clock: clock)
         guard case .failed = launcher.state else { Issue.record("失敗するはず"); return }
-        #expect(try Data(contentsOf: file) == before)
+        #expect(try fileNumber() == before)
+        var normal = options
+        normal.failStoreOpen = false
+        guard case .ready = AppLauncher(options: normal, clock: clock).state else { Issue.record("開き直せなかった"); return }
     }
 
     @Test func failSaveAppliesAfterDemoSeed() throws {
