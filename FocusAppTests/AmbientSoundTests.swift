@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 @testable import FocusApp
@@ -31,6 +32,32 @@ struct AmbientSoundTests {
         // 1秒に約30粒：粒のある所は大きく跳ねる
         let peaks = samples(.rain).filter { abs($0) > 0.45 }.count
         #expect(peaks > 0)
+    }
+
+    /// 音を作る処理は音のスレッドから呼ばれる。メインのスレッド以外のエンジンで描いても落ちずに音が出る
+    /// （MainActor の中で作って実機で落ちた不具合の再発防止）
+    @Test func sourceRendersOffTheMainThread() async throws {
+        let peak: Float = try await withCheckedThrowingContinuation { continuation in
+            Thread.detachNewThread {
+                do {
+                    let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
+                    let engine = AVAudioEngine()
+                    try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 512)
+                    let node = EngineAmbientPlayer.makeSource(.white, sampleRate: 44_100, seed: 1)
+                    engine.attach(node)
+                    engine.connect(node, to: engine.mainMixerNode, format: format)
+                    try engine.start()
+                    let buffer = try #require(AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 512))
+                    _ = try engine.renderOffline(512, to: buffer)
+                    engine.stop()
+                    let samples = UnsafeBufferPointer(start: buffer.floatChannelData?[0], count: Int(buffer.frameLength))
+                    continuation.resume(returning: samples.map(abs).max() ?? 0)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+        #expect(peak > 0)
     }
 
     @Test func storedValuesReadBack() {

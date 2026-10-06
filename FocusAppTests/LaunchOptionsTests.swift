@@ -67,6 +67,11 @@ struct LaunchOptionsTests {
         #expect(!LaunchOptions.parse([]).liveActivity)
     }
 
+    @Test func realAmbientOption() {
+        #expect(LaunchOptions.parse(["-seedDemoData", "running", "-realAmbient"]).realAmbient)
+        #expect(!LaunchOptions.parse(["-seedDemoData", "running"]).realAmbient)
+    }
+
     @Test func openStartSheetOption() {
         #expect(!LaunchOptions.parse([]).openStartSheet)
         #expect(LaunchOptions.parse(["-seedDemoData", "day", "-openStartSheet"]).openStartSheet)
