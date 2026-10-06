@@ -59,6 +59,11 @@ final class AppModel {
     private(set) var habits = PlanHabits()
     /// 初めて使う端末で、朝の計画の前に出す習慣の画面（PLN-08）
     private(set) var showsHabitIntro = false
+    /// ラップ・中間地点の帯を出した回数（ホームで軽く振動させる合図、GHO-06）
+    private(set) var raceNoticeCount = 0
+    /// 自己ベストと休み明けの判定の材料（記録の数が変わったときだけ数え直す）
+    private var historyCache: (revision: Int, today: Date, byDay: [Date: Int])?
+    private var timeMapCache: (revision: Int, today: Date, map: TimeMap)?
     var endTimeCheck: EndTimeCheck?
     /// 短い知らせ（ホームの上に2秒出す）
     var notice: String?
@@ -97,6 +102,13 @@ final class AppModel {
     private let notifications: any NotificationScheduling
     /// ロック画面と画面上部のタイマー（TMR-06）
     private let liveActivity: any LiveActivityControlling
+    /// ウィジェット（WID-01）に材料を渡す
+    let widgets: any WidgetPublishing
+    /// 環境音を鳴らす（TMR-14）
+    let ambient: any AmbientPlaying
+    /// 選んだ環境音と音量（前回の音を覚えて、次から自動で流す）
+    private(set) var ambientSound: AmbientSound = .none
+    private(set) var ambientVolume = SettingsDefaults.ambientVolume
     let blocking: any BlockingControlling
     let blockStore: any BlockStoring
     let blockLog: any BlockEventLogging
@@ -113,7 +125,12 @@ final class AppModel {
          blocking: any BlockingControlling = NoBlocking(), blockStore: any BlockStoring = MemoryBlockStore(),
          blockLog: any BlockEventLogging = MemoryBlockEventLog(),
          liveActivity: any LiveActivityControlling = NoLiveActivity(), sleepSource: any SleepSource = NoSleepSource(),
-         offersHabitIntro: Bool = false) {
+         offersHabitIntro: Bool = false, widgets: any WidgetPublishing = MemoryWidgetPublisher(),
+         ambient: any AmbientPlaying = SilentAmbientPlayer()) {
+        self.widgets = widgets
+        self.ambient = ambient
+        ambientSound = AmbientSound(stored: settings.ambientSound)
+        ambientVolume = settings.ambientVolume
         self.store = store
         self.sleepSource = sleepSource
         self.clock = clock
@@ -215,12 +232,17 @@ final class AppModel {
                                          reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
                                          detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps)
 
+            try addHistory(to: &snapshot, calendar: calendar)
+            snapshot.awake = awakeRange(dayStart: dayStart)
+
             if let session = try store.runningSession() {
                 running = try runningTimer(session, calendar: calendar)
             } else {
                 running = nil
                 endTimeCheck = nil
             }
+            widgets.publish(widgetSnapshot(now: now, isConfirmed: isConfirmed))
+            syncAmbient()
             // ロック画面と画面上部のタイマー（TMR-06）。開き直したときも、実行中なら出し直す
             liveActivity.show(running.map { TimerActivity.make($0.session, now: now, timeZone: calendar.timeZone) })
             refreshNotifications()
@@ -235,6 +257,7 @@ final class AppModel {
                 let draft = stored?.draft ?? newDraft(dayStart: dayStart)
                 morningPlan = MorningPlan(dayKey: dayKey, dayStart: dayStart, draft: draft)
             }
+            if running == nil, morningPlan == nil { announceRace(dayKey: dayKey) }
         }
     }
 
@@ -276,12 +299,13 @@ final class AppModel {
             let stored = try store.plan(dayKey: dayKey)
             let sessions = try store.sessions(dayKey: dayKey)
             let detox = try detoxDays(now: now, dayStart: dayStart, calendar: calendar)
-            let home = HomeSnapshot.make(now: now, calendar: calendar,
+            var home = HomeSnapshot.make(now: now, calendar: calendar,
                                          todaySessions: sessions + (try carriedOver(into: dayStart, calendar: calendar)),
                                          plan: stored?.status == .skipped ? nil : (stored?.draft ?? PlanDraft()),
                                          lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
                                          reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
                                          detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps)
+            try addHistory(to: &home, calendar: calendar)
             // 確定した日だけ朝の計画と比べる。下書きのまま・計画なし日は計画なしとして扱う
             let confirmed = stored?.status == .confirmed || stored?.status == .unknown
             content = ReviewContent.make(home: home, sessions: sessions,
@@ -697,6 +721,117 @@ final class AppModel {
     func startUnplanned(category: CategoryOption, project: ProjectOption? = nil, minutes: Int?) {
         start(StartRequest(category: category, project: project, planBlockId: nil, plannedEndAt: nil,
                            plannedDurationSec: minutes.map { $0 * 60 }, timeZone: timeZone()))
+    }
+
+    // MARK: 環境音（TMR-14）
+
+    /// 環境音を選ぶ。覚えて、タイマーが動いていればすぐ流す（「なし」なら止める）
+    func setAmbientSound(_ sound: AmbientSound) {
+        ambientSound = sound
+        settings.ambientSound = sound.rawValue
+        syncAmbient()
+    }
+
+    func setAmbientVolume(_ volume: Double) {
+        ambientVolume = min(max(volume, 0), 1)
+        settings.ambientVolume = ambientVolume
+        ambient.setVolume(ambientVolume)
+    }
+
+    /// タイマーが動いていれば流し、一時停止・終了・タイマーなしなら止める
+    private func syncAmbient() {
+        if let running, !running.session.isPaused, ambientSound != .none {
+            ambient.play(ambientSound, volume: ambientVolume)
+        } else {
+            ambient.stop()
+        }
+    }
+
+    // MARK: ウィジェット（WID-01）
+
+    /// ウィジェットに渡すその日の材料。予定は確定した今日の計画（下書き・計画なし日は空）
+    func widgetSnapshot(now: Date, isConfirmed: Bool) -> WidgetSnapshot {
+        let blocks = isConfirmed ? (plan?.sortedBlocks ?? []).map {
+            WidgetSnapshot.Block(title: $0.title, start: $0.start, end: $0.end, isGameTime: $0.isUnblock)
+        } : []
+        let session = running?.session
+        let counting = session.map { $0.category.countsAsFocus && !$0.isPaused } ?? false
+        let ghostCurve = snapshot.ghost.map { ghost in
+            (0...Int(snapshot.dayEnd.timeIntervalSince(snapshot.dayStart) / WidgetSnapshot.curveStep)).map {
+                ghost.focusSeconds(at: snapshot.dayStart.addingTimeInterval(Double($0) * WidgetSnapshot.curveStep))
+            }
+        } ?? []
+        return WidgetSnapshot(generatedAt: now, dayStart: snapshot.dayStart, dayEnd: snapshot.dayEnd, blocks: blocks,
+                              focusSeconds: snapshot.focusSeconds, runningStart: counting ? now : nil,
+                              runningEnd: counting ? session?.plannedEnd(at: now) : nil, ghostCurve: ghostCurve)
+    }
+
+    // MARK: 自己ベスト・休み明け・ラップの帯（GHO-06・15、ANA-06）
+
+    /// 自己ベスト（今日より前）と、先週より前に記録があるか（休み明け）をホームの数字に入れる
+    private func addHistory(to snapshot: inout HomeSnapshot, calendar: Calendar) throws {
+        let byDay = try focusByDay(calendar: calendar, today: snapshot.dayStart)
+        snapshot.personalBest = DailyFocus.best(byDay, before: snapshot.dayStart)
+        let lastWeekStart = DayBoundary.sameDayLastWeek(snapshot.dayStart, calendar: calendar)
+        snapshot.hasOlderHistory = byDay.keys.contains { $0 < lastWeekStart }
+    }
+
+    /// 日ごとの集中。保存したとき・日が変わったときだけ読み直す（毎分の読み直しで全件を読まない）。
+    /// タイマーが動いている間は今の分が毎分変わるので、覚えない
+    private func focusByDay(calendar: Calendar, today: Date) throws -> [Date: Int] {
+        if let cache = historyCache, cache.revision == store.revision, cache.today == today { return cache.byDay }
+        let sessions = try store.allSessions()
+        let byDay = DailyFocus.byDay(sessions.flatMap { $0.activeSegments(now: clock.now()) }, calendar: calendar)
+        if sessions.allSatisfy({ !$0.isRunning }) { historyCache = (store.revision, today, byDay) }
+        return byDay
+    }
+
+    /// 自己ベストのポイント（ANA-06）：記録のある日のうち一番多い1日の合計と、その日の 4:00。今日は入れない。
+    /// 毎回数え直すので重い。分析の画面を開いたときだけ使う（使い始めから最大180日）
+    func bestPointsDay() -> (points: Double, dayStart: Date)? {
+        let calendar = self.calendar
+        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        guard let first = (try? store.allSessions())?.first.map({ DayBoundary.dayStart(containing: $0.startAt, calendar: calendar) }) else {
+            return nil
+        }
+        let days = min(180, max(1, (calendar.dateComponents([.day], from: first, to: today).day ?? 0) + 1))
+        return pointsHistory(days: days).filter { !$0.isToday }.compactMap { day in day.points.map { ($0, day.dayStart) } }
+            .max { $0.0 < $1.0 }
+    }
+
+    /// 時間帯の地図（ANA-07）：直近4週の曜日×2時間の集中の平均
+    func timeMap() -> TimeMap {
+        let calendar = self.calendar
+        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        // 今日は入れないので、保存したとき・日が変わったときだけ数え直す
+        if let cache = timeMapCache, cache.revision == store.revision, cache.today == today { return cache.map }
+        let segments = ((try? store.allSessions()) ?? []).flatMap { $0.activeSegments(now: clock.now()) }
+        let map = TimeMap.make(segments, today: today, calendar: calendar)
+        timeMapCache = (store.revision, today, map)
+        return map
+    }
+
+    /// 区間の区切り・中間地点を過ぎて開いたとき、帯と軽い振動で知らせる（1日に同じものは1回だけ、GHO-06）。
+    /// 一度に出すのは1つ。出したものはその日の分だけ覚える
+    private func announceRace(dayKey: String) {
+        var shown = Set((settings.lastRaceNotice ?? "").split(separator: ",").map(String.init).filter { $0.hasPrefix(dayKey + "|") })
+        func show(_ key: String, _ text: String) {
+            shown.insert(key)
+            settings.lastRaceNotice = shown.sorted().joined(separator: ",")
+            notice = text
+            raceNoticeCount += 1
+        }
+        if let lap = snapshot.laps(opponent).last(where: { !$0.isCurrent && !$0.isEmpty }) {
+            let key = "\(dayKey)|\(Int(lap.interval.start.timeIntervalSinceReferenceDate))"
+            if !shown.contains(key) { return show(key, "\(Self.lapRange(lap)) のラップ \(DurationFormat.signed(lap.diff))") }
+        }
+        let half = "\(dayKey)|half"
+        if snapshot.halfwayTime(opponent) != nil, !shown.contains(half) { show(half, "中間地点を通過") }
+    }
+
+    static func lapRange(_ lap: Lap) -> String {
+        let style = Date.FormatStyle.dateTime.hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits)
+        return "\(lap.interval.start.formatted(style))–\(lap.interval.end.formatted(style))"
     }
 
     // MARK: 押し忘れの申告（TMR-13）

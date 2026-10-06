@@ -727,6 +727,33 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["endButton"].waitForExistence(timeout: timeout))
     }
 
+    /// 見せ方と環境音（ANA-06・07、GHO-15、TMR-14）：ホームに予想ゴール、分析に自己ベストと時間帯の地図、タイマーの ♪ で音を選べる
+    func testInsightsAnalysisAndAmbient() {
+        var app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00"])
+        XCTAssertTrue(app.staticTexts["predictedFinish"].waitForExistence(timeout: timeout))
+        app.tabBars.buttons["分析"].tap()
+        let best = app.buttons["analysisBestRow"]
+        XCTAssertTrue(best.waitForExistence(timeout: timeout))
+        best.tap()
+        XCTAssertTrue(app.navigationBars["自己ベスト"].waitForExistence(timeout: timeout))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["analysisTimeMapRow"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["timeMapGrid"].waitForExistence(timeout: timeout))
+        app.terminate()
+        app = launch(["-seedDemoData", "running", "-fixedNow", "2026-10-19T11:20:00+09:00"])
+        let ambient = app.buttons["ambientButton"]
+        XCTAssertTrue(ambient.waitForExistence(timeout: timeout))
+        XCTAssertEqual(ambient.value as? String, "なし")
+        ambient.tap()
+        let rain = app.buttons["ambient-rain"]
+        XCTAssertTrue(rain.waitForExistence(timeout: timeout))
+        rain.tap()
+        XCTAssertTrue(rain.isSelected)
+        app.buttons["完了"].tap()
+        XCTAssertTrue(ambient.waitForExistence(timeout: timeout))
+        XCTAssertEqual(ambient.value as? String, "雨")
+    }
+
     /// 計画の時間の格子のブロック（PLN-10）。読み上げは「名前 時刻」
     private func planBlock(_ app: XCUIApplication, _ name: String) -> XCUIElement {
         app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", name + " ")).firstMatch

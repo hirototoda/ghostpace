@@ -68,6 +68,8 @@ struct ReviewContent {
     /// 朝の計画とのズレ（15分以上、終わったブロックだけ、最大2つ）
     var gaps: [ReviewGap]
     var isNoPlanDay: Bool
+    /// 先週より前に記録がある（休み明けの文言、GHO-15）
+    var hasOlderHistory = false
 
     /// - snapshot: 朝の計画（確定時の写し）。計画なし日は nil
     static func make(home: HomeSnapshot, sessions: [FocusSession], snapshot: [PlanSnapshotBlock]?) -> ReviewContent {
@@ -108,6 +110,6 @@ struct ReviewContent {
             dayStart: home.dayStart, focusSeconds: home.focusSeconds, opened: opened,
             categories: categories, opponents: opponents, verdicts: verdicts,
             gaps: snapshot.map { ReviewGaps.largest(snapshot: $0, sessions: sessions, now: now) } ?? [],
-            isNoPlanDay: snapshot == nil)
+            isNoPlanDay: snapshot == nil, hasOlderHistory: home.hasOlderHistory)
     }
 }

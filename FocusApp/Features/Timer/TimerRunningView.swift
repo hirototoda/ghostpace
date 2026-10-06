@@ -12,7 +12,10 @@ struct TimerRunningView: View {
     let onEnd: () -> Void
     /// 計画外のタイマー中に始まった計画ブロックに切り替える（TMR-11）
     var onSwitch: ((PlanBlockSummary) -> Void)?
+    /// 環境音（TMR-14）。nil なら「♪」を出さない
+    var ambient: AmbientControl?
     @Environment(\.clock) private var clock
+    @State private var showsAmbient = false
 
     private var isPaused: Bool { timer.session.isPaused }
 
@@ -33,6 +36,26 @@ struct TimerRunningView: View {
                 buttons
             }
             .padding(20)
+            .overlay(alignment: .topTrailing) {
+                if let ambient {
+                    Button {
+                        showsAmbient = true
+                    } label: {
+                        Image(systemName: "music.note")
+                            .font(.title3.bold())
+                            .foregroundStyle(ambient.sound == .none ? Color.secondary : Theme.focus)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(ambient.sound == .none ? Color.secondary.opacity(0.1) : Theme.focus.opacity(0.15)))
+                    }
+                    .padding(.trailing, 16).padding(.top, 8)
+                    .accessibilityLabel("環境音")
+                    .accessibilityValue(ambient.sound.label)
+                    .accessibilityIdentifier("ambientButton")
+                }
+            }
+            .sheet(isPresented: $showsAmbient) {
+                if let ambient { AmbientSheet(control: ambient) }
+            }
         }
         .background(Theme.focus.opacity(0.06).ignoresSafeArea())
         .tint(Theme.focus)
@@ -138,5 +161,73 @@ struct TimerRunningView: View {
         }
         .font(.headline)
         .controlSize(.extraLarge)
+    }
+}
+
+/// タイマーの画面の環境音（TMR-14）
+struct AmbientControl {
+    var sound: AmbientSound
+    var volume: Double
+    var onSelect: (AmbientSound) -> Void
+    var onVolume: (Double) -> Void
+}
+
+/// 「♪」で開く：音を選び、音量を変える。選んだ音は次から自動で流れる
+struct AmbientSheet: View {
+    let control: AmbientControl
+    @State private var volume: Double
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    init(control: AmbientControl) {
+        self.control = control
+        _volume = State(initialValue: control.volume)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(AmbientSound.allCases) { sound in
+                        Button {
+                            control.onSelect(sound)
+                        } label: {
+                            HStack {
+                                Label(sound.label, systemImage: sound.symbol)
+                                Spacer()
+                                if sound == control.sound { Image(systemName: "checkmark").foregroundStyle(Theme.focus) }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(sound == control.sound ? .isSelected : [])
+                        .accessibilityIdentifier("ambient-\(sound.rawValue)")
+                    }
+                } footer: {
+                    Text("選んだ音は次からタイマーを始めると自動で流れます。一時停止・終了で止まります。")
+                }
+                Section("音量") {
+                    HStack {
+                        Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                        Slider(value: $volume, in: 0...1) { editing in
+                            if !editing { control.onVolume(volume) }
+                        }
+                        .accessibilityLabel("音量")
+                        .accessibilityIdentifier("ambientVolume")
+                        Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("環境音")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完了") { dismiss() }
+                }
+            }
+        }
+        // 大きな文字では半分の高さに収まらないので、最初から全部の高さで出す
+        .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        .tint(Theme.focus)
     }
 }

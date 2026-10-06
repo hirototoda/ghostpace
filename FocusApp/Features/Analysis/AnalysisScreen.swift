@@ -7,6 +7,10 @@ enum AnalysisRoute: Hashable {
     case timeline
     /// その日のグラフ（その日の 4:00。開いたまま4:00をまたいでも同じ日を指すよう日付で持つ）
     case day(Date)
+    /// 自己ベスト（ANA-06）
+    case best
+    /// 時間帯の地図（ANA-07）
+    case timeMap
 }
 
 /// 分析のタブ（NAV-01・ANA-03、2026-10-05 オーナー決定でタイムラインのタブを置き換え）。項目の一覧から進む
@@ -15,6 +19,8 @@ struct AnalysisScreen: View {
     @Binding var path: [AnalysisRoute]
     /// 昨日までの7日の平均（開いたとき・1分ごとの読み直しで数え直す。描き直すたびには数えない）
     @State private var average: Double?
+    /// 時間帯の地図（行の下の「よく集中するのは〜」に使う）
+    @State private var map: TimeMap?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -35,14 +41,29 @@ struct AnalysisScreen: View {
                 }
                 .foregroundStyle(.primary)
                 .accessibilityIdentifier("analysisReviewRow")
+                NavigationLink(value: AnalysisRoute.best) {
+                    row("自己ベスト", systemImage: "trophy", detail: model.snapshot.personalBest.map {
+                        Text("集中 \(DurationFormat.japanese($0.focusSeconds))（\(TimeMapView.dayText($0.focusDay))）")
+                    })
+                }
+                .accessibilityIdentifier("analysisBestRow")
+                NavigationLink(value: AnalysisRoute.timeMap) {
+                    row("時間帯の地図", systemImage: "square.grid.3x3.fill", detail: map.flatMap(TimeMapView.peakText).map { Text($0) })
+                }
+                .accessibilityIdentifier("analysisTimeMapRow")
             }
             .navigationTitle("分析")
-            .task(id: model.snapshot.now) { average = PointsHistory.average(model.pointsHistory(days: 8)) }
+            .task(id: model.snapshot.now) {
+                average = PointsHistory.average(model.pointsHistory(days: 8))
+                map = model.timeMap()
+            }
             .navigationDestination(for: AnalysisRoute.self) { route in
                 switch route {
                 case .points: PointsHistoryView(model: model)
                 case .timeline: TimelineScreen(model: model)
                 case .day(let dayStart): DayGraphView(model: model, dayStart: dayStart)
+                case .best: PersonalBestView(model: model)
+                case .timeMap: TimeMapView(map: map ?? model.timeMap())
                 }
             }
         }
@@ -245,6 +266,8 @@ struct DayGraphView: View {
                 RaceChart(snapshot: snapshot, opponent: model.opponent, isPastDay: snapshot.now >= snapshot.dayEnd)
                     .aspectRatio(0.8, contentMode: .fit)
                     .padding(16)
+                LapList(laps: snapshot.laps(model.opponent).filter { !$0.isEmpty }, opponent: model.opponent)
+                    .padding(.horizontal, 16).padding(.bottom, 16)
                     .navigationTitle(Text(snapshot.dayStart.formatted(
                         .dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))))
             } else {
@@ -252,5 +275,137 @@ struct DayGraphView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// その日のラップの一覧（GHO-06）：2時間ごとの自分・相手の集中と差
+struct LapList: View {
+    let laps: [Lap]
+    let opponent: Opponent
+
+    var body: some View {
+        if !laps.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("ラップ（2時間ごと）").font(.headline)
+                ForEach(laps) { lap in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(AppModel.lapRange(lap) + (lap.isCurrent ? "（途中）" : "")).font(.subheadline.monospacedDigit())
+                            Text("\(DurationFormat.japanese(lap.mine))・\(opponent == .goal ? "目標" : "先週") \(DurationFormat.japanese(lap.opponent))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(DurationFormat.signed(lap.diff)).font(.subheadline.bold().monospacedDigit())
+                            .foregroundStyle(Theme.diffColor(lap.diff))
+                    }
+                    .accessibilityElement(children: .combine)
+                    Divider()
+                }
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
+            .accessibilityIdentifier("lapList")
+        }
+    }
+}
+
+/// 自己ベスト（ANA-06）：一番多い1日の集中した時間とポイント。押すとその日のグラフ
+struct PersonalBestView: View {
+    @Bindable var model: AppModel
+    @State private var points: (points: Double, dayStart: Date)??
+
+    var body: some View {
+        List {
+            if let best = model.snapshot.personalBest {
+                NavigationLink(value: AnalysisRoute.day(best.focusDay)) {
+                    bestRow("集中した時間", value: DurationFormat.japanese(best.focusSeconds), day: best.focusDay)
+                }
+            }
+            switch points {
+            case .some(.some(let best)):
+                NavigationLink(value: AnalysisRoute.day(best.dayStart)) {
+                    bestRow("ポイント", value: RaceChart.pointText(best.points), day: best.dayStart)
+                }
+            case .some(.none): EmptyView()
+            case .none: ProgressView()
+            }
+            if model.snapshot.personalBest == nil, case .some(.none) = points {
+                Text("まだ記録がありません").foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("自己ベスト")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { points = .some(model.bestPointsDay()) }
+    }
+
+    private func bestRow(_ title: String, value: String, day: Date) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.subheadline).foregroundStyle(.secondary)
+            Text(value).font(.title2.bold().monospacedDigit())
+            Text(TimeMapView.dayText(day)).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 時間帯の地図（ANA-07）：曜日×2時間の区間。濃いほど集中している（直近4週の平均）
+struct TimeMapView: View {
+    let map: TimeMap
+    static let weekdays = ["月", "火", "水", "木", "金", "土", "日"]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                grid
+                if let peak = Self.peakText(map) { Text(peak).font(.subheadline) }
+                Text("直近4週の、曜日と時間帯ごとの集中の平均。濃いほど長く集中しています（今日は入れません）。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(16)
+        }
+        .navigationTitle("時間帯の地図")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var grid: some View {
+        let maxValue = max(map.maxValue, 1)
+        return Grid(horizontalSpacing: 3, verticalSpacing: 3) {
+            GridRow {
+                Text("")
+                ForEach(Self.weekdays, id: \.self) { Text($0).font(.caption2).foregroundStyle(.secondary) }
+            }
+            ForEach(0..<Laps.count, id: \.self) { section in
+                GridRow {
+                    Text("\((DayBoundary.hour + section * 2) % 24):00").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
+                        .gridColumnAlignment(.trailing)
+                    ForEach(0..<7, id: \.self) { weekday in
+                        let value = map.averages[weekday][section]
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(value == 0 ? Color.secondary.opacity(0.08) : Theme.focus.opacity(0.15 + 0.85 * Double(value) / Double(maxValue)))
+                            .frame(height: 22)
+                            .accessibilityLabel("\(Self.weekdays[weekday])曜 \((DayBoundary.hour + section * 2) % 24)時から")
+                            .accessibilityValue(DurationFormat.japanese(value))
+                    }
+                }
+            }
+        }
+        // マスの幅は変えないので、時刻と曜日は折り返さない大きさまで
+        .dynamicTypeSize(...DynamicTypeSize.large)
+        .accessibilityIdentifier("timeMapGrid")
+    }
+
+    /// 例：よく集中するのは 水曜の 10:00–12:00
+    static func peakText(_ map: TimeMap) -> String? {
+        map.peak.map { peak in
+            let start = (DayBoundary.hour + peak.section * 2) % 24
+            return "よく集中するのは \(weekdays[peak.weekday])曜の \(start):00–\((start + 2) % 24):00"
+        }
+    }
+
+    /// 例：9月28日（日）
+    static func dayText(_ day: Date) -> String {
+        day.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
     }
 }

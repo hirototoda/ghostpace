@@ -32,12 +32,19 @@ protocol AppSettings: AnyObject {
     var habitsJSON: Data? { get set }
     /// 習慣の最初の案内を出す途中か（初めて使う端末。決める前に閉じても、次の起動でまた出す）
     var habitIntroPending: Bool { get set }
+    /// 最後に出したラップ・中間地点の帯（GHO-06。「その日|区間の開始」「その日|中間」）。同じものを二度出さない
+    var lastRaceNotice: String? { get set }
+    /// 環境音（TMR-14）。nil・"none" は流さない
+    var ambientSound: String? { get set }
+    /// 環境音の音量（0〜1、初期 0.6）
+    var ambientVolume: Double { get set }
 }
 
 enum SettingsDefaults {
     static let reviewMinutes = 22 * 60
     static let sleepStartMinutes = 0
     static let sleepEndMinutes = 7 * 60
+    static let ambientVolume = 0.6
 }
 
 /// UserDefaults に保存する設定。項目がなければ初期値で読む。
@@ -65,6 +72,9 @@ final class UserDefaultsSettings: AppSettings {
         static let sleepEndMinutes = "sleepEndMinutes"
         static let habits = "habits"
         static let habitIntroPending = "habitIntroPending"
+        static let lastRaceNotice = "lastRaceNotice"
+        static let ambientSound = "ambientSound"
+        static let ambientVolume = "ambientVolume"
     }
 
     var reviewMinutes: Int {
@@ -146,6 +156,21 @@ final class UserDefaultsSettings: AppSettings {
         set { defaults.set(newValue, forKey: Key.habitIntroPending) }
     }
 
+    var lastRaceNotice: String? {
+        get { defaults.string(forKey: Key.lastRaceNotice) }
+        set { defaults.set(newValue, forKey: Key.lastRaceNotice) }
+    }
+
+    var ambientSound: String? {
+        get { defaults.string(forKey: Key.ambientSound) }
+        set { defaults.set(newValue, forKey: Key.ambientSound) }
+    }
+
+    var ambientVolume: Double {
+        get { (defaults.object(forKey: Key.ambientVolume) as? Double).map { min(max($0, 0), 1) } ?? SettingsDefaults.ambientVolume }
+        set { defaults.set(newValue, forKey: Key.ambientVolume) }
+    }
+
     /// 0:00 からの分（1日の中に収める）
     private static func minutes(_ value: Any?) -> Int? {
         (value as? Int).map { (($0 % 1440) + 1440) % 1440 }
@@ -170,6 +195,9 @@ final class MemorySettings: AppSettings {
     var sleepEndMinutes = SettingsDefaults.sleepEndMinutes
     var habitsJSON: Data?
     var habitIntroPending = false
+    var lastRaceNotice: String?
+    var ambientSound: String?
+    var ambientVolume = SettingsDefaults.ambientVolume
 
     init(didShowNotificationIntro: Bool = false) {
         self.didShowNotificationIntro = didShowNotificationIntro

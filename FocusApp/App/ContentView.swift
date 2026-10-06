@@ -10,6 +10,8 @@ struct ContentView: View {
                 #if DEBUG
                 if launcher.options.liveGallery {
                     LiveActivityGallery()
+                } else if launcher.options.widgetGallery {
+                    WidgetGallery(model: model)
                 } else if launcher.options.openAddCategory {
                     AddCategorySheet(startsDetox: true, focusesName: false) { _, _, _ in false }
                 } else {
@@ -136,6 +138,8 @@ private struct MainView: View {
             .accessibilityIdentifier("analysisTab")
         }
         .overlay(alignment: .top) { noticeBanner }
+        // ラップ・中間地点の帯は軽く振動させる（GHO-06）
+        .sensoryFeedback(.impact(weight: .light), trigger: model.raceNoticeCount)
         // 計画・分析のタブは、それぞれの画面が自分で知らせを出す
         .saveErrorAlert($model.errorMessage, when: tab == .timer && isHomeTopmost)
         .fullScreenCover(item: Binding(get: { model.morningPlan }, set: { _ in })) { morning in
@@ -176,7 +180,10 @@ private struct MainView: View {
             // 実行中のタイマーは、朝の計画とは別の階層から出す（全画面の表示は1つの View に1つまで）
             Color.clear.fullScreenCover(item: Binding(get: { model.running }, set: { _ in })) { timer in
                 TimerRunningView(timer: timer, opponent: model.opponent, onPause: model.pause, onResume: model.resume,
-                                 onEnd: model.requestEnd, onSwitch: model.switchToBlock)
+                                 onEnd: model.requestEnd, onSwitch: model.switchToBlock,
+                                 ambient: AmbientControl(sound: model.ambientSound, volume: model.ambientVolume,
+                                                         onSelect: { model.setAmbientSound($0) },
+                                                         onVolume: { model.setAmbientVolume($0) }))
                     .sheet(item: $model.endTimeCheck) { check in
                         EndTimeSheet(check: check) { model.end(reportedEnd: $0) }
                             .saveErrorAlert($model.errorMessage)

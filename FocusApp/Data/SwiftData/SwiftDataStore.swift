@@ -8,6 +8,8 @@ final class SwiftDataStore: RecordStore {
     let clock: any AppClock
     /// 保存の直前に呼ぶ。テストと DEBUG の `-failSave` で保存を失敗させるために使う
     var saveHook: (() throws -> Void)?
+    /// 保存するたびに増える番号（数え直しのキャッシュの目印、ANA-06・07）
+    private(set) var revision = 0
 
     init(container: ModelContainer, clock: any AppClock) {
         context = ModelContext(container)
@@ -23,6 +25,7 @@ final class SwiftDataStore: RecordStore {
             if context.hasChanges {
                 try saveHook?()
                 try context.save()
+                revision += 1
             }
             return result
         } catch {
@@ -503,6 +506,13 @@ final class SwiftDataStore: RecordStore {
             record.originalEndAt = shortened.originalEndAt
             record.updatedAt = clock.now()
         }
+    }
+
+    func allSessions() throws -> [FocusSession] {
+        let categories = try categoryMap()
+        let projects = try projectMap()
+        return try context.fetch(FetchDescriptor<FocusSessionRecord>(sortBy: [SortDescriptor(\.startAt)]))
+            .map { value($0, categories: categories, projects: projects) }
     }
 
     func sessions(dayKey: String) throws -> [FocusSession] {

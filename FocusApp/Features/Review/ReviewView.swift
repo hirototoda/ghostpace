@@ -89,7 +89,9 @@ struct ReviewView: View {
                 Text("今のところ・確定は朝4:00").font(.caption2).foregroundStyle(.tertiary)
             }
             if content.verdicts.isEmpty {
-                Text("先週の記録がないので、来週から勝ち負けが出ます").font(.subheadline).foregroundStyle(.secondary)
+                Text(content.hasOlderHistory ? "おかえりなさい。先週はお休みでした。来週から勝ち負けが出ます"
+                                             : "先週の記録がないので、来週から勝ち負けが出ます")
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
             ForEach(content.verdicts) { verdict in
                 VerdictRow(verdict: verdict)
