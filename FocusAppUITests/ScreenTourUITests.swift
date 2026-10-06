@@ -59,6 +59,14 @@ final class ScreenTourUITests: XCTestCase {
         shoot("habit-intro")
     }
 
+    /// 計画どおりの点（GHO-16）の帯と、今のブロックの最中の前倒し（TMR-15）
+    func testOnPlanPoints() {
+        let app = demo("day", "2026-10-19T11:40:00")
+        XCTAssertTrue(app.buttons["startEarlyButton"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("home-current-and-next")
+    }
+
     /// 見せ方・ウィジェット・環境音（GHO-06・15、ANA-06・07、WID-01、TMR-14）
     func testRaceViewsWidgetsAndSound() {
         var app = demo("day", "2026-10-19T15:20:00")

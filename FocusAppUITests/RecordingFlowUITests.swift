@@ -754,6 +754,17 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertEqual(ambient.value as? String, "雨")
     }
 
+    /// 今のブロックの最中でもタイマーがなければ次を前倒しで始められる（TMR-15）。計画どおりの点の帯（2秒）は単体テストで確かめる
+    func testEarlyStartDuringABlock() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T11:40:00+09:00"])
+        let early = app.buttons["startEarlyButton"]
+        XCTAssertTrue(early.waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["ゼミ準備を開始"].exists)
+        early.tap()
+        XCTAssertTrue(app.staticTexts["卒論"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["endButton"].exists)
+    }
+
     /// 計画の時間の格子のブロック（PLN-10）。読み上げは「名前 時刻」
     private func planBlock(_ app: XCUIApplication, _ name: String) -> XCUIElement {
         app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", name + " ")).firstMatch

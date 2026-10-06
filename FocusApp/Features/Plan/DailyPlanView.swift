@@ -56,6 +56,9 @@ struct DailyPlanView: View {
     /// 押し忘れの申告（TMR-13、計画のタブだけ）：申告できない理由と、申告する操作
     var declarationProblem: ((PlanBlockDraft, Date) -> Declaration.Problem?)?
     var onDeclare: ((PlanBlockDraft, Date) -> Bool)?
+    /// 終わったブロックを遅れて始める（TMR-15、計画のタブだけ）：始められるか、始める操作
+    var canStartLate: ((PlanBlockDraft) -> Bool)?
+    var onStartLate: ((PlanBlockDraft) -> Void)?
     @State private var gridProblem: String?
     @State private var editsSleep = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -173,7 +176,8 @@ struct DailyPlanView: View {
                                      plan.endUnblock(id: target.block.id, now: now)
                                      editing = nil
                                  },
-                                 declaration: target.isNew ? nil : declarationOption(for: target.block)) { saved in
+                                 declaration: target.isNew ? nil : declarationOption(for: target.block),
+                                 onStartNow: startLateAction(for: target)) { saved in
                     plan.upsert(saved)
                     editing = nil
                 } onDelete: {
@@ -230,6 +234,15 @@ struct DailyPlanView: View {
                 Divider()
                 saveAsTemplateButton.padding(.vertical, 10)
             }
+        }
+    }
+
+    /// 終わったブロックを今から始めるボタン（計画のタブで、開始から1時間以内・記録なし）
+    private func startLateAction(for target: EditorTarget) -> (() -> Void)? {
+        guard mode == .tab, !target.isNew, let canStartLate, let onStartLate, canStartLate(target.block) else { return nil }
+        return {
+            editing = nil
+            onStartLate(target.block)
         }
     }
 

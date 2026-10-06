@@ -36,10 +36,10 @@ struct EarlyStartTests {
         #expect(snapshot("2026-10-19T05:00", plan: plan()).earlyStartBlock?.start == jst("2026-10-19T09:00"))
     }
 
-    /// 今の計画ブロックがあるときは、主ボタンでそれを始めるので出さない（境界：ちょうど終わる・ちょうど始まる時刻）
-    @Test func noEarlyStartDuringABlock() {
-        #expect(snapshot("2026-10-19T09:00", plan: plan()).earlyStartBlock == nil)
-        #expect(snapshot("2026-10-19T10:29", plan: plan()).earlyStartBlock == nil)
+    /// 2026-10-06 から今の計画ブロックの最中も次を前倒しできる（タイマーがなくホームが見えているとき、TMR-15）
+    @Test func earlyStartAlsoDuringABlock() {
+        #expect(snapshot("2026-10-19T09:00", plan: plan()).earlyStartBlock?.start == jst("2026-10-19T11:00"))
+        #expect(snapshot("2026-10-19T10:29", plan: plan()).earlyStartBlock?.start == jst("2026-10-19T11:00"))
         #expect(snapshot("2026-10-19T10:30", plan: plan()).earlyStartBlock?.start == jst("2026-10-19T11:00"))
         #expect(snapshot("2026-10-19T10:59", plan: plan()).earlyStartBlock?.start == jst("2026-10-19T11:00"))
         #expect(snapshot("2026-10-19T11:00", plan: plan()).earlyStartBlock == nil)
@@ -57,13 +57,13 @@ struct EarlyStartTests {
         #expect(s.earlyStartBlock == nil)
     }
 
-    /// くっつくブロック：前のブロックの終わり＝次の始まりの瞬間は、次のブロックが「今」なので前倒しは出ない
-    @Test func noEarlyStartBetweenAdjacentBlocks() {
+    /// くっつくブロック：前のブロックの最中は次を前倒しでき、次の始まりの瞬間は次のブロックが「今」になる
+    @Test func earlyStartBetweenAdjacentBlocks() {
         let adjacent = PlanDraft(blocks: [
             PlanBlockDraft(start: jst("2026-10-19T10:00"), minutes: 60, category: c[0]),
             PlanBlockDraft(start: jst("2026-10-19T11:00"), minutes: 60, category: c[1]),
         ])
-        #expect(snapshot("2026-10-19T10:59", plan: adjacent).earlyStartBlock == nil)
+        #expect(snapshot("2026-10-19T10:59", plan: adjacent).earlyStartBlock?.start == jst("2026-10-19T11:00"))
         #expect(snapshot("2026-10-19T11:00", plan: adjacent).earlyStartBlock == nil)
     }
 
@@ -106,11 +106,16 @@ struct EarlyStartTests {
         #expect(timer(session("2026-10-19T11:00", nil), blocks: [block]).switchableBlock(at: jst("2026-10-19T11:20")) == nil)
     }
 
-    @Test func notSwitchableFromABlockOrForGameTime() {
+    /// 2026-10-06 から、ほかの計画ブロックのタイマー中に次のブロックの時刻が来ても切り替えを出す（TMR-15）。ゲーム・SNS には出さない
+    @Test func switchableFromAnotherBlockButNotForGameTime() {
         let block = summary("2026-10-19T11:00", 120)
-        var planned = session("2026-10-19T10:30", nil, plannedEnd: "2026-10-19T10:50")
+        var planned = session("2026-10-19T10:30", nil, plannedEnd: "2026-10-19T11:30")
         planned.planBlockId = UUID()
-        #expect(timer(planned, blocks: [block]).switchableBlock(at: jst("2026-10-19T11:05")) == nil)
+        #expect(timer(planned, blocks: [block]).switchableBlock(at: jst("2026-10-19T11:05")) == block)
+        // そのブロック自身のタイマーには出さない
+        var own = session("2026-10-19T11:05", nil, plannedEnd: "2026-10-19T13:00")
+        own.planBlockId = block.id
+        #expect(timer(own, blocks: [block]).switchableBlock(at: jst("2026-10-19T11:10")) == nil)
         let game = summary("2026-10-19T11:00", 30, .gameSNS, title: "ゲーム・SNS")
         #expect(timer(session("2026-10-19T10:30", nil), blocks: [game]).switchableBlock(at: jst("2026-10-19T11:05")) == nil)
     }

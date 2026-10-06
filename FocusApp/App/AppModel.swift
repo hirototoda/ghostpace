@@ -230,7 +230,8 @@ final class AppModel {
                                          todaySessions: todaySessions + (try carriedOver(into: dayStart, calendar: calendar)),
                                          plan: plan, lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
                                          reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
-                                         detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps)
+                                         detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps,
+                                         onPlan: try onPlanContext(dayStart: dayStart, calendar: calendar))
 
             try addHistory(to: &snapshot, calendar: calendar)
             snapshot.awake = awakeRange(dayStart: dayStart)
@@ -257,7 +258,8 @@ final class AppModel {
                 let draft = stored?.draft ?? newDraft(dayStart: dayStart)
                 morningPlan = MorningPlan(dayKey: dayKey, dayStart: dayStart, draft: draft)
             }
-            if running == nil, morningPlan == nil { announceRace(dayKey: dayKey) }
+            // 計画どおりの点はタイマー中も知らせる。ラップの帯はタイマー中は出さない
+            if morningPlan == nil, !announcePlanPoint(dayKey: dayKey), running == nil { announceRace(dayKey: dayKey) }
         }
     }
 
@@ -304,7 +306,8 @@ final class AppModel {
                                          plan: stored?.status == .skipped ? nil : (stored?.draft ?? PlanDraft()),
                                          lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
                                          reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
-                                         detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps)
+                                         detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps,
+                                         onPlan: try onPlanContext(dayStart: dayStart, calendar: calendar))
             try addHistory(to: &home, calendar: calendar)
             // 確定した日だけ朝の計画と比べる。下書きのまま・計画なし日は計画なしとして扱う
             let confirmed = stored?.status == .confirmed || stored?.status == .unknown
@@ -655,7 +658,8 @@ final class AppModel {
             detox: try detoxDay(dayStart: dayStart, until: until, events: events, calendar: calendar),
             lastWeekDetox: try detoxDay(dayStart: DayBoundary.sameDayLastWeek(dayStart, calendar: calendar),
                                         until: .distantFuture, events: events, calendar: calendar),
-            sleep: sleep.map(\.interval), sleepCaps: sleep.compactMap(\.extendedPart), dayStart: dayStart)
+            sleep: sleep.map(\.interval), sleepCaps: sleep.compactMap(\.extendedPart), dayStart: dayStart,
+            onPlan: try onPlanContext(dayStart: dayStart, calendar: calendar))
     }
 
     // MARK: タイムライン
@@ -711,16 +715,37 @@ final class AppModel {
 
     // MARK: タイマー
 
-    func startPlanned(block: PlanBlockSummary) {
+    /// 計画ブロックから始める。遅れて始めたら終わりを計画の長さぶんずらす（TMR-15）。
+    /// 長さは始めた時点のブロックの長さとして残す（計画どおりの点の基準、GHO-16）。
+    /// `endsAtBlockEnd` は「開始から始めていた（申告）」のとき（開始からの分は申告済みなので、終わりはブロックの終わり）
+    func startPlanned(block: PlanBlockSummary, endsAtBlockEnd: Bool = false) {
         // ゲーム・SNS の時間（BLK-10）からはタイマーを始めない
         guard !block.category.isUnblock else { return }
+        let length = max(60, Int(block.end.timeIntervalSince(block.start)))
+        let now = clock.now()
+        let end = endsAtBlockEnd || now <= block.start ? block.end : now.addingTimeInterval(Double(length))
         start(StartRequest(category: block.category, project: block.project, planBlockId: block.id,
-                           plannedEndAt: block.end, plannedDurationSec: nil, timeZone: timeZone()))
+                           plannedEndAt: end, plannedDurationSec: length, timeZone: timeZone()))
     }
 
     func startUnplanned(category: CategoryOption, project: ProjectOption? = nil, minutes: Int?) {
         start(StartRequest(category: category, project: project, planBlockId: nil, plannedEndAt: nil,
                            plannedDurationSec: minutes.map { $0 * 60 }, timeZone: timeZone()))
+    }
+
+    // MARK: 計画どおりの点（GHO-16）
+
+    /// その日と先週の同じ曜日の、計画どおりの点の材料（確定した計画だけ）
+    private func onPlanContext(dayStart: Date, calendar: Calendar) throws -> OnPlanContext {
+        func confirmed(_ start: Date) throws -> (plan: StoredPlan, morning: Set<UUID>)? {
+            let key = DayBoundary.dayKey(containing: start, calendar: calendar)
+            guard let stored = try store.plan(dayKey: key), stored.status == .confirmed || stored.status == .unknown else { return nil }
+            return (stored, Set((try store.snapshot(dayKey: key) ?? []).map(\.blockId)))
+        }
+        let today = try confirmed(dayStart)
+        let lastWeek = try confirmed(DayBoundary.sameDayLastWeek(dayStart, calendar: calendar))
+        return OnPlanContext(morningBlockIds: today?.morning ?? [], addedAt: today?.plan.addedAt ?? [:],
+                             lastWeekPlan: lastWeek?.plan, lastWeekMorningBlockIds: lastWeek?.morning ?? [])
     }
 
     // MARK: 環境音（TMR-14）
@@ -811,6 +836,18 @@ final class AppModel {
         return map
     }
 
+    /// 計画どおりの点（GHO-16）が付いたら「計画どおり +1pt（今日 2/3）」を出す（ブロックごとに1回）。出したら true
+    private func announcePlanPoint(dayKey: String) -> Bool {
+        let shown = Set((settings.lastRaceNotice ?? "").split(separator: ",").map(String.init).filter { $0.hasPrefix(dayKey + "|") })
+        let awards = snapshot.planAwards
+        guard let index = awards.firstIndex(where: { !shown.contains("\(dayKey)|plan|\($0.blockId)") }) else { return false }
+        let key = "\(dayKey)|plan|\(awards[index].blockId)"
+        settings.lastRaceNotice = shown.union([key]).sorted().joined(separator: ",")
+        notice = "計画どおり +1pt（今日 \(index + 1)/\(OnPlanPoints.dailyLimit)）"
+        raceNoticeCount += 1
+        return true
+    }
+
     /// 区間の区切り・中間地点を過ぎて開いたとき、帯と軽い振動で知らせる（1日に同じものは1回だけ、GHO-06）。
     /// 一度に出すのは1つ。出したものはその日の分だけ覚える
     private func announceRace(dayKey: String) {
@@ -873,8 +910,24 @@ final class AppModel {
                                                      start: start, end: now, plannedEndAt: draft.end, timeZone: timeZone()))
             }
             guard declared else { return }
+            return startPlanned(block: block, endsAtBlockEnd: true)
         }
         startPlanned(block: block)
+    }
+
+    // MARK: 遅れ開始（TMR-15）
+
+    /// 終わったブロックを今から始められるか：タイマーなし、記録なし、開始から1時間以内、ゲーム・SNS でない
+    func canStartLate(_ block: PlanBlockDraft) -> Bool {
+        let now = clock.now()
+        return running == nil && !block.isUnblock && block.end <= now && now.timeIntervalSince(block.start) <= OnPlanPoints.window
+            && !snapshot.startedBlockIds.contains(block.id)
+    }
+
+    /// 終わったブロックを今から始める（終わりは計画の長さぶん後ろ）
+    func startLate(_ block: PlanBlockDraft) {
+        guard canStartLate(block), let summary = snapshot.planBlocks.first(where: { $0.id == block.id }) else { return }
+        startPlanned(block: summary)
     }
 
     /// 申告の判定の材料：今日の朝の計画のブロック、今日の記録、開けていた時間
@@ -899,7 +952,8 @@ final class AppModel {
         var result: EndResult?
         guard perform({ result = try store.end(id: timer.id, reportedEnd: nil) }) else { return }
         if result == .discardedTooShort { notice = Self.discardedNotice }
-        startPlanned(block: block)
+        // 切り替えはブロックの終わりまで（TMR-11 の決まり。遅れ開始の「終わりをずらす」は使わない）
+        startPlanned(block: block, endsAtBlockEnd: true)
     }
 
     private func start(_ request: StartRequest) {

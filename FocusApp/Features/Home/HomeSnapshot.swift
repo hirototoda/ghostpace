@@ -42,6 +42,12 @@ struct HomeSnapshot {
     var hasOlderHistory = false
     /// 起きている時間（計画なし日のペース）。AppModel が入れる
     var awake: ClosedRange<Date>? = nil
+    /// 計画どおりの点（GHO-16）が付いた時刻：自分・先週の自分（今日に揃えた）・目標のゴースト
+    var planAwards: [OnPlanPoints.Award] = []
+    var ghostPlanAwards: [Date] = []
+    var goalPlanAwards: [Date] = []
+    /// 今日の記録があるブロック（さっきの行・前倒しの判定）
+    var startedBlockIds: Set<UUID> = []
 
     var focusSeconds: Int { sessions.focusSeconds(until: now) }
     /// 今日開けた時間と回数（DTX-05）。今日ブロックが一度も効いていなければ nil（出さない）
@@ -51,11 +57,21 @@ struct HomeSnapshot {
     }
     var currentBlock: PlanBlockSummary? { planBlocks.first { $0.start <= now && now < $0.end } }
     var nextBlock: PlanBlockSummary? { planBlocks.filter { $0.start > now }.min { $0.start < $1.start } }
-    /// 今から前倒しで始められるブロック（TMR-10）：計画なし日でなく、今の計画ブロックがないときの次のブロック。
+    /// 今から前倒しで始められるブロック（TMR-10）：計画なし日でない日の次のブロック。
+    /// 2026-10-06 から今のブロックの最中も（タイマーが動いていないとき＝ホームが見えているとき、TMR-15）。
     /// ゲーム・SNS の時間（BLK-10）はタイマーを始めないので出さない
     var earlyStartBlock: PlanBlockSummary? {
-        guard !isNoPlanDay, currentBlock == nil, let next = nextBlock, !next.category.isUnblock else { return nil }
+        guard !isNoPlanDay, let next = nextBlock, !next.category.isUnblock else { return nil }
         return next
+    }
+
+    /// 遅れて始められる終わったブロック（TMR-15）：記録がなく、開始から1時間以内（計画どおりの点の窓）。一番新しいもの
+    var recentMissedBlock: PlanBlockSummary? {
+        guard !isNoPlanDay else { return nil }
+        return planBlocks.filter {
+            $0.end <= now && now.timeIntervalSince($0.start) <= OnPlanPoints.window && !startedBlockIds.contains($0.id)
+                && !$0.category.isUnblock
+        }.max { $0.start < $1.start }
     }
     var ghostFocusSeconds: Int? { ghost?.focusSeconds(at: now) }
     /// 先週の自分との差（プラスならリード）
@@ -119,6 +135,14 @@ struct HomeSnapshot {
     var bestStatus: PersonalBest.Status? { personalBest?.status(todayFocus: focusSeconds) }
 }
 
+/// 計画どおりの点（GHO-16）の材料：朝の計画の写しのブロック、ブロックを足した時刻、先週の確定した計画
+struct OnPlanContext {
+    var morningBlockIds: Set<UUID> = []
+    var addedAt: [UUID: Date] = [:]
+    var lastWeekPlan: StoredPlan?
+    var lastWeekMorningBlockIds: Set<UUID> = []
+}
+
 /// 裏のグラフのアイコン（GHO-15）
 struct SessionIcon: Hashable {
     var start: Date
@@ -138,14 +162,15 @@ extension HomeSnapshot {
     static func make(now: Date, calendar: Calendar, todaySessions: [FocusSession], plan: PlanDraft?,
                      lastWeekSessions: [FocusSession], reviewMinutes: Int = SettingsDefaults.reviewMinutes,
                      noPlanGoalSeconds: Int? = nil, detox: DetoxDay? = nil, lastWeekDetox: DetoxDay? = nil,
-                     sleep: [DateInterval] = [], sleepCaps: [DateInterval] = [], dayStart: Date? = nil) -> HomeSnapshot {
+                     sleep: [DateInterval] = [], sleepCaps: [DateInterval] = [], dayStart: Date? = nil,
+                     onPlan: OnPlanContext = OnPlanContext()) -> HomeSnapshot {
         let dayStart = dayStart ?? DayBoundary.dayStart(containing: now, calendar: calendar)
         let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
         let lastWeekStart = DayBoundary.sameDayLastWeek(dayStart, calendar: calendar)
         // 計画なし日は目標時間だけ（GHO-10、Q13）
         let goal = GoalGhost(plan: plan, goalSeconds: plan == nil ? noPlanGoalSeconds : plan?.goalSeconds, sleep: sleep,
                              dayStart: dayStart, calendar: calendar).nonEmpty
-        return HomeSnapshot(
+        var snapshot = HomeSnapshot(
             now: now,
             dayStart: dayStart,
             dayEnd: dayEnd,
@@ -162,6 +187,20 @@ extension HomeSnapshot {
             goalDetox: goal.map { idealDetox($0, plan: plan, sleep: sleep, sleepCaps: sleepCaps, dayStart: dayStart, dayEnd: dayEnd) },
             sessionIcons: icons(todaySessions, dayStart: dayStart, now: now)
         )
+        // 計画どおりの点（GHO-16）：自分、目標のゴースト、先週の自分（先週の計画と記録から同じ決まりで、今日に揃える）
+        snapshot.planAwards = plan.map {
+            OnPlanPoints.awards(blocks: $0.blocks, sessions: todaySessions, morningBlockIds: onPlan.morningBlockIds,
+                                addedAt: onPlan.addedAt, now: now)
+        } ?? []
+        snapshot.goalPlanAwards = goal == nil ? [] : OnPlanPoints.goalAwards(blocks: plan?.blocks ?? [])
+        if let lastWeek = onPlan.lastWeekPlan {
+            let offset = dayStart.timeIntervalSince(lastWeekStart)
+            snapshot.ghostPlanAwards = OnPlanPoints.awards(
+                blocks: lastWeek.draft.blocks, sessions: lastWeekSessions, morningBlockIds: onPlan.lastWeekMorningBlockIds,
+                addedAt: lastWeek.addedAt, now: dayEnd.addingTimeInterval(-offset)).map { $0.date.addingTimeInterval(offset) }
+        }
+        snapshot.startedBlockIds = Set(todaySessions.compactMap(\.planBlockId))
+        return snapshot
     }
 
     /// タイマーを始めた所のアイコン。続けて同じカテゴリのときは最初だけ。前の日から続くタイマーは 4:00 に置く

@@ -247,13 +247,15 @@ final class SwiftDataStore: RecordStore {
         guard let record = try planRecord(dayKey: dayKey) else { return nil }
         let categories = try categoryMap()
         let projects = try projectMap()
-        let blocks = try blockRecords(planId: record.id).filter { !$0.isRemoved }.map { block in
+        let records = try blockRecords(planId: record.id).filter { !$0.isRemoved }
+        let blocks = records.map { block in
             PlanBlockDraft(id: block.id, start: block.startAt, minutes: Int(block.endAt.timeIntervalSince(block.startAt)) / 60,
                            category: categories[block.categoryId] ?? .unknown,
                            project: block.projectId.flatMap { projects[$0] })
         }
         return StoredPlan(status: PlanStatus(raw: record.statusRaw),
-                          draft: PlanDraft(blocks: blocks, goalSeconds: record.goalEdited ? record.goalFocusSec : nil))
+                          draft: PlanDraft(blocks: blocks, goalSeconds: record.goalEdited ? record.goalFocusSec : nil),
+                          addedAt: Dictionary(records.map { ($0.id, $0.createdAt) }, uniquingKeysWith: { first, _ in first }))
     }
 
     func snapshot(dayKey: String) throws -> [PlanSnapshotBlock]? {

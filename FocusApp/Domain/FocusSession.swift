@@ -194,10 +194,10 @@ struct RunningTimer: Identifiable, Hashable {
 
     /// 計画外のタイマー中に始まった、今の計画ブロック（TMR-11）。あればタイマー画面に「〜に切り替える」を出す。
     /// 計画外を始めた時点ですでに始まっていたブロック（わざと計画外にした）と、ゲーム・SNS の時間（BLK-10）は出さない
+    /// 2026-10-06 から計画ブロックのタイマーも：遅れて始めて終わりをずらした間に次のブロックの時刻が来たとき（TMR-15）
     func switchableBlock(at now: Date) -> PlanBlockSummary? {
-        guard session.planBlockId == nil else { return nil }
-        return planBlocks.first {
-            $0.start > session.startAt && $0.start <= now && now < $0.end && !$0.category.isUnblock
+        planBlocks.first {
+            $0.id != session.planBlockId && $0.start > session.startAt && $0.start <= now && now < $0.end && !$0.category.isUnblock
         }
     }
 

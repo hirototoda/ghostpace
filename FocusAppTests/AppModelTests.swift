@@ -114,7 +114,8 @@ struct AppModelTests {
         #expect(home.focusSeconds(at: jst("2026-10-19T18:00")) == 270 * 60)
     }
 
-    @Test func startPlannedUsesBlockEnd() throws {
+    /// 遅れて始めると終わりは計画の長さぶん後ろ（TMR-15、2026-10-06。それまではブロックの終わり）
+    @Test func startPlannedLateShiftsTheEnd() throws {
         let t = try TestStore(now: jst("2026-10-19T09:00"))
         let m = model(t)
         m.confirmPlan(PlanDraft(blocks: [block("2026-10-19T09:00", 70, m.categories[0])]))
@@ -124,9 +125,9 @@ struct AppModelTests {
         m.startPlanned(block: current)
 
         let running = try #require(m.running)
-        #expect(running.session.plannedEndAt == jst("2026-10-19T10:10"))
+        #expect(running.session.plannedEndAt == jst("2026-10-19T10:30"))
         #expect(running.session.planBlockId == current.id)
-        #expect(running.remainingSeconds(at: t.clock.now()) == 50 * 60)
+        #expect(running.remainingSeconds(at: t.clock.now()) == 70 * 60)
     }
 
     @Test func startUnplannedUsesLength() throws {

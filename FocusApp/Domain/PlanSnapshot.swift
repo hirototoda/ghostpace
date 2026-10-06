@@ -32,6 +32,8 @@ enum PlanStatus: Hashable {
 struct StoredPlan: Hashable {
     var status: PlanStatus
     var draft: PlanDraft
+    /// ブロックを計画に足した時刻（計画どおりの点の対象を決める、GHO-16）
+    var addedAt: [UUID: Date] = [:]
 }
 
 /// 確定時の計画ブロックの写し（PLN-03）。名前も残すので、後でカテゴリ名を変えても朝の計画が読める。

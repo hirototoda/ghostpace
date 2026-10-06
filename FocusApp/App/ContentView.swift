@@ -190,6 +190,9 @@ private struct MainView: View {
                     }
                     .saveErrorAlert($model.errorMessage, when: model.endTimeCheck == nil)
                     .holdUnlockCover(model: model, when: model.endTimeCheck == nil)
+                    // 計画どおりの点（GHO-16）はタイマーの画面にも出す
+                    .overlay(alignment: .top) { noticeBanner }
+                    .sensoryFeedback(.impact(weight: .light), trigger: model.raceNoticeCount)
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -271,7 +274,9 @@ private struct MainView: View {
                           habits: model.habits, habitsEditor: { AnyView(HabitsView(model: model)) },
                           awake: model.awakeRange(dayStart: model.snapshot.dayStart),
                           declarationProblem: { model.declarationProblem(for: $0, end: $1) },
-                          onDeclare: { model.declare($0, end: $1) })
+                          onDeclare: { model.declare($0, end: $1) },
+                          canStartLate: { model.canStartLate($0) },
+                          onStartLate: { model.startLate($0) })
                 .id(model.snapshot.dayStart)
         } else {
             NoPlanTab(model: model)

@@ -153,7 +153,8 @@ struct RacePointsTests {
         #expect(goalDetox.pieces.contains { $0.kind == .asleep && $0.start == jst("2026-10-19T04:00") })
         #expect(goalDetox.detoxSeconds(until: s.dayEnd) == 22 * 3600)
         let whole = try #require(s.opponentPoints(.goal, at: s.dayEnd))
-        #expect(whole.isApprox(11.25 + goalDetox.points(until: s.dayEnd)))
+        // ＋計画どおりの点2つ（勉強と運動、GHO-16）
+        #expect(whole.isApprox(11.25 + goalDetox.points(until: s.dayEnd) + 2))
         #expect(whole > 11.25 + 50)
         // 時間の線はないので、目標を選んでも自分と目標のポイントの2本
         #expect(Set(s.raceCurves(opponent: .goal).map(\.kind)) == [.minePoints, .opponentPoints])

@@ -46,7 +46,8 @@ struct HomeView: View {
                 VStack(spacing: 24) {
                     header
                     Spacer(minLength: 0)
-                    RingHero(snapshot: snapshot, opponent: $opponent)
+                    // 日付・差・予想ゴールの行の分（約240pt）を残してカードを収める
+                    RingHero(snapshot: snapshot, opponent: $opponent, maxCardHeight: max(260, proxy.size.height - 240))
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 20)
@@ -142,47 +143,58 @@ struct HomeView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("planLine")
             .accessibilityHint("計画を作ります")
-        } else if let early = snapshot.earlyStartBlock {
-            // 「次」の行の右に「今から始める」（前倒し、TMR-10。2026-10-03 案B）。入りきらない大きな文字では下に回す
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { earlyLine(early) }
-                VStack(spacing: 8) { earlyLine(early) }
-            }
         } else {
-            Button(action: onTapPlan) {
-                HStack(spacing: 6) {
-                    if let block = snapshot.currentBlock {
-                        blockLine("今", block)
-                    } else if let block = snapshot.nextBlock {
-                        blockLine("次", block)
-                    } else {
-                        Text("今日の計画は終わりました").font(.subheadline).foregroundStyle(.secondary)
+            VStack(spacing: 8) {
+                // さっき終わったブロックを遅れて始める（TMR-15）
+                if let missed = snapshot.recentMissedBlock { actionLine("さっき", missed, identifier: "startMissedButton") }
+                if let current = snapshot.currentBlock {
+                    planButton { blockLine("今", current) }
+                }
+                if let early = snapshot.earlyStartBlock {
+                    // 「次」の行の右に「今から始める」（前倒し、TMR-10。2026-10-03 案B。今のブロックの最中も、TMR-15）
+                    actionLine("次", early, identifier: "startEarlyButton")
+                } else if snapshot.currentBlock == nil {
+                    planButton {
+                        if let block = snapshot.nextBlock {
+                            blockLine("次", block)
+                        } else {
+                            Text("今日の計画は終わりました").font(.subheadline).foregroundStyle(.secondary)
+                        }
                     }
-                    Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
                 }
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("planLine")
-            .accessibilityHint("計画を変更します")
         }
     }
 
-    @ViewBuilder
-    private func earlyLine(_ early: PlanBlockSummary) -> some View {
+    /// 押すと計画のタブへ（PLN-04）
+    private func planButton<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         Button(action: onTapPlan) {
             HStack(spacing: 6) {
-                blockLine("次", early)
+                content()
                 Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
             }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("planLine")
         .accessibilityHint("計画を変更します")
-        Button("今から始める") { onStartBlock(early) }
+    }
+
+    /// 行の右に「今から始める」。入りきらない大きな文字では下に回す
+    private func actionLine(_ prefix: String, _ block: PlanBlockSummary, identifier: String) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { actionContent(prefix, block, identifier: identifier) }
+            VStack(spacing: 8) { actionContent(prefix, block, identifier: identifier) }
+        }
+    }
+
+    @ViewBuilder
+    private func actionContent(_ prefix: String, _ block: PlanBlockSummary, identifier: String) -> some View {
+        planButton { blockLine(prefix, block) }
+        Button("今から始める") { onStartBlock(block) }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .font(.subheadline.bold())
-            .accessibilityIdentifier("startEarlyButton")
+            .accessibilityIdentifier(identifier)
     }
 
     private func blockLine(_ prefix: String, _ block: PlanBlockSummary) -> some View {

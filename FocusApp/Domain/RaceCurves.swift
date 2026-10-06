@@ -37,6 +37,7 @@ extension HomeSnapshot {
 
     func myPoints(until date: Date) -> Double {
         FocusPoints.points(sessions, until: date, opened: detox?.openedIntervals ?? []) + (detox?.points(until: date) ?? 0)
+            + Double(planAwards.filter { $0.date <= date }.count)
     }
 
     /// 相手の `date` までのポイント。相手がいなければ nil。
@@ -46,9 +47,12 @@ extension HomeSnapshot {
         case .lastWeek:
             guard let ghostDetox else { return nil }
             return FocusPoints.points(ghost?.segments ?? [], until: date, opened: ghostDetox.openedIntervals)
-                + ghostDetox.points(until: date)
+                + ghostDetox.points(until: date) + Double(ghostPlanAwards.filter { $0 <= date }.count)
         case .goal:
-            return goal.map { FocusPoints.points($0.segments, until: date) + (goalDetox?.points(until: date) ?? 0) }
+            return goal.map {
+                FocusPoints.points($0.segments, until: date) + (goalDetox?.points(until: date) ?? 0)
+                    + Double(goalPlanAwards.filter { $0 <= date }.count)
+            }
         }
     }
 
