@@ -65,7 +65,7 @@ final class AppModel {
     private var historyCache: (revision: Int, today: Date, byDay: [Date: Int])?
     private var timeMapCache: (revision: Int, today: Date, map: TimeMap)?
     /// 過ぎた日のポイント（分析）。保存したとき・日が変わったときだけ数え直す（全期間の自己ベストで毎回全部の日を数えない）
-    private var pastPointsCache: (revision: Int, today: Date, events: Int, days: [Date: DayPoints])?
+    private var pastPointsCache: (revision: Int, today: Date, events: Int, sleep: (start: Int, end: Int), days: [Date: DayPoints])?
     var endTimeCheck: EndTimeCheck?
     /// 短い知らせ（ホームの上に2秒出す）
     var notice: String?
@@ -647,23 +647,31 @@ final class AppModel {
         let today = DayBoundary.dayStart(containing: now, calendar: calendar)
         // ブロックの記録は1回だけ読む
         let events = (try? blockLog.all()) ?? []
-        // ブロックの記録はあとから届くことがある（ブロックの画面の拡張が書く）ので、件数が変わっても数え直す
-        if pastPointsCache?.revision != store.revision || pastPointsCache?.today != today || pastPointsCache?.events != events.count {
-            pastPointsCache = (store.revision, today, events.count, [:])
+        // ブロックの記録はあとから届くことがある（ブロックの画面の拡張が書く）ので、件数が変わっても数え直す。
+        // 睡眠を保存していない日は設定の睡眠の時刻で点が付くので、設定を変えても数え直す
+        if let cache = pastPointsCache, cache.revision == store.revision, cache.today == today,
+           cache.events == events.count, cache.sleep == sleepSettings {
+        } else {
+            pastPointsCache = (store.revision, today, events.count, sleepSettings, [:])
         }
         // 途中の1日が読めなくても全体は欠かさず、その日だけ記録なしにする
         return dayStarts.filter { $0 <= today }.map { dayStart -> DayPoints in
             let isToday = dayStart == today
             if !isToday, let cached = pastPointsCache?.days[dayStart] { return cached }
-            let day = dayPoints(dayStart: dayStart, isToday: isToday, now: now, events: events, calendar: calendar)
-            if !isToday { pastPointsCache?.days[dayStart] = day }
-            return day
+            do {
+                let day = try dayPoints(dayStart: dayStart, isToday: isToday, now: now, events: events, calendar: calendar)
+                if !isToday { pastPointsCache?.days[dayStart] = day }
+                return day
+            } catch {
+                // 読めなかった日は覚えず、次に開いたときに読み直す
+                return DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday)
+            }
         }
     }
 
-    private func dayPoints(dayStart: Date, isToday: Bool, now: Date, events: [BlockEvent], calendar: Calendar) -> DayPoints {
-        guard let snapshot = try? daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar),
-              let recorded = try? isToday || hasRecord(dayStart: dayStart, snapshot: snapshot, calendar: calendar), recorded else {
+    private func dayPoints(dayStart: Date, isToday: Bool, now: Date, events: [BlockEvent], calendar: Calendar) throws -> DayPoints {
+        let snapshot = try daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar)
+        guard try isToday || hasRecord(dayStart: dayStart, snapshot: snapshot, calendar: calendar) else {
             return DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday)
         }
         return DayPoints(dayStart: dayStart, points: snapshot.points,
@@ -870,8 +878,6 @@ final class AppModel {
         }
         return result
     }
-
-    func periodBest(_ period: BestPeriod) -> PeriodBest? { periodBests()[period] }
 
     /// 今日と、ポイントのベストの日（`bestDay` の 4:00）の比べとラップ表（ANA-06）
     func bestComparison(bestDay: Date) -> BestComparison? {

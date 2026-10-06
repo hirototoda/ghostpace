@@ -450,7 +450,7 @@ struct PersonalBestView: View {
 
     /// 「今日 今まで 78.3pt」と、ベストの日の同じ時刻までと差。上回っていれば赤
     private func todayRow(_ comparison: BestComparison) -> some View {
-        let wins = BestLaps.beats(comparison.today, comparison.bestAtSameTime)
+        let wins = comparison.wins
         return ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline) {
                 todayValue(comparison, wins: wins)
@@ -526,8 +526,8 @@ struct BestLapTable: View {
                         Text(Self.startText(row))
                         if row.isCurrent { Text("途中").font(.caption2).foregroundStyle(.secondary) }
                     }
-                    number(row.today, wins: row.today.map { BestLaps.beats($0, row.best) } ?? false)
-                    number(row.todayTotal, wins: row.todayTotal.map { BestLaps.beats($0, row.bestTotal) } ?? false)
+                    number(row.today, wins: row.todayWins)
+                    number(row.todayTotal, wins: row.totalWins)
                     number(row.best, wins: false).foregroundStyle(.secondary)
                     number(row.bestTotal, wins: false).foregroundStyle(.secondary)
                     gap(row)
@@ -543,9 +543,9 @@ struct BestLapTable: View {
             Text(Self.rangeText(row) + (row.isCurrent ? "（途中）" : "")).font(.subheadline.bold())
             HStack(spacing: 4) {
                 Text("今日")
-                number(row.today, wins: row.today.map { BestLaps.beats($0, row.best) } ?? false)
+                number(row.today, wins: row.todayWins)
                 Text("累計")
-                number(row.todayTotal, wins: row.todayTotal.map { BestLaps.beats($0, row.bestTotal) } ?? false)
+                number(row.todayTotal, wins: row.totalWins)
             }
             HStack(spacing: 4) {
                 Text("ベストの日")
@@ -574,8 +574,8 @@ struct BestLapTable: View {
     private func gap(_ row: BestLapRow) -> some View {
         if let gap = row.totalGap {
             Text(String(RaceChartLayout.signedPoints(gap).dropLast(2)))
-                .foregroundStyle(BestLaps.beats(gap, 0) ? Theme.record : Theme.behind)
-                .fontWeight(BestLaps.beats(gap, 0) ? .bold : .regular)
+                .foregroundStyle(row.totalWins ? Theme.record : Theme.behind)
+                .fontWeight(row.totalWins ? .bold : .regular)
         } else {
             Text("—").foregroundStyle(.secondary)
         }

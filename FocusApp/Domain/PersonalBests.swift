@@ -41,8 +41,12 @@ struct BestLapRow: Identifiable, Hashable {
     var isCurrent: Bool
 
     var id: Date { section.start }
-    /// 累計の差（今日−ベストの日）。まだ来ていない区間は nil
-    var totalGap: Double? { todayTotal.map { $0 - bestTotal } }
+    /// 累計の差（今日−ベストの日）。表に出る2つの数字（0.1pt）の差なので、見た目の引き算と合う。まだ来ていない区間は nil
+    var totalGap: Double? { todayTotal.map { BestLaps.shownGap($0, bestTotal) } }
+    /// 区間の数字を赤にするか（今日がベストの日を上回った）
+    var todayWins: Bool { today.map { BestLaps.beats($0, best) } ?? false }
+    /// 累計の数字と差を赤にするか
+    var totalWins: Bool { todayTotal.map { BestLaps.beats($0, bestTotal) } ?? false }
 }
 
 /// 今日とベストの日の比べ（ANA-06）
@@ -53,7 +57,8 @@ struct BestComparison: Hashable {
     var bestAtSameTime: Double
     var rows: [BestLapRow]
 
-    var gap: Double { today - bestAtSameTime }
+    var gap: Double { BestLaps.shownGap(today, bestAtSameTime) }
+    var wins: Bool { BestLaps.beats(today, bestAtSameTime) }
 }
 
 enum BestLaps {
@@ -83,6 +88,11 @@ enum BestLaps {
     /// 表示（0.1pt）で上回っているか。同じに見えるなら false（赤にしない）
     static func beats(_ mine: Double, _ theirs: Double) -> Bool {
         shown(mine) > shown(theirs)
+    }
+
+    /// 表示（0.1pt）どうしの差。差だけ別に丸めると「12.0 と 12.0 で +0.1」のようにずれるため
+    static func shownGap(_ mine: Double, _ theirs: Double) -> Double {
+        (shown(mine) - shown(theirs)) / 10
     }
 
     private static func shown(_ points: Double) -> Double { (points * 10).rounded() }
