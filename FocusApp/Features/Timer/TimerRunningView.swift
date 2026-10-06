@@ -177,6 +177,7 @@ struct AmbientSheet: View {
     let control: AmbientControl
     @State private var volume: Double
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(control: AmbientControl) {
         self.control = control
@@ -225,7 +226,8 @@ struct AmbientSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        // 大きな文字では半分の高さに収まらないので、最初から全部の高さで出す
+        .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
         .tint(Theme.focus)
     }
 }

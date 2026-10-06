@@ -59,6 +59,52 @@ final class ScreenTourUITests: XCTestCase {
         shoot("habit-intro")
     }
 
+    /// 見せ方・ウィジェット・環境音（GHO-06・15、ANA-06・07、WID-01、TMR-14）
+    func testRaceViewsWidgetsAndSound() {
+        var app = demo("day", "2026-10-19T15:20:00")
+        XCTAssertTrue(app.staticTexts["predictedFinish"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 2)
+        shoot("home-insights")
+        app.terminate()
+        app = demo("day", "2026-10-19T15:20:00", ["-flipRace"])
+        Thread.sleep(forTimeInterval: 5)
+        shoot("chart-marks")
+        app.terminate()
+        app = demo("day", "2026-10-19T15:20:00")
+        app.tabBars.buttons["分析"].tap()
+        let best = app.buttons["analysisBestRow"]
+        XCTAssertTrue(best.waitForExistence(timeout: timeout))
+        shoot("analysis-hub")
+        best.tap()
+        Thread.sleep(forTimeInterval: 2)
+        shoot("analysis-best")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["analysisTimeMapRow"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["timeMapGrid"].waitForExistence(timeout: timeout))
+        shoot("analysis-time-map")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["analysisPointsRow"].tap()
+        let today = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "10月19日")).firstMatch
+        if today.waitForExistence(timeout: timeout) { today.tap() }
+        let laps = app.descendants(matching: .any)["lapList"].firstMatch
+        for _ in 0..<4 where !(laps.exists && laps.isHittable) { app.swipeUp() }
+        shoot("analysis-laps")
+        app.terminate()
+        app = demo("running", "2026-10-19T11:20:00")
+        let ambient = app.buttons["ambientButton"]
+        XCTAssertTrue(ambient.waitForExistence(timeout: timeout))
+        shoot("timer-ambient-button")
+        ambient.tap()
+        XCTAssertTrue(app.buttons["ambient-rain"].waitForExistence(timeout: timeout))
+        app.buttons["ambient-rain"].tap()
+        Thread.sleep(forTimeInterval: 1)
+        shoot("timer-ambient-sheet")
+        app.terminate()
+        app = demo("day", "2026-10-19T10:40:00", ["-widgetGallery"])
+        Thread.sleep(forTimeInterval: 2)
+        shoot("widget-gallery")
+    }
+
     /// 押し忘れの申告（TMR-13）：計画のタブの申告の画面と、遅れて始めるときの聞き方
     func testDeclaration() {
         var app = demo("day", "2026-10-19T15:20:00", ["-openPlan"])

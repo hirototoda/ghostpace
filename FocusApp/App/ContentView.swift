@@ -10,6 +10,8 @@ struct ContentView: View {
                 #if DEBUG
                 if launcher.options.liveGallery {
                     LiveActivityGallery()
+                } else if launcher.options.widgetGallery {
+                    WidgetGallery(model: model)
                 } else if launcher.options.openAddCategory {
                     AddCategorySheet(startsDetox: true, focusesName: false) { _, _, _ in false }
                 } else {

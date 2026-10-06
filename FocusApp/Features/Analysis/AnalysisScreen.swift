@@ -378,6 +378,7 @@ struct TimeMapView: View {
             ForEach(0..<Laps.count, id: \.self) { section in
                 GridRow {
                     Text("\((DayBoundary.hour + section * 2) % 24):00").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
                         .gridColumnAlignment(.trailing)
                     ForEach(0..<7, id: \.self) { weekday in
                         let value = map.averages[weekday][section]
@@ -390,7 +391,8 @@ struct TimeMapView: View {
                 }
             }
         }
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        // マスの幅は変えないので、時刻と曜日は折り返さない大きさまで
+        .dynamicTypeSize(...DynamicTypeSize.large)
         .accessibilityIdentifier("timeMapGrid")
     }
 

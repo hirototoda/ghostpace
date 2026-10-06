@@ -220,12 +220,17 @@ struct RaceChart: View {
                     RuleMark(x: .value("区切り", flag.date))
                         .foregroundStyle(Color.secondary.opacity(0.25))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
-                        .annotation(position: .top, alignment: .center, spacing: 2) {
+                        // グラフの外は切り取るので、旗はグラフの中の上の端に置く
+                        .annotation(position: .overlay, alignment: .top, spacing: 0) {
                             HStack(spacing: 2) {
                                 Image(systemName: "flag.fill").font(.system(size: 9))
                                 if let text = flag.text { Text(text).font(.caption2.monospacedDigit()) }
                             }
                             .foregroundStyle(flag.color)
+                            // 線の上に重ねると幅が線の太さになるので、中身の大きさで出す
+                            .fixedSize()
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Capsule().fill(Color(.systemBackground).opacity(0.85)))
                             .dynamicTypeSize(...DynamicTypeSize.large)
                         }
                 }
