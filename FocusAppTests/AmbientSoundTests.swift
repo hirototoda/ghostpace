@@ -20,18 +20,59 @@ struct AmbientSoundTests {
         #expect(samples(.white).contains { $0 != 0 })
     }
 
-    /// ブラウンノイズは低い音（となりの値との差が小さい）
-    @Test func brownIsLowerThanWhite() {
-        func roughness(_ values: [Float]) -> Float {
-            zip(values, values.dropFirst()).map { abs($1 - $0) }.reduce(0, +) / Float(values.count)
-        }
-        #expect(roughness(samples(.brown)) < roughness(samples(.white)) / 4)
+    private func rms(_ values: [Float]) -> Double {
+        sqrt(values.map { Double($0 * $0) }.reduce(0, +) / Double(values.count))
     }
 
-    @Test func rainHasDrops() {
-        // 1秒に約30粒：粒のある所は大きく跳ねる
-        let peaks = samples(.rain).filter { abs($0) > 0.45 }.count
-        #expect(peaks > 0)
+    /// 高い音の多さ：となりとの差の大きさ ÷ 大きさ（まったくのホワイトノイズで約1.41）
+    private func brightness(_ values: [Float]) -> Double {
+        rms(zip(values, values.dropFirst()).map { $1 - $0 }) / rms(values)
+    }
+
+    /// 10ミリ秒ごとの大きさのばらつき（はじける粒が多いと大きい）
+    private func crackle(_ values: [Float], sampleRate: Double = 44_100) -> Double {
+        let window = Int(sampleRate / 100)
+        let levels = stride(from: 0, to: values.count - window, by: window).map { rms(Array(values[$0..<$0 + window])) }
+        let mean = levels.reduce(0, +) / Double(levels.count)
+        return sqrt(levels.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(levels.count)) / mean
+    }
+
+    /// ブラウンノイズは低い音（となりの値との差が小さい）
+    @Test func brownIsLowerThanWhite() {
+        #expect(brightness(samples(.brown)) < brightness(samples(.white)) / 4)
+    }
+
+    /// 3つの音はだいたい同じ大きさ（-21 dBFS 前後）で、上限で切れない（割れない）。実機で「勢いがすごい」と言われた
+    @Test func soundsAreEvenAndNeverClip() {
+        let levels = [AmbientSound.white, .brown, .rain].map { sound -> Double in
+            let values = samples(sound, count: 44_100 * 5)
+            #expect(values.allSatisfy { abs($0) < 0.9 }, "\(sound) が割れる")
+            return 20 * log10(rms(values))
+        }
+        #expect(levels.allSatisfy { (-25 ... -18).contains($0) }, "\(levels)")
+        #expect(levels.max()! - levels.min()! < 3)
+    }
+
+    /// ホワイトノイズは高い「シャー」を少し落とす
+    @Test func whiteIsSoftenedAtTheTop() {
+        #expect(brightness(samples(.white)) < 1.2)
+    }
+
+    /// 雨は細かい粒があるが、はじけるガサガサにはしない（実機で「ガサガサ」と言われた。前は約0.45）
+    @Test func rainHasFineDropsWithoutCrackle() {
+        let rain = crackle(samples(.rain, count: 44_100 * 5))
+        #expect(rain < 0.2)
+        #expect(rain > crackle(samples(.white, count: 44_100 * 5)) * 2)
+    }
+
+    /// サンプルの速さ（iPhone は 48kHz が多い）が違っても同じような音
+    @Test func soundsMatchAcrossSampleRates() {
+        for sound in [AmbientSound.white, .brown, .rain] {
+            var at48 = NoiseGenerator(sound: sound, sampleRate: 48_000, seed: 7)
+            let fast = (0..<48_000 * 5).map { _ in at48.next() }
+            let slow = samples(sound, count: 44_100 * 5)
+            #expect(abs(20 * log10(rms(fast) / rms(slow))) < 1.5, "\(sound)")
+        }
     }
 
     /// 音を作る処理は音のスレッドから呼ばれる。メインのスレッド以外のエンジンで描いても落ちずに音が出る
