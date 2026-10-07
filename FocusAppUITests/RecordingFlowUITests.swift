@@ -784,11 +784,16 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(today.waitForExistence(timeout: timeout))
         XCTAssertTrue(today.label.contains("ベストの日の同じ時刻"))
         XCTAssertTrue(app.descendants(matching: .any)["bestLapTable"].firstMatch.exists)
+        XCTAssertTrue(app.segmentedControls["lapTargetPicker"].exists)
 
+        // 記録のない期間では、相手の切り替えも表もベスト10も出さない（ANA-06・09、1b-51・1b-52）
         picker.buttons["今週"].tap()
         XCTAssertTrue(app.staticTexts["今週はまだ記録なし（今日が終わると入ります）"].waitForExistence(timeout: timeout))
         XCTAssertFalse(today.exists)
         XCTAssertFalse(app.descendants(matching: .any)["bestLapTable"].firstMatch.exists)
+        XCTAssertFalse(app.segmentedControls["lapTargetPicker"].exists)
+        XCTAssertFalse(app.staticTexts["ベスト10"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "bestTopDay").count, 0)
 
         // 今月は前の週の日がベストになり、表がまた出る
         picker.buttons["今月"].tap()

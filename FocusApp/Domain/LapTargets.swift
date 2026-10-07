@@ -29,13 +29,18 @@ struct SectionRecord: Hashable {
 
 /// ラップ表の相手の1日（4:00 からの経過 → その時刻までのポイント）を作る（ANA-06・11、analysis.md「比べる相手」「区間ベストと理論ベスト」）
 enum LapTargets {
+    /// 同点とみなす幅。区間の値・1日の値は累計の引き算・足し算なので、同じ点でも浮動小数の誤差で小さくずれる
+    static let tieTolerance = 1e-9
+
+    /// `a` が `b` より多い、または同じ（誤差の幅の中）
+    static func atLeast(_ a: Double, _ b: Double) -> Bool { a >= b - tieTolerance }
     /// 平均：記録のある日の、その時刻までのポイントの平均。最後は1日の平均。日がなければ nil
     static func average(_ days: [RecordDay]) -> ((TimeInterval) -> Double)? {
         guard !days.isEmpty else { return nil }
         return { offset in days.reduce(0) { $0 + $1.points(at: offset) } / Double(days.count) }
     }
 
-    /// 12区間それぞれの区間ベスト。区間全体の値で比べ、同じなら新しい日。日がなければ空
+    /// 12区間それぞれの区間ベスト。区間全体の値で比べ、同じ（誤差の幅の中）なら新しい日。日がなければ空
     static func sectionRecords(_ days: [RecordDay]) -> [SectionRecord] {
         guard !days.isEmpty else { return [] }
         let days = days.sorted { $0.dayStart < $1.dayStart }
@@ -45,13 +50,22 @@ enum LapTargets {
             for day in days {
                 let value = day.points(at: start + Laps.length) - day.points(at: start)
                 // 古い日から見て、同じ値なら新しい日に置き換える
-                if value >= best?.value ?? -.infinity { best = SectionRecord(dayStart: day.dayStart, value: value) }
+                if atLeast(value, best?.value ?? -.infinity) { best = SectionRecord(dayStart: day.dayStart, value: value) }
             }
             return best ?? SectionRecord(dayStart: days[days.count - 1].dayStart, value: 0)
         }
     }
 
-    /// 睡眠の区間：`sleep`（今の設定の睡眠の時刻を今日と翌日に当てはめたもの）と半分以上（ちょうど半分も）重なる区間の番号
+    /// 睡眠の区間：設定の睡眠の時刻（0:00 からの分）を今日（その朝と夜）に当てはめ、半分以上（ちょうど半分も）重なる区間の番号
+    static func sleepSections(startMinutes: Int, endMinutes: Int, dayStart: Date, calendar: Calendar) -> Set<Int> {
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
+        let sleep = [dayStart, tomorrow].map {
+            SleepLine.fromSetting(startMinutes: startMinutes, endMinutes: endMinutes, dayStart: $0, calendar: calendar).interval
+        }
+        return sleepSections(sleep, dayStart: dayStart)
+    }
+
+    /// 睡眠の区間：`sleep` と半分以上（ちょうど半分も）重なる区間の番号
     static func sleepSections(_ sleep: [DateInterval], dayStart: Date) -> Set<Int> {
         Set(Laps.sections(dayStart: dayStart).enumerated().compactMap { index, section in
             let overlap = sleep.reduce(0.0) { $0 + ($1.intersection(with: section)?.duration ?? 0) }
@@ -93,15 +107,78 @@ enum LapTargets {
     }
 }
 
+extension LapTargets {
+    /// ポイントの多い順（ベスト10・ベストの日）。同じ（誤差の幅の中）なら新しい日が上。記録なしの日は入れない
+    static func ranked(_ days: [DayPoints]) -> [DayPoints] {
+        days.filter { $0.points != nil }.sorted { a, b in
+            let (x, y) = (a.points ?? 0, b.points ?? 0)
+            return abs(x - y) <= tieTolerance ? a.dayStart > b.dayStart : x > y
+        }
+    }
+}
+
+/// 自己ベストの1つの期間の材料（ANA-06・09・11）：記録のある日、区間ベスト、理論ベスト、ベスト10。
+/// 期間・記録・日付・睡眠の設定が変わったときだけ作り、相手を切り替えたときはラップ表だけを作り直す
+struct PeriodRecords {
+    /// 記録のある日（古い日が先）
+    let days: [RecordDay]
+    /// 区間ごとの区間ベスト（12個。★に使う）。日がなければ空
+    let records: [SectionRecord]
+    /// ポイントの多い順（同じなら新しい日が上）
+    let ranked: [DayPoints]
+    /// 理論ベスト。日がなければ nil
+    let theoreticalBest: Double?
+    private let average: ((TimeInterval) -> Double)?
+    private let sectionBest: (TimeInterval) -> Double
+
+    /// ベスト10
+    var topDays: [DayPoints] { Array(ranked.prefix(10)) }
+
+    /// - days: 記録のある日のポイントと材料
+    /// - sleepSections: 睡眠の区間（今の設定で決める）
+    init(days: [(points: DayPoints, day: RecordDay)], sleepSections: Set<Int>) {
+        let days = days.sorted { $0.points.dayStart < $1.points.dayStart }
+        self.days = days.map(\.day)
+        records = LapTargets.sectionRecords(self.days)
+        ranked = LapTargets.ranked(days.map(\.points))
+        average = LapTargets.average(self.days)
+        sectionBest = LapTargets.sectionBestDay(self.days, records: records, sleepSections: sleepSections)
+        theoreticalBest = days.isEmpty ? nil : sectionBest(Double(Laps.count) * Laps.length)
+    }
+
+    /// 相手の1日（4:00 からの経過 → ポイント）。期間に記録のある日がなければ nil
+    func curve(_ target: LapTarget) -> ((TimeInterval) -> Double)? {
+        guard !days.isEmpty else { return nil }
+        switch target {
+        case .bestDay:
+            guard let best = ranked.first, let day = days.first(where: { $0.dayStart == best.dayStart }) else { return nil }
+            return day.points(at:)
+        case .average: return average
+        case .sectionBest: return sectionBest
+        }
+    }
+}
+
+/// 集中以外の点（デトックス・睡眠・開けた回数・計画どおり、DTX-03・GHO-16）。
+/// ホームのポイント（`HomeSnapshot.myPoints(until:)`）と分析の材料（`RecordDay`）で同じ式を使う
+struct OtherPoints {
+    var detox: DetoxDay?
+    /// 計画どおりの点が付いた時刻
+    var planAwards: [Date]
+
+    func until(_ date: Date) -> Double {
+        (detox?.points(until: date) ?? 0) + Double(planAwards.filter { $0 <= date }.count)
+    }
+}
+
 extension HomeSnapshot {
-    /// 過ぎた日の材料（ANA-06・11）。`myPoints(until:)` と同じ数え方を、集中の一切れと集中以外に分けて持つ
+    /// 集中以外の点
+    var otherPoints: OtherPoints { OtherPoints(detox: detox, planAwards: planAwards.map(\.date)) }
+
+    /// 過ぎた日の材料（ANA-06・11）。`myPoints(until:)` と同じ数え方を、集中の一切れと集中以外に分けて持つ。
+    /// 覚えておくのはこれだけにする（HomeSnapshot を丸ごと覚えない）
     var recordDay: RecordDay {
-        let detox = self.detox
-        let awards = planAwards.map(\.date)
-        return RecordDay(dayStart: dayStart,
-                         pieces: FocusPoints.pieces(sessions, until: now, opened: detox?.openedIntervals ?? []),
-                         otherPoints: { date in
-                             (detox?.points(until: date) ?? 0) + Double(awards.filter { $0 <= date }.count)
-                         })
+        RecordDay(dayStart: dayStart, pieces: FocusPoints.pieces(sessions, until: now, opened: detox?.openedIntervals ?? []),
+                  otherPoints: otherPoints.until)
     }
 }

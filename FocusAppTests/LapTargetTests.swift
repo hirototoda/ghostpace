@@ -89,6 +89,34 @@ struct LapTargetTests {
         #expect(LapTargets.sectionRecords([]).isEmpty)
     }
 
+    /// 区間の値は累計の引き算なので、浮動小数の小さな誤差は同点とみなして新しい日にする
+    /// （(63.9 + 0.3) − 63.9 は (31.9 + 0.3) − 31.9 よりわずかに大きい）
+    @Test func sectionRecordsTreatTinyDifferencesAsTies() {
+        let older = day("2026-10-13", other: [("05:00", 63.9), ("09:00", 0.3)])
+        let newer = day("2026-10-14", other: [("05:00", 31.9), ("09:00", 0.3)])
+        #expect(older.points(at: 6 * hour) - older.points(at: 4 * hour) > newer.points(at: 6 * hour) - newer.points(at: 4 * hour))
+        let records = LapTargets.sectionRecords([older, newer])
+        #expect(records[2].dayStart == newer.dayStart)
+        // はっきり多ければ古い日
+        let more = day("2026-10-13", other: [("09:00", 0.31)])
+        #expect(LapTargets.sectionRecords([more, newer])[2].dayStart == more.dayStart)
+    }
+
+    /// ポイントの多い順（ベスト10・ベストの日）。同点（小さな誤差を含む）なら新しい日が上
+    @Test func rankedDaysPutNewerFirstOnTies() {
+        func points(_ date: String, _ value: Double) -> DayPoints {
+            DayPoints(dayStart: jst("\(date)T04:00"), points: value, lastWeek: nil, isToday: false)
+        }
+        let ranked = LapTargets.ranked([
+            points("2026-10-11", (63.9 + 0.3) - 63.9),
+            points("2026-10-12", (31.9 + 0.3) - 31.9),
+            points("2026-10-13", 0.5),
+            points("2026-10-14", 0.1),
+            DayPoints(dayStart: jst("2026-10-15T04:00"), points: nil, lastWeek: nil, isToday: false),
+        ])
+        #expect(ranked.map(\.dayStart) == ["2026-10-13", "2026-10-12", "2026-10-11", "2026-10-14"].map { jst("\($0)T04:00") })
+    }
+
     /// 区間全体の値で比べる。区間の途中で多くても、区間の終わりで少なければ選ばない。マイナスの区間は一番大きい（0に近い）日
     @Test func sectionRecordsUseTheWholeSection() {
         // 9:00 の時点では late が多いが、区間の終わり（10:00）では early が多い
@@ -105,11 +133,13 @@ struct LapTargetTests {
         let today = jst("2026-10-22T04:00")
         let tomorrow = jst("2026-10-23T04:00")
         func sections(_ start: Int, _ end: Int) -> Set<Int> {
-            let sleep = [today, tomorrow].map {
-                SleepLine.fromSetting(startMinutes: start, endMinutes: end, dayStart: $0, calendar: tokyoCalendar).interval
-            }
-            return LapTargets.sleepSections(sleep, dayStart: today)
+            LapTargets.sleepSections(startMinutes: start, endMinutes: end, dayStart: today, calendar: tokyoCalendar)
         }
+        // 当てはめた睡眠の区間から数えても同じ
+        let sleep = [today, tomorrow].map {
+            SleepLine.fromSetting(startMinutes: 0, endMinutes: 7 * 60, dayStart: $0, calendar: tokyoCalendar).interval
+        }
+        #expect(LapTargets.sleepSections(sleep, dayStart: today) == sections(0, 7 * 60))
         // 0:00–7:00：4:00–6:00、6:00–8:00（ちょうど半分）、翌0:00–2:00、翌2:00–4:00
         #expect(sections(0, 7 * 60) == [0, 1, 10, 11])
         // 23:00–7:00：22:00–24:00 もちょうど半分
@@ -138,6 +168,41 @@ struct LapTargetTests {
         let short = day("2026-10-14", focus: [("14:00", "15:30"), ("16:00", "16:30")])
         let exact = LapTargets.sectionBestDay([a, short], records: LapTargets.sectionRecords([a, short]), sleepSections: [])
         #expect(exact(24 * hour).isApprox(48))
+    }
+
+    /// 10時間ちょうどまでは ×0.75 のまま。10時間を超えた分から ×0.5
+    @Test func tenHoursExactlyStaysAtThreeQuarters() {
+        let a = day("2026-10-13", focus: [("06:00", "07:30"), ("08:00", "09:30"), ("10:00", "11:30"), ("12:00", "13:30")])
+        // b は4時間（つなぐと10時間ちょうど）
+        let b = day("2026-10-14", focus: [("14:00", "15:30"), ("16:00", "17:30"), ("18:00", "19:00")])
+        let exact = LapTargets.sectionBestDay([a, b], records: LapTargets.sectionRecords([a, b]), sleepSections: [])
+        // 8時間まで 48 ＋ 8〜10時間 ×0.75 で 9
+        #expect(exact(24 * hour).isApprox(57))
+        // 6分超えると、その6分は ×0.5（0.3）
+        let over = day("2026-10-14", focus: [("14:00", "15:30"), ("16:00", "17:30"), ("18:00", "19:06")])
+        let longer = LapTargets.sectionBestDay([a, over], records: LapTargets.sectionRecords([a, over]), sleepSections: [])
+        #expect(longer(24 * hour).isApprox(57.3))
+    }
+
+    /// 期間の材料：記録・理論ベスト・ベスト10は1回で作り、相手ごとの1日はそこから出す
+    @Test func periodRecordsHoldEverything() throws {
+        let a = day("2026-10-13", focus: [("06:00", "07:00")])  // 6
+        let b = day("2026-10-14", focus: [("08:00", "09:00"), ("10:00", "10:30")])  // 9
+        func points(_ day: RecordDay) -> DayPoints {
+            DayPoints(dayStart: day.dayStart, points: day.points(at: 24 * hour), lastWeek: nil, isToday: false)
+        }
+        let period = PeriodRecords(days: [(points(a), a), (points(b), b)], sleepSections: [])
+        #expect(period.records.count == Laps.count)
+        #expect(period.topDays.map(\.dayStart) == [b.dayStart, a.dayStart])
+        #expect(try #require(period.theoreticalBest).isApprox(15))
+        let bestDay = try #require(period.curve(.bestDay))
+        let average = try #require(period.curve(.average))
+        let sectionBest = try #require(period.curve(.sectionBest))
+        #expect(bestDay(24 * hour).isApprox(9))
+        #expect(average(24 * hour).isApprox(7.5))
+        #expect(sectionBest(24 * hour).isApprox(15))
+        let empty = PeriodRecords(days: [], sleepSections: [])
+        #expect(empty.theoreticalBest == nil && empty.topDays.isEmpty && empty.curve(.average) == nil)
     }
 
     /// 区間をまたぐ集中は境目で切る。1回の長さの倍率はもとの日のまま

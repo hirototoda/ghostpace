@@ -394,11 +394,14 @@ struct PersonalBestView: View {
         .navigationTitle("自己ベスト")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: model.snapshot.now) { bests = model.periodBests() }
-        .task(id: Refresh(day: bests?[period]?.pointsDay, now: model.snapshot.now, period: period, target: target)) {
+        // 期間の材料（理論ベスト・ベスト10）は期間が変わったとき・1分ごとの読み直しで。相手を切り替えたときはラップ表だけ
+        .task(id: Refresh(day: bests?[period]?.pointsDay, now: model.snapshot.now, period: period)) {
             let has = bests?[period] != nil
-            comparison = has ? model.lapComparison(target: target, period: period) : nil
             theoretical = has ? model.theoreticalBest(period: period) : nil
             top = has ? model.topDays(period: period) : []
+        }
+        .task(id: Refresh(day: bests?[period]?.pointsDay, now: model.snapshot.now, period: period, target: target)) {
+            comparison = bests?[period] != nil ? model.lapComparison(target: target, period: period) : nil
         }
         #if DEBUG
         .onAppear {
@@ -477,7 +480,7 @@ struct PersonalBestView: View {
         var day: Date?
         var now: Date
         var period: BestPeriod
-        var target: LapTarget
+        var target: LapTarget?
     }
 
     private var emptyText: String {

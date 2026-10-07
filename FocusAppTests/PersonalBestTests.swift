@@ -373,6 +373,67 @@ struct PersonalBestTests {
         #expect(current.gold)
     }
 
+    /// ★は相手が平均・区間ベストでも同じ区間に付く。夜（睡眠の区間）でも付く
+    @Test func goldMarksForEveryTargetAndAtNight() throws {
+        let t = try TestStore(now: jst("2026-10-23T02:30"))  // まだ 10/22
+        try t.seeded()
+        try record(t, "2026-10-20T08:00", "2026-10-20T09:00")
+        try record(t, "2026-10-21T00:30", "2026-10-21T01:00")  // 10/20 の 翌0:00–2:00 に 3
+        try record(t, "2026-10-22T08:00", "2026-10-22T09:10")  // 7
+        try record(t, "2026-10-23T00:00", "2026-10-23T01:00")  // 夜の区間で 6
+        let m = model(t)
+        for target in LapTarget.allCases {
+            let rows = try #require(m.lapComparison(target: target, period: .week)).rows
+            #expect(rows.filter(\.gold).map(\.section.start) == [jst("2026-10-22T08:00"), jst("2026-10-23T00:00")])
+        }
+    }
+
+    /// 今の区間で開けた時間が入って値が下がると、★は消える
+    @Test func goldDisappearsWhenOpenedTimeLowersTheSection() throws {
+        let t = try TestStore(now: jst("2026-10-22T11:50"))
+        try t.seeded()
+        try record(t, "2026-10-20T13:00", "2026-10-20T14:00")  // 10:00–12:00 は集中なし（ブロック中の点だけ）
+        try record(t, "2026-10-22T10:00", "2026-10-22T11:50")
+        let log = MemoryBlockEventLog()
+        try log.append(BlockEvent(occurredAt: jst("2026-10-01T04:00"), timeZoneId: "Asia/Tokyo", kind: .started))
+        let settings = MemorySettings()
+        settings.didShowBlockingIntro = true
+        settings.didLogBlockStart = true
+        settings.lastBlockingAuthorized = true
+        let blockStore = MemoryBlockStore()
+        blockStore.state = BlockState(isEnabled: true)
+        blockStore.selection = Data("sel".utf8)
+        let m = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings,
+                         blocking: FakeBlocking(), blockStore: blockStore, blockLog: log)
+        func current() throws -> BestLapRow {
+            try #require(m.lapComparison(target: .bestDay, period: .week)?.rows.first { $0.isCurrent })
+        }
+        // 110分の集中で 10.5、区間ベストはブロック中の 6
+        #expect(try current().gold)
+        // 10:10–11:10 に開けていた（その間は0点）
+        try log.append(BlockEvent(occurredAt: jst("2026-10-22T10:10"), timeZoneId: "Asia/Tokyo", kind: .unlocked, unlockMinutes: 60))
+        try log.append(BlockEvent(occurredAt: jst("2026-10-22T11:10"), timeZoneId: "Asia/Tokyo", kind: .reblocked))
+        let lowered = try current()
+        #expect(!lowered.gold)
+        #expect(try #require(lowered.today) < 6)
+    }
+
+    /// ベスト10の件数：ちょうど10日なら10件、9日なら9件、期間に1日なら1件
+    @Test func topDaysCount() throws {
+        let t = try TestStore(now: jst("2026-10-20T12:00"))  // 火曜。今週は月曜の1日だけ
+        try t.seeded()
+        for day in 11...19 {  // 9日
+            try record(t, "2026-10-\(day)T09:00", "2026-10-\(day)T10:00")
+        }
+        let m = model(t)
+        #expect(m.topDays(period: .all).count == 9)
+        #expect(m.topDays(period: .week).map(\.dayStart) == [jst("2026-10-19T04:00")])
+        try record(t, "2026-10-10T09:00", "2026-10-10T10:00")
+        #expect(m.topDays(period: .all).count == 10)
+        try record(t, "2026-10-09T09:00", "2026-10-09T10:00")
+        #expect(m.topDays(period: .all).count == 10)
+    }
+
     /// ベスト10：期間の記録のある日の上位10日。同じなら新しい日が上。今日は入れない
     @Test func topTenDays() throws {
         let t = try TestStore(now: jst("2026-10-22T12:00"))
