@@ -8,6 +8,7 @@ import Foundation
 /// - `-failSave`: 保存を毎回失敗させる。`-failStoreOpen`: ストアを開けなかったことにする（画面の確認用）
 /// - `-openAnalysis`: 起動したら分析のタブを開く。`-openTimeline`: 分析のタブのタイムラインを開く。`-openPoints`: 分析のタブのポイントの推移を開く（`-openDay <何日前>` でその日のグラフまで）
 /// - `-openBest [all|month|week]`: 分析のタブの自己ベストを、その期間で開く（ANA-06 の撮影用）。`-pointsPage <n>`: ポイントの推移を n 期間前で開く（ANA-04 の撮影用）
+/// - `-lapTarget bestDay|average|sectionBest`: 自己ベストのラップ表の相手をこれで始める。`-bestScroll laps|top10`: 自己ベストを理論ベストの行（その下に相手の切り替えとラップ表）・ベスト10まで送って始める（ANA-06・09・11 の撮影用）
 /// - `-openReview`: 起動したら夜の振り返りを開く。`-openSettings`: 設定を開く。`-openPlan`: 計画のタブを開く
 /// - `-openStartSheet`: 起動したら計画外で開始のシートを開く
 /// - `-flipRace`: ホームの円を裏（グラフ）で始める（GHO-13 の撮影用）
@@ -40,6 +41,10 @@ struct LaunchOptions: Hashable {
     var openBest: BestPeriod?
     /// ポイントの推移を何期間前で開くか
     var pointsPage = 0
+    /// 自己ベストのラップ表の相手（撮影用）。nil ならベストの日
+    var lapTarget: LapTarget?
+    /// 自己ベストをどこまで送って始めるか（撮影用）："laps"（理論ベストの行から）・"top10"（ベスト10）
+    var bestScroll: String?
     var openReview = false
     var openSettings = false
     var openPlan = false
@@ -129,6 +134,17 @@ struct LaunchOptions: Hashable {
                     index += 1
                 } else {
                     options.openBest = .all
+                }
+            case "-lapTarget":
+                let targets: [String: LapTarget] = ["bestDay": .bestDay, "average": .average, "sectionBest": .sectionBest]
+                if let value = next(), let target = targets[value] {
+                    options.lapTarget = target
+                    index += 1
+                }
+            case "-bestScroll":
+                if let value = next() {
+                    options.bestScroll = value
+                    index += 1
                 }
             case "-pointsPage":
                 if let value = next(), let page = Int(value) {

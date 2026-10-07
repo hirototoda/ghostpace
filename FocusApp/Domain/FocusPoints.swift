@@ -55,9 +55,52 @@ enum FocusPoints {
     }
 
     static func points(_ flows: [Flow], until date: Date, opened: [DateInterval] = []) -> Double {
+        points(pieces(flows, until: date, opened: opened), until: date)
+    }
+
+    /// 集中の一切れ：1回の長さの倍率・重み・開けていたかが変わらない時間。
+    /// 1日の合計の倍率はここでは掛けず、`points(_:until:)` で時刻の順に掛ける（理論ベストで、つないだ1日を数え直すため。ANA-11）
+    struct Piece: Hashable {
+        var start: Date
+        var end: Date
+        /// 1秒あたりに増える集中の秒数
+        var rate: Double = 1
+        /// 1回の長さの倍率（もとの日のまま）
+        var runFactor: Double = 1
+        /// 点の重み（申告は0.8）
+        var weight: Double = 1
+        /// 開けていた時間。0点だが1日の合計は進む
+        var opened = false
+
+        /// この一切れで増える集中の秒数
+        var seconds: TimeInterval { max(0, end.timeIntervalSince(start)) * rate }
+
+        /// `interval` の中だけにする。重ならなければ nil
+        func clipped(to interval: DateInterval) -> Piece? {
+            var piece = self
+            piece.start = max(start, interval.start)
+            piece.end = min(end, interval.end)
+            return piece.end > piece.start ? piece : nil
+        }
+
+        func shifted(by offset: TimeInterval) -> Piece {
+            var piece = self
+            piece.start = start.addingTimeInterval(offset)
+            piece.end = end.addingTimeInterval(offset)
+            return piece
+        }
+    }
+
+    /// 記録の区間の `until` までの集中の一切れ（デトックスのカテゴリの区間は入れない）。時刻の順
+    static func pieces(_ segments: [TimeSegment], until date: Date, opened: [DateInterval] = []) -> [Piece] {
+        pieces(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? declaredFactor : 1) },
+               until: date, opened: opened)
+    }
+
+    /// `until` までの集中の一切れ。1回の長さの倍率が変わる所と、開けた時間に出入りする所で分ける
+    static func pieces(_ flows: [Flow], until date: Date, opened: [DateInterval] = []) -> [Piece] {
         let openedBounds = opened.flatMap { [$0.start, $0.end] }
-        var total = 0.0
-        var day: TimeInterval = 0
+        var result: [Piece] = []
         var run: TimeInterval = 0
         var lastContinuousEnd: Date?
         for flow in flows.sorted(by: { $0.start < $1.start }) {
@@ -73,24 +116,43 @@ enum FocusPoints {
             var left = end.timeIntervalSince(flow.start) * flow.rate
             var cursor = flow.start
             while left > 0 {
-                // 次に倍率が変わる・開けた時間に出入りするまでの集中の秒数
+                // 次に1回の長さの倍率が変わる・開けた時間に出入りするまでの集中の秒数
                 var step = left
                 for bound in openedBounds where bound > cursor { step = min(step, bound.timeIntervalSince(cursor) * flow.rate) }
-                for limit in dayLimits where day < limit { step = min(step, limit - day) }
                 if flow.continuous {
                     for limit in runLimits where run < limit { step = min(step, limit - run) }
                 }
-                let factor = max(min(flow.continuous ? runFactor(run) : 1, dayFactor(day)), floor)
+                let next = cursor.addingTimeInterval(step / flow.rate)
                 let middle = cursor.addingTimeInterval(step / flow.rate / 2)
-                if !opened.contains(where: { $0.start < middle && middle < $0.end }) {
-                    total += focusPerSecond * step * factor * flow.weight
-                }
-                cursor = cursor.addingTimeInterval(step / flow.rate)
-                day += step
+                result.append(Piece(start: cursor, end: next, rate: flow.rate,
+                                    runFactor: flow.continuous ? runFactor(run) : 1, weight: flow.weight,
+                                    opened: opened.contains { $0.start < middle && middle < $0.end }))
+                cursor = next
                 if flow.continuous { run += step }
                 left -= step
             }
             lastContinuousEnd = flow.continuous ? max(lastContinuousEnd ?? .distantPast, end) : nil
+        }
+        return result
+    }
+
+    /// 一切れを並んだ順に `until` まで数える。1日の合計の倍率は、ここで集中の秒数を足しながら掛ける
+    static func points(_ pieces: [Piece], until date: Date) -> Double {
+        var total = 0.0
+        var day: TimeInterval = 0
+        for piece in pieces where piece.start < date {
+            var piece = piece
+            piece.end = min(piece.end, date)
+            var left = piece.seconds
+            while left > 0 {
+                var step = left
+                for limit in dayLimits where day < limit { step = min(step, limit - day) }
+                if !piece.opened {
+                    total += focusPerSecond * step * max(min(piece.runFactor, dayFactor(day)), floor) * piece.weight
+                }
+                day += step
+                left -= step
+            }
         }
         return total
     }

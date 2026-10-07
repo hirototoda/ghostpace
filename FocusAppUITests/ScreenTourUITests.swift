@@ -132,6 +132,23 @@ final class ScreenTourUITests: XCTestCase {
         }
     }
 
+    /// ラップ表の相手（ANA-06）・区間ベストの ★ と理論ベスト（ANA-11）・ベスト10（ANA-09）
+    func testRecordsTargets() {
+        let app = demo("day", "2026-10-22T15:20:00", ["-openBest", "all", "-lapTarget", "sectionBest", "-bestScroll", "laps"])
+        let targets = app.segmentedControls["lapTargetPicker"]
+        XCTAssertTrue(targets.waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 2)
+        shoot("records-section-best")
+        targets.buttons["平均"].tap()
+        Thread.sleep(forTimeInterval: 1)
+        shoot("records-average")
+        for index in 1...3 {
+            app.swipeUp(velocity: .slow)
+            Thread.sleep(forTimeInterval: 1)
+            shoot("records-scrolled-\(index)")
+        }
+    }
+
     /// 押し忘れの申告（TMR-13）：計画のタブの申告の画面と、遅れて始めるときの聞き方
     func testDeclaration() {
         var app = demo("day", "2026-10-19T15:20:00", ["-openPlan"])

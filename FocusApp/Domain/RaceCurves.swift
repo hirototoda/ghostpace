@@ -36,8 +36,7 @@ extension HomeSnapshot {
     var points: Double { myPoints(until: now) }
 
     func myPoints(until date: Date) -> Double {
-        FocusPoints.points(sessions, until: date, opened: detox?.openedIntervals ?? []) + (detox?.points(until: date) ?? 0)
-            + Double(planAwards.filter { $0.date <= date }.count)
+        FocusPoints.points(sessions, until: date, opened: detox?.openedIntervals ?? []) + otherPoints.until(date)
     }
 
     /// 相手の `date` までのポイント。相手がいなければ nil。

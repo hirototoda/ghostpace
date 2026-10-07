@@ -32,6 +32,8 @@ struct ContentView: View {
         .environment(\.raceIntroScale, launcher.options.slowRaceIntro ? 5 : 1)
         .environment(\.bestStartsPeriod, launcher.options.openBest)
         .environment(\.pointsStartsPage, launcher.options.pointsPage)
+        .environment(\.lapStartsTarget, launcher.options.lapTarget)
+        .environment(\.bestStartsScroll, launcher.options.bestScroll)
         .environment(\.opensStartSheet, launcher.options.openStartSheet)
         .overlay(alignment: .top) {
             if launcher.options.demoScene != nil || launcher.options.liveGallery {

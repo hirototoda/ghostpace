@@ -19,6 +19,9 @@ enum Theme {
     /// 自己ベストのラップ表で今日が上回った数字（ANA-06、2026-10-06 オーナー決定）。
     /// 陸上の速報で記録を赤く出すのと同じ「勝っている」の印。責める意味では使わない
     static let record = Color.red
+    /// ラップ表で今日の区間が区間ベストを超えた印 ★ にだけ使う金（ANA-11、2026-10-07 オーナー決定）。数字の色には使わない
+    static let gold = Color(light: UIColor(red: 0.85, green: 0.62, blue: 0.0, alpha: 1),
+                            dark: UIColor(red: 1.0, green: 0.80, blue: 0.22, alpha: 1))
 
     static func diffColor(_ seconds: Int) -> Color {
         seconds >= 0 ? lead : behind

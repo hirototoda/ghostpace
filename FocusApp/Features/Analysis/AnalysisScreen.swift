@@ -7,6 +7,10 @@ extension EnvironmentValues {
     @Entry var bestStartsPeriod: BestPeriod? = nil
     /// 見本の撮影用：ポイントの推移を何期間前で始めるか（`-pointsPage`）
     @Entry var pointsStartsPage = 0
+    /// 見本の撮影用：ラップ表の相手（`-lapTarget`）
+    @Entry var lapStartsTarget: LapTarget? = nil
+    /// 見本の撮影用：自己ベストを送る先（`-bestScroll`）
+    @Entry var bestStartsScroll: String? = nil
 }
 #endif
 
@@ -360,18 +364,54 @@ struct LapList: View {
 }
 
 /// 自己ベスト（ANA-06）：期間（全期間・今月・今週）の一番多い1日の集中した時間とポイント。押すとその日のグラフ。
-/// 下に今日と、ポイントのベストの日との比べ（今日の行と2時間ごとのラップ表、2026-10-06 オーナー決定）
+/// 下に理論ベスト（ANA-11）、今日と相手（ベストの日・平均・区間ベスト）の比べ（今日の行と2時間ごとのラップ表）、ベスト10（ANA-09）
 struct PersonalBestView: View {
     @Bindable var model: AppModel
     @State private var period: BestPeriod = .all
+    /// ラップ表の相手。期間を変えても、ほかのタブへ行って戻ってもそのまま。開き直すとベストの日
+    @State private var target: LapTarget = .bestDay
     /// 期間ごとのベスト。開いたとき・1分ごとの読み直しで数え直す（期間を切り替えるたびには数えない）
     @State private var bests: [BestPeriod: PeriodBest]?
     @State private var comparison: BestComparison?
+    @State private var theoretical: Double?
+    @State private var top: [DayPoints] = []
     #if DEBUG
     @Environment(\.bestStartsPeriod) private var startsPeriod
+    @Environment(\.lapStartsTarget) private var startsTarget
+    @Environment(\.bestStartsScroll) private var startsScroll
     #endif
 
     var body: some View {
+        ScrollViewReader { proxy in
+            list
+            #if DEBUG
+                .task(id: comparison != nil && !top.isEmpty) {
+                    guard comparison != nil, let startsScroll else { return }
+                    proxy.scrollTo(startsScroll == "top10" ? "bestTop10" : "bestTheoretical", anchor: .top)
+                }
+            #endif
+        }
+        .navigationTitle("自己ベスト")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: model.snapshot.now) { bests = model.periodBests() }
+        // 期間の材料（理論ベスト・ベスト10）は期間が変わったとき・1分ごとの読み直しで。相手を切り替えたときはラップ表だけ
+        .task(id: Refresh(day: bests?[period]?.pointsDay, now: model.snapshot.now, period: period)) {
+            let has = bests?[period] != nil
+            theoretical = has ? model.theoreticalBest(period: period) : nil
+            top = has ? model.topDays(period: period) : []
+        }
+        .task(id: Refresh(day: bests?[period]?.pointsDay, now: model.snapshot.now, period: period, target: target)) {
+            comparison = bests?[period] != nil ? model.lapComparison(target: target, period: period) : nil
+        }
+        #if DEBUG
+        .onAppear {
+            if let startsPeriod { period = startsPeriod }
+            if let startsTarget { target = startsTarget }
+        }
+        #endif
+    }
+
+    private var list: some View {
         List {
             Section {
                 Picker("期間", selection: $period) {
@@ -395,39 +435,52 @@ struct PersonalBestView: View {
                             bestRow("集中した時間", value: DurationFormat.japanese(focus.focusSeconds), day: focus.focusDay)
                         }
                     }
+                    if let theoretical {
+                        LabeledContent("理論ベスト", value: RaceChart.pointText(theoretical))
+                            .font(.subheadline.monospacedDigit())
+                            .accessibilityIdentifier("theoreticalBestRow")
+                            .id("bestTheoretical")
+                    }
                 }
             }
             if let comparison {
                 Section {
+                    targetPicker
                     todayRow(comparison)
                 } header: {
                     Text("今日と比べる")
                 }
                 if !comparison.rows.isEmpty {
                     Section {
-                        BestLapTable(rows: comparison.rows)
+                        BestLapTable(rows: comparison.rows, theirsName: theirsName(comparison))
                     } header: {
                         Text("ラップ（2時間ごと・pt）")
                     } footer: {
-                        Text("今日がベストの日を上回った数字は赤。今の区間はベストの日も同じ時刻まで")
+                        Text("今日が\(plainName)を上回った数字は赤。区間ベストを超えた区間に★。今の区間は\(plainName)も同じ時刻まで")
                     }
                 }
             }
+            if !top.isEmpty {
+                Section {
+                    ForEach(Array(top.enumerated()), id: \.element.dayStart) { index, day in
+                        NavigationLink(value: AnalysisRoute.day(day.dayStart)) {
+                            topRow(rank: index + 1, day: day)
+                        }
+                        .id(index == 0 ? "bestTop10" : "bestTop\(index + 1)")
+                        .accessibilityIdentifier("bestTopDay")
+                    }
+                } header: {
+                    Text("ベスト10")
+                }
+            }
         }
-        .navigationTitle("自己ベスト")
-        .navigationBarTitleDisplayMode(.inline)
-        .task(id: model.snapshot.now) { bests = model.periodBests() }
-        .task(id: Refresh(day: bests?[period]?.pointsDay, now: model.snapshot.now)) {
-            comparison = bests?[period].flatMap { model.bestComparison(bestDay: $0.pointsDay) }
-        }
-        #if DEBUG
-        .onAppear { if let startsPeriod { period = startsPeriod } }
-        #endif
     }
 
     private struct Refresh: Equatable {
         var day: Date?
         var now: Date
+        var period: BestPeriod
+        var target: LapTarget?
     }
 
     private var emptyText: String {
@@ -435,6 +488,30 @@ struct PersonalBestView: View {
         case .all: "まだ記録がありません"
         case .month: "今月はまだ記録なし（今日が終わると入ります）"
         case .week: "今週はまだ記録なし（今日が終わると入ります）"
+        }
+    }
+
+    /// 比べる相手：「今日と比べる」の一番上の［ベストの日｜平均｜区間ベスト］（2026-10-07 オーナーが画面の案から選んだ）
+    private var targetPicker: some View {
+        Picker("比べる相手", selection: $target) {
+            Text("ベストの日").tag(LapTarget.bestDay)
+            Text("平均").tag(LapTarget.average)
+            Text("区間ベスト").tag(LapTarget.sectionBest)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("lapTargetPicker")
+    }
+
+    /// 相手の名前（見出し・今日の行）。平均は日数を添える
+    private func theirsName(_ comparison: BestComparison) -> String {
+        target == .average ? String(localized: "平均（\(comparison.days)日）") : plainName
+    }
+
+    private var plainName: String {
+        switch target {
+        case .bestDay: String(localized: "ベストの日")
+        case .average: String(localized: "平均")
+        case .sectionBest: String(localized: "区間ベスト")
         }
     }
 
@@ -448,7 +525,21 @@ struct PersonalBestView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// 「今日 今まで 78.3pt」と、ベストの日の同じ時刻までと差。上回っていれば赤
+    /// 「1　100.4pt　9月28日(月)」。文字が大きくて入らなければ日付を下に
+    private func topRow(rank: Int, day: DayPoints) -> some View {
+        let points = Text(RaceChart.pointText(day.points ?? 0)).font(.body.bold().monospacedDigit())
+        let date = Text(TimeMapView.dayText(day.dayStart)).font(.subheadline).foregroundStyle(.secondary)
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("\(rank)").font(.body.monospacedDigit()).foregroundStyle(.secondary).frame(minWidth: 22, alignment: .leading)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) { points; date }
+                VStack(alignment: .leading, spacing: 2) { points; date }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 「今日 今まで 78.3pt」と、相手の同じ時刻までと差。上回っていれば赤
     private func todayRow(_ comparison: BestComparison) -> some View {
         let wins = comparison.wins
         return ViewThatFits(in: .horizontal) {
@@ -477,7 +568,7 @@ struct PersonalBestView: View {
 
     private func todayGap(_ comparison: BestComparison, wins: Bool, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
-            Text("ベストの日の同じ時刻 \(RaceChart.pointText(comparison.bestAtSameTime))")
+            Text("\(theirsName(comparison))の同じ時刻 \(RaceChart.pointText(comparison.theirsAtSameTime))")
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             Text(RaceChartLayout.signedPoints(comparison.gap)).font(.headline.monospacedDigit())
                 .foregroundStyle(wins ? Theme.record : Theme.behind)
@@ -485,11 +576,14 @@ struct PersonalBestView: View {
     }
 }
 
-/// 自己ベストのラップ表（ANA-06）：縦は2時間の区間、横は［今日｜今日の累計｜ベストの日｜ベストの日の累計｜累計の差］（オーナーの案）。
-/// 見出しは「今日」「ベストの日」「差」と「区間・累計」の2段（1段の案と比べた）。
-/// 今日が上回った数字と、前にいる累計の差は赤。文字が大きくて入らないときは区間ごとに縦に並べる
+/// 自己ベストのラップ表（ANA-06）：縦は2時間の区間、横は［今日｜今日の累計｜相手｜相手の累計｜累計の差］（オーナーの案）。
+/// 見出しは「今日」「相手の名前」「差」と「区間・累計」の2段（1段の案と比べた）。
+/// 今日が上回った数字と、前にいる累計の差は赤。区間ベストを超えた今日の区間に金の ★（ANA-11）。
+/// 文字が大きくて入らないときは区間ごとに縦に並べる
 struct BestLapTable: View {
     let rows: [BestLapRow]
+    /// 相手の名前（「ベストの日」「平均（12日）」「区間ベスト」）
+    let theirsName: String
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -512,7 +606,7 @@ struct BestLapTable: View {
             GridRow {
                 Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
                 Text("今日").gridCellColumns(2).gridCellAnchor(.center)
-                Text("ベストの日").gridCellColumns(2).gridCellAnchor(.center)
+                Text(theirsName).gridCellColumns(2).gridCellAnchor(.center)
                 Text("差")
             }
             .font(.caption.bold()).foregroundStyle(.secondary)
@@ -532,10 +626,10 @@ struct BestLapTable: View {
                         Text(Self.startText(row))
                         if row.isCurrent { Text("途中").font(.caption2).foregroundStyle(.secondary) }
                     }
-                    number(row.today, wins: row.todayWins)
+                    todayNumber(row)
                     number(row.todayTotal, wins: row.totalWins)
-                    number(row.best, wins: false).foregroundStyle(.secondary)
-                    number(row.bestTotal, wins: false).foregroundStyle(.secondary)
+                    number(row.theirs, wins: false).foregroundStyle(.secondary)
+                    number(row.theirsTotal, wins: false).foregroundStyle(.secondary)
                     gap(row)
                 }
                 .font(.subheadline.monospacedDigit())
@@ -549,41 +643,54 @@ struct BestLapTable: View {
             Text(Self.rangeText(row) + (row.isCurrent ? "（途中）" : "")).font(.subheadline.bold())
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
-                    pair("今日", number(row.today, wins: row.todayWins))
-                    pair("累計", number(row.todayTotal, wins: row.totalWins))
+                    pair(Text("今日"), todayNumber(row))
+                    pair(Text("累計"), number(row.todayTotal, wins: row.totalWins))
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    pair("今日", number(row.today, wins: row.todayWins))
-                    pair("今日の累計", number(row.todayTotal, wins: row.totalWins))
+                    pair(Text("今日"), todayNumber(row))
+                    pair(Text("今日の累計"), number(row.todayTotal, wins: row.totalWins))
                 }
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
-                    pair("ベストの日", number(row.best, wins: false))
-                    pair("累計", number(row.bestTotal, wins: false))
+                    pair(Text(theirsName), number(row.theirs, wins: false))
+                    pair(Text("累計"), number(row.theirsTotal, wins: false))
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    pair("ベストの日", number(row.best, wins: false))
-                    pair("ベストの日の累計", number(row.bestTotal, wins: false))
+                    pair(Text(theirsName), number(row.theirs, wins: false))
+                    pair(Text("\(theirsName)の累計"), number(row.theirsTotal, wins: false))
                 }
             }
-            pair("累計の差", gap(row))
+            pair(Text("累計の差"), gap(row))
         }
         .font(.subheadline.monospacedDigit())
         .accessibilityElement(children: .combine)
     }
 
     /// 見出しと数字の組。横に入らなければ見出しの下に数字（文字が大きいとき、見出しや数字を途中で折り返さない）
-    private func pair(_ label: LocalizedStringKey, _ value: some View) -> some View {
+    private func pair(_ label: Text, _ value: some View) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 6) {
-                Text(label).foregroundStyle(.secondary)
+                label.foregroundStyle(.secondary)
                 value
             }
             VStack(alignment: .leading, spacing: 0) {
-                Text(label).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                label.foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 value
             }
+        }
+    }
+
+    /// 今日の区間の数字。区間ベストを超えたら、数字の左に同じ大きさの金の ★（「★9.1」。数字の色は変えず、右端は上下の行とそろう）
+    @ViewBuilder
+    private func todayNumber(_ row: BestLapRow) -> some View {
+        if row.gold {
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text("★").foregroundStyle(Theme.gold).accessibilityLabel("区間ベスト更新")
+                number(row.today, wins: row.todayWins)
+            }
+        } else {
+            number(row.today, wins: row.todayWins)
         }
     }
 
