@@ -795,6 +795,51 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(today.waitForExistence(timeout: timeout))
     }
 
+    /// ラップ表の相手の切り替えとベスト10（ANA-06・09・11、1b-51・1b-52）。相手は期間を変えても、ほかのタブへ行って戻ってもそのまま。
+    /// ベスト10は期間の記録のある日（今週なら月〜水の3日）で、押すとその日のグラフ
+    func testLapTargetsAndTopDays() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-22T15:20:00+09:00"])
+        let tab = app.tabBars.buttons["分析"]
+        XCTAssertTrue(tab.waitForExistence(timeout: timeout))
+        tab.tap()
+        app.buttons["analysisBestRow"].tap()
+        let targets = app.segmentedControls["lapTargetPicker"]
+        XCTAssertTrue(targets.waitForExistence(timeout: timeout))
+        XCTAssertTrue(targets.buttons["ベストの日"].isSelected)
+        XCTAssertTrue(app.descendants(matching: .any)["theoreticalBestRow"].firstMatch.exists)
+        let today = app.descendants(matching: .any)["bestTodayRow"].firstMatch
+        XCTAssertTrue(today.label.contains("ベストの日の同じ時刻"))
+
+        targets.buttons["平均"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(label("平均（21日）の同じ時刻")).firstMatch
+            .waitForExistence(timeout: timeout))
+        // 期間を変えても平均のまま。日数は期間の記録のある日
+        app.segmentedControls["bestPeriodPicker"].buttons["今週"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(label("平均（3日）の同じ時刻")).firstMatch
+            .waitForExistence(timeout: timeout))
+        XCTAssertTrue(targets.buttons["平均"].isSelected)
+
+        targets.buttons["区間ベスト"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(label("区間ベストの同じ時刻")).firstMatch
+            .waitForExistence(timeout: timeout))
+        // ほかのタブへ行って戻っても区間ベストのまま
+        app.tabBars.buttons["タイマー"].tap()
+        tab.tap()
+        XCTAssertTrue(targets.waitForExistence(timeout: timeout))
+        XCTAssertTrue(targets.buttons["区間ベスト"].isSelected)
+
+        // ベスト10：今週は3日。押すとその日のグラフ
+        let top = app.buttons.matching(identifier: "bestTopDay")
+        for _ in 0..<6 where top.count < 3 || !top.element(boundBy: 0).isHittable {
+            app.swipeUp(velocity: .slow)
+        }
+        XCTAssertEqual(top.count, 3)
+        XCTAssertTrue(top.element(boundBy: 0).label.hasPrefix("1"))
+        top.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars.matching(NSPredicate(format: "identifier CONTAINS %@", "10月")).firstMatch
+            .waitForExistence(timeout: timeout))
+    }
+
     /// 今のブロックの最中でもタイマーがなければ次を前倒しで始められる（TMR-15）。計画どおりの点の帯（2秒）は単体テストで確かめる
     func testEarlyStartDuringABlock() {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T11:40:00+09:00"])

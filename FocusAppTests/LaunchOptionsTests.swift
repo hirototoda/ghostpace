@@ -141,6 +141,18 @@ struct LaunchOptionsTests {
         #expect(page.pointsPage == 2)
     }
 
+    /// ラップ表の相手と、自己ベストを送る先（ANA-06・09・11 の撮影用）
+    @Test func parsesLapTargetAndBestScroll() {
+        #expect(LaunchOptions.parse([]).lapTarget == nil)
+        #expect(LaunchOptions.parse(["-lapTarget", "average"]).lapTarget == .average)
+        #expect(LaunchOptions.parse(["-lapTarget", "sectionBest"]).lapTarget == .sectionBest)
+        // 知らない相手は読み飛ばさず、次の引数をそのまま読む
+        let unknown = LaunchOptions.parse(["-lapTarget", "-openBest", "week"])
+        #expect(unknown.lapTarget == nil)
+        #expect(unknown.openBest == .week)
+        #expect(LaunchOptions.parse(["-bestScroll", "top10"]).bestScroll == "top10")
+    }
+
     /// 見本データの今日の目標（計画より多い目標の撮影用、GHO-10）
     @Test func parsesDemoGoalMinutes() {
         #expect(LaunchOptions.parse([]).demoGoalMinutes == nil)

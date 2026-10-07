@@ -195,30 +195,30 @@ struct PersonalBestTests {
             let h = date.timeIntervalSince(best) / 3600
             return min(max(h - 4, 0), 2) * 5 + min(max(h - 6, 0), 2) * 6 + min(max(h - 10, 0), 1) * 5
         }
-        let rows = BestLaps.make(today: mine, todayStart: today, now: jst("2026-10-22T11:00"), best: theirs, bestStart: best)
+        let rows = BestLaps.make(today: mine, todayStart: today, now: jst("2026-10-22T11:00"), theirs: { theirs(best.addingTimeInterval($0)) })
         // どちらも0の区間（4:00–8:00、12:00–14:00 など）は省く
         #expect(rows.map(\.section.start) == [jst("2026-10-22T08:00"), jst("2026-10-22T10:00"), jst("2026-10-22T14:00")])
         let first = rows[0]
         #expect(first.today?.isApprox(6) == true)
         #expect(first.todayTotal?.isApprox(6) == true)
-        #expect(first.best.isApprox(10))
-        #expect(first.bestTotal.isApprox(10))
+        #expect(first.theirs.isApprox(10))
+        #expect(first.theirsTotal.isApprox(10))
         #expect(!first.isCurrent)
         // 今の区間：ベストの日も 11:00 まで（12pt のうち 6pt）
         let current = rows[1]
         #expect(current.isCurrent)
         #expect(current.today?.isApprox(6) == true)
         #expect(current.todayTotal?.isApprox(12) == true)
-        #expect(current.best.isApprox(6))
-        #expect(current.bestTotal.isApprox(16))
+        #expect(current.theirs.isApprox(6))
+        #expect(current.theirsTotal.isApprox(16))
         #expect(current.totalGap?.isApprox(-4) == true)
         // まだ来ていない区間：今日は空、ベストの日は区間の全部
         let future = rows[2]
         #expect(future.today == nil)
         #expect(future.todayTotal == nil)
         #expect(future.totalGap == nil)
-        #expect(future.best.isApprox(5))
-        #expect(future.bestTotal.isApprox(27))
+        #expect(future.theirs.isApprox(5))
+        #expect(future.theirsTotal.isApprox(27))
     }
 
     /// 今がちょうど区間の始まりなら、その区間はまだ来ていない。今日だけ・ベストの日だけに点がある区間は残す
@@ -228,30 +228,30 @@ struct PersonalBestTests {
         // 今日は 6:00〜8:00 に 4pt、ベストの日は 8:00〜10:00 に 4pt
         func mine(_ date: Date) -> Double { min(max(date.timeIntervalSince(today) / 3600 - 2, 0), 2) * 2 }
         func theirs(_ date: Date) -> Double { min(max(date.timeIntervalSince(best) / 3600 - 4, 0), 2) * 2 }
-        let rows = BestLaps.make(today: mine, todayStart: today, now: jst("2026-10-22T10:00"), best: theirs, bestStart: best)
+        let rows = BestLaps.make(today: mine, todayStart: today, now: jst("2026-10-22T10:00"), theirs: { theirs(best.addingTimeInterval($0)) })
         #expect(rows.map(\.section.start) == [jst("2026-10-22T06:00"), jst("2026-10-22T08:00")])
         #expect(rows[0].todayWins && rows[0].totalWins)
         #expect(rows[1].today?.isApprox(0) == true)
         #expect(!rows[1].todayWins && !rows[1].isCurrent)
         #expect(rows[1].totalGap?.isApprox(0) == true)
-        let atStart = BestLaps.make(today: mine, todayStart: today, now: jst("2026-10-22T08:00"), best: theirs, bestStart: best)
+        let atStart = BestLaps.make(today: mine, todayStart: today, now: jst("2026-10-22T08:00"), theirs: { theirs(best.addingTimeInterval($0)) })
         #expect(atStart[1].today == nil)
         #expect(!atStart[1].todayWins && !atStart[1].totalWins)
         // 4:00 ちょうどは、どの区間もまだ来ていない
-        let dawn = BestLaps.make(today: mine, todayStart: today, now: today, best: theirs, bestStart: best)
+        let dawn = BestLaps.make(today: mine, todayStart: today, now: today, theirs: { theirs(best.addingTimeInterval($0)) })
         #expect(dawn.allSatisfy { $0.today == nil })
     }
 
     /// 赤と差は、表に出る数字（0.1pt）で決める。12.04 と 11.96 はどちらも 12.0 なので、赤にせず差も 0
     @Test func winsAndGapUseTheShownValues() {
         let section = DateInterval(start: jst("2026-10-22T08:00"), duration: Laps.length)
-        let row = BestLapRow(section: section, today: 2.04, todayTotal: 12.04, best: 1.96, bestTotal: 11.96, isCurrent: false)
+        let row = BestLapRow(section: section, today: 2.04, todayTotal: 12.04, theirs: 1.96, theirsTotal: 11.96, isCurrent: false)
         #expect(!row.todayWins && !row.totalWins)
         #expect(row.totalGap == 0)
-        let ahead = BestLapRow(section: section, today: 2.06, todayTotal: 12.06, best: 2.0, bestTotal: 11.96, isCurrent: false)
+        let ahead = BestLapRow(section: section, today: 2.06, todayTotal: 12.06, theirs: 2.0, theirsTotal: 11.96, isCurrent: false)
         #expect(ahead.todayWins && ahead.totalWins)
         #expect(ahead.totalGap?.isApprox(0.1) == true)
-        let comparison = BestComparison(today: 10.04, bestAtSameTime: 9.96, rows: [])
+        let comparison = BestComparison(today: 10.04, theirsAtSameTime: 9.96, rows: [])
         #expect(!comparison.wins)
         #expect(comparison.gap == 0)
     }
@@ -274,12 +274,136 @@ struct PersonalBestTests {
         try record(t, "2026-10-22T08:00", "2026-10-22T09:30")
         let m = model(t)
         let best = try #require(m.periodBests()[.month])
-        let comparison = try #require(m.bestComparison(bestDay: best.pointsDay))
+        let comparison = try #require(m.lapComparison(target: .bestDay, period: .month))
         let todaySnapshot = try #require(m.daySnapshot(daysAgo: 0))
         let bestSnapshot = try #require(m.daySnapshot(of: best.pointsDay))
         #expect(comparison.today.isApprox(todaySnapshot.points))
-        #expect(comparison.bestAtSameTime.isApprox(bestSnapshot.myPoints(until: jst("2026-10-13T12:00"))))
+        #expect(comparison.theirsAtSameTime.isApprox(bestSnapshot.myPoints(until: jst("2026-10-13T12:00"))))
         #expect(comparison.rows.contains { $0.section.start == jst("2026-10-22T14:00") && $0.today == nil })
+    }
+
+    // MARK: ラップ表の相手・理論ベスト・ベスト10（ANA-06・09・11）
+
+    /// 平均：期間の記録のある日の、その時刻までの平均。最後の累計は期間の1日の平均。ほかの期間の日は入らない
+    @Test func lapComparisonAgainstTheAverage() throws {
+        let t = try TestStore(now: jst("2026-10-22T12:00"))
+        try t.seeded()
+        try record(t, "2026-10-13T09:00", "2026-10-13T13:00")  // 先週（今週には入らない）
+        try record(t, "2026-10-20T09:00", "2026-10-20T10:00")
+        try record(t, "2026-10-21T09:00", "2026-10-21T10:00")
+        try record(t, "2026-10-21T13:00", "2026-10-21T14:00")
+        try record(t, "2026-10-22T08:00", "2026-10-22T09:00")  // 今日（入らない）
+        let m = model(t)
+        let tue = try #require(m.daySnapshot(of: jst("2026-10-20T04:00")))
+        let wed = try #require(m.daySnapshot(of: jst("2026-10-21T04:00")))
+        let comparison = try #require(m.lapComparison(target: .average, period: .week))
+        #expect(comparison.days == 2)
+        let todaySnapshot = try #require(m.daySnapshot(daysAgo: 0))
+        #expect(comparison.today.isApprox(todaySnapshot.points))
+        let noon = (tue.myPoints(until: jst("2026-10-20T12:00")) + wed.myPoints(until: jst("2026-10-21T12:00"))) / 2
+        #expect(comparison.theirsAtSameTime.isApprox(noon))
+        // 12:00–14:00 はまだ来ていない区間：相手は区間の全部。最後の累計は1日の平均
+        let last = try #require(comparison.rows.last)
+        #expect(last.section.start == jst("2026-10-22T12:00"))
+        #expect(last.today == nil)
+        #expect(last.theirsTotal.isApprox((tue.points + wed.points) / 2))
+        #expect(last.theirs.isApprox((wed.points - wed.myPoints(until: jst("2026-10-21T12:00"))) / 2))
+    }
+
+    /// 1日なら平均はその日。期間に記録のある日がなければ、どの相手も理論ベストもベスト10も出さない
+    @Test func averageOfOneDayAndNoDays() throws {
+        let t = try TestStore(now: jst("2026-10-19T12:00"))  // 月曜
+        try t.seeded()
+        try record(t, "2026-10-18T09:00", "2026-10-18T10:00")
+        let m = model(t)
+        for target in LapTarget.allCases {
+            #expect(m.lapComparison(target: target, period: .week) == nil)
+        }
+        #expect(m.theoreticalBest(period: .week) == nil)
+        #expect(m.topDays(period: .week).isEmpty)
+        let one = try #require(m.lapComparison(target: .average, period: .month))
+        #expect(one.days == 1)
+        let sunday = try #require(m.daySnapshot(of: jst("2026-10-18T04:00")))
+        #expect(one.theirsAtSameTime.isApprox(sunday.myPoints(until: jst("2026-10-18T12:00"))))
+        let lastRow = try #require(one.rows.last)
+        #expect(lastRow.theirsTotal.isApprox(sunday.points))
+    }
+
+    /// 区間ベストをつないだ1日：起きている区間は区間ベスト、睡眠の区間（今の設定 0:00–7:00 で 4:00–8:00 と 翌0:00–4:00）は平均。
+    /// 最後の累計＝理論ベスト。3:59 までの集中は前の日、4:00 からはその日の区間
+    @Test func sectionBestAndTheoreticalBest() throws {
+        let t = try TestStore(now: jst("2026-10-22T12:00"))
+        try t.seeded()
+        try record(t, "2026-10-20T09:00", "2026-10-20T10:00")  // 火曜 8:00–10:00 に 6
+        try record(t, "2026-10-21T01:00", "2026-10-21T02:00")  // 火曜の 翌0:00–2:00 に 6（睡眠の区間）
+        try record(t, "2026-10-21T03:00", "2026-10-21T03:59")  // 火曜の 翌2:00–4:00 に 5.9（睡眠の区間）
+        try record(t, "2026-10-21T04:00", "2026-10-21T04:30")  // 水曜の 4:00–6:00 に 3（睡眠の区間）
+        try record(t, "2026-10-21T10:00", "2026-10-21T11:00")  // 水曜 10:00–12:00 に 6
+        let m = model(t)
+        // 6 ＋ 6 ＋ 睡眠の区間は平均（3 ＋ 2.95 ＋ 1.5）
+        let theoretical = try #require(m.theoreticalBest(period: .week))
+        #expect(theoretical.isApprox(19.45))
+        let comparison = try #require(m.lapComparison(target: .sectionBest, period: .week))
+        let lastRow = try #require(comparison.rows.last)
+        #expect(lastRow.theirsTotal.isApprox(theoretical))
+        // ★の記録は睡眠の区間でも区間ベスト（数え直す前）
+        let night = try #require(comparison.rows.first { $0.section.start == jst("2026-10-23T02:00") })
+        #expect(night.record?.isApprox(5.9) == true)
+        #expect(night.theirs.isApprox(2.95))
+        let dawn = try #require(comparison.rows.first { $0.section.start == jst("2026-10-22T04:00") })
+        #expect(dawn.record?.isApprox(3) == true)
+        #expect(dawn.theirs.isApprox(1.5))
+        // 今日の行も区間ベストの1日の同じ時刻まで（12:00 なら 1.5 ＋ 6 ＋ 6）
+        #expect(comparison.theirsAtSameTime.isApprox(13.5))
+    }
+
+    /// ★：今日の区間が区間ベストを超えたら（相手がベストの日でも）。今の区間は今まで
+    @Test func goldMarksInTheTable() throws {
+        let t = try TestStore(now: jst("2026-10-22T11:00"))
+        try t.seeded()
+        try record(t, "2026-10-20T08:00", "2026-10-20T09:00")  // 8:00–10:00 の区間ベスト 6
+        try record(t, "2026-10-22T08:00", "2026-10-22T09:10")  // 7
+        try record(t, "2026-10-22T10:00", "2026-10-22T11:00")  // 今の区間で 6（区間ベストは 0）
+        let m = model(t)
+        let rows = try #require(m.lapComparison(target: .bestDay, period: .week)).rows
+        let eight = try #require(rows.first { $0.section.start == jst("2026-10-22T08:00") })
+        #expect(eight.gold && eight.todayWins)
+        let current = try #require(rows.first { $0.isCurrent })
+        #expect(current.section.start == jst("2026-10-22T10:00"))
+        #expect(current.gold)
+    }
+
+    /// ベスト10：期間の記録のある日の上位10日。同じなら新しい日が上。今日は入れない
+    @Test func topTenDays() throws {
+        let t = try TestStore(now: jst("2026-10-22T12:00"))
+        try t.seeded()
+        // 10/10 から 10/21 まで、10分ずつ長く。10/21 は 10/20 と同じ
+        for i in 0..<12 {
+            let minutes = i == 11 ? 110 : 10 * (i + 1)
+            let day = String(format: "2026-10-%02d", 10 + i)
+            try record(t, "\(day)T09:00", String(format: "\(day)T%02d:%02d", 9 + minutes / 60, minutes % 60))
+        }
+        try record(t, "2026-10-22T05:00", "2026-10-22T11:00")  // 今日
+        let m = model(t)
+        let top = m.topDays(period: .all)
+        #expect(top.map(\.dayStart) == [21, 20, 19, 18, 17, 16, 15, 14, 13, 12].map {
+            jst(String(format: "2026-10-%02dT04:00", $0))
+        })
+        #expect(top[0].points == top[1].points)
+        #expect(m.topDays(period: .week).map(\.dayStart) == [21, 20, 19].map { jst("2026-10-\($0)T04:00") })
+    }
+
+    /// 過ぎた日を覚えていても、記録を足したら平均を数え直す
+    @Test func averageRecountsAfterNewRecords() throws {
+        let t = try TestStore(now: jst("2026-10-22T12:00"))
+        try t.seeded()
+        try record(t, "2026-10-20T09:00", "2026-10-20T10:00")
+        try record(t, "2026-10-21T09:00", "2026-10-21T10:00")
+        let m = model(t)
+        let before = try #require(m.lapComparison(target: .average, period: .week)?.rows.last).theirsTotal
+        try record(t, "2026-10-20T13:00", "2026-10-20T14:00")
+        let after = try #require(m.lapComparison(target: .average, period: .week)?.rows.last).theirsTotal
+        #expect(after.isApprox(before + 3))
     }
 
     // MARK: ポイントの推移のさかのぼり（ANA-04）
