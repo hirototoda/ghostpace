@@ -56,15 +56,17 @@ struct PersonalBestTests {
         #expect(m.periodBests()[.all]?.focus?.focusSeconds == 4 * 3600)
     }
 
-    /// 今週に記録のある日がなければ nil（月曜は必ずこうなる）
-    @Test func noBestOnMonday() throws {
+    /// 今週に記録のある日がなければ（月曜は必ず）先週に代える（2026-10-11）。今日は入れない
+    @Test func mondayFallsBackToLastWeek() throws {
         let t = try TestStore(now: jst("2026-10-19T12:00"))
         try t.seeded()
         try record(t, "2026-10-18T09:00", "2026-10-18T10:00")  // 前の週の日曜
         try record(t, "2026-10-19T09:00", "2026-10-19T11:00")  // 今日
         let m = model(t)
-        #expect(m.periodBests()[.week] == nil)
+        #expect(m.periodBests()[.week]?.pointsDay == jst("2026-10-18T04:00"))
+        #expect(m.periodBests()[.week]?.isFallback == true)
         #expect(m.periodBests()[.month]?.pointsDay == jst("2026-10-18T04:00"))
+        #expect(m.periodBests()[.month]?.isFallback == false)
     }
 
     /// 月曜の 3:59 はまだ日曜（今日）なので、日曜の記録は入らない。4:00 に月曜になると、日曜は前の週
@@ -76,8 +78,9 @@ struct PersonalBestTests {
         // 今日は日曜なので入れない。今週（10/12〜）にほかの記録はない
         #expect(m.periodBests()[.week] == nil)
         t.clock.set(jst("2026-10-19T04:00"))
-        // 月曜になると日曜は前の週。今週はまだない
-        #expect(m.periodBests()[.week] == nil)
+        // 月曜になると日曜は前の週。今週はまだないので先週（日曜を含む）に代える
+        #expect(m.periodBests()[.week]?.pointsDay == jst("2026-10-18T04:00"))
+        #expect(m.periodBests()[.week]?.isFallback == true)
         #expect(m.periodBests()[.month]?.pointsDay == jst("2026-10-18T04:00"))
     }
 
@@ -112,7 +115,9 @@ struct PersonalBestTests {
         try record(t, "2026-11-01T09:00", "2026-11-01T10:00")
         #expect(m.periodBests().isEmpty)
         try record(t, "2026-10-31T09:00", "2026-10-31T10:00")
-        #expect(m.periodBests()[.month] == nil)
+        // 今月（11/1 だけ）に記録のある日がないので、先月に代える（2026-10-11）
+        #expect(m.periodBests()[.month]?.pointsDay == jst("2026-10-31T04:00"))
+        #expect(m.periodBests()[.month]?.isFallback == true)
         // 11/1 は日曜なので、今週（10/26〜）には土曜が入る
         #expect(m.periodBests()[.week]?.pointsDay == jst("2026-10-31T04:00"))
         #expect(m.periodBests()[.all]?.pointsDay == jst("2026-10-31T04:00"))
@@ -310,17 +315,24 @@ struct PersonalBestTests {
         #expect(last.theirs.isApprox((wed.points - wed.myPoints(until: jst("2026-10-21T12:00"))) / 2))
     }
 
-    /// 1日なら平均はその日。期間に記録のある日がなければ、どの相手も理論ベストもベスト10も出さない
+    /// 1日なら平均はその日。期間（先週に代えても）に記録のある日がなければ、どの相手も理論ベストもベスト10も出さない
     @Test func averageOfOneDayAndNoDays() throws {
         let t = try TestStore(now: jst("2026-10-19T12:00"))  // 月曜
         try t.seeded()
         try record(t, "2026-10-18T09:00", "2026-10-18T10:00")
         let m = model(t)
+        // 月曜は先週に代えるので、先週の日曜1日の平均
+        #expect(m.lapComparison(target: .average, period: .week)?.days == 1)
+        // 先週にも記録がない月曜（2週前だけ）
+        let empty = try TestStore(now: jst("2026-10-19T12:00"))
+        try empty.seeded()
+        try record(empty, "2026-10-11T09:00", "2026-10-11T10:00")
+        let none = model(empty)
         for target in LapTarget.allCases {
-            #expect(m.lapComparison(target: target, period: .week) == nil)
+            #expect(none.lapComparison(target: target, period: .week) == nil)
         }
-        #expect(m.theoreticalBest(period: .week) == nil)
-        #expect(m.topDays(period: .week).isEmpty)
+        #expect(none.theoreticalBest(period: .week) == nil)
+        #expect(none.topDays(period: .week).isEmpty)
         let one = try #require(m.lapComparison(target: .average, period: .month))
         #expect(one.days == 1)
         let sunday = try #require(m.daySnapshot(of: jst("2026-10-18T04:00")))

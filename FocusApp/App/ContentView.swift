@@ -72,12 +72,14 @@ private struct MainView: View {
         self.model = model
         let opensAnalysis = options.openAnalysis || options.openTimeline || options.openPoints || options.openBest != nil
         _tab = State(initialValue: opensAnalysis ? .analysis : options.openPlan ? .plan : .timer)
+        let openDay = options.openDay.map { days in
+            let today = DayBoundary.dayStart(containing: model.clock.now(), calendar: model.calendar)
+            return model.calendar.date(byAdding: .day, value: -days, to: today) ?? today
+        }
         _analysisPath = State(initialValue: options.openTimeline ? [.timeline]
-                              : options.openBest != nil ? [.best]
-                              : options.openPoints ? [.points] + (options.openDay.map { days in
-                                  let today = DayBoundary.dayStart(containing: model.clock.now(), calendar: model.calendar)
-                                  return [.day(model.calendar.date(byAdding: .day, value: -days, to: today) ?? today)]
-                              } ?? []) : [])
+                              // 自己ベストから開いたその日のグラフ（相手は今日、ANA-05）は `-openBest … -openDay <何日前>`
+                              : options.openBest != nil ? [.best] + (openDay.map { [.bestDay($0)] } ?? [])
+                              : options.openPoints ? [.points] + (openDay.map { [.day($0)] } ?? []) : [])
         _showsSettings = State(initialValue: options.openSettings)
         if options.openReview { model.showsReview = true }
         _holdProgress = State(initialValue: options.holdProgress)
@@ -91,6 +93,10 @@ private struct MainView: View {
 
     var body: some View {
         tabs
+            // ラップ・中間地点・計画どおりの点の帯は、タイマーのタブにいるときだけ出す。
+            // 分析・計画のタブにいる間に届いたものは、戻ったときに出す（2026-10-11。分析の見出しに重なっていた）
+            .onChange(of: tab) { _, tab in model.setTimerTabVisible(tab == .timer) }
+            .onAppear { model.setTimerTabVisible(tab == .timer) }
             .habitIntroCover(model: model)
             // 長押しの画面は、いちばん上に出ている画面から出す（設定・タイマーの上ではそれぞれの中から）
             .holdUnlockCover(model: model, initialProgress: holdProgress,

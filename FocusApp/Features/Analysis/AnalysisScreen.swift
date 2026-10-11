@@ -20,6 +20,8 @@ enum AnalysisRoute: Hashable {
     case timeline
     /// その日のグラフ（その日の 4:00。開いたまま4:00をまたいでも同じ日を指すよう日付で持つ）
     case day(Date)
+    /// 自己ベストの画面（ベストの行・ベスト10）から開いたその日のグラフ。相手は今日（ANA-05、2026-10-11）
+    case bestDay(Date)
     /// 自己ベスト（ANA-06）
     case best
     /// 時間帯の地図（ANA-07）
@@ -75,6 +77,7 @@ struct AnalysisScreen: View {
                 case .points: PointsHistoryView(model: model)
                 case .timeline: TimelineScreen(model: model)
                 case .day(let dayStart): DayGraphView(model: model, dayStart: dayStart)
+                case .bestDay(let dayStart): DayGraphView(model: model, dayStart: dayStart, versusToday: true)
                 case .best: PersonalBestView(model: model)
                 case .timeMap: TimeMapView(map: map ?? model.timeMap())
                 }
@@ -308,19 +311,25 @@ struct PointsHistoryView: View {
     }
 }
 
-/// その日のグラフ（ANA-05）：ホームの円の裏と同じグラフ。過ぎた日は 4:00〜翌4:00 の1日で始める
+/// その日のグラフ（ANA-05）：ホームの円の裏と同じグラフ。過ぎた日は 4:00〜翌4:00 の1日で始める。
+/// 自己ベストから開いたとき（`versusToday`）は相手を今日にする（2026-10-11）。1分ごとの読み直しで今日を数え直し、
+/// 4:00 を過ぎれば新しい今日と比べる
 struct DayGraphView: View {
     @Bindable var model: AppModel
     let dayStart: Date
+    var versusToday = false
 
     var body: some View {
+        // 1分ごとの読み直し（model.snapshot.now）で描き直す
+        let _ = model.snapshot.now
         ScrollView {
-            if let snapshot = model.daySnapshot(of: dayStart) {
+            if let snapshot = model.daySnapshot(of: dayStart, versusToday: versusToday) {
+                let rival: RaceRival = snapshot.todayRival != nil ? .today : .opponent(model.opponent)
                 // 過ぎた日（翌4:00 まで数えた日）は1日で始める。今日はホームの裏と同じ
-                RaceChart(snapshot: snapshot, opponent: model.opponent, isPastDay: snapshot.now >= snapshot.dayEnd)
+                RaceChart(snapshot: snapshot, rival: rival, isPastDay: snapshot.now >= snapshot.dayEnd)
                     .aspectRatio(0.8, contentMode: .fit)
                     .padding(16)
-                LapList(laps: snapshot.laps(model.opponent).filter { !$0.isEmpty }, opponent: model.opponent)
+                LapList(laps: snapshot.rivalLaps(rival).filter { !$0.isEmpty }, rival: rival)
                     .padding(.horizontal, 16).padding(.bottom, 16)
                     .navigationTitle(Text(snapshot.dayStart.formatted(
                         .dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))))
@@ -335,7 +344,7 @@ struct DayGraphView: View {
 /// その日のラップの一覧（GHO-06）：2時間ごとの自分・相手の集中と差
 struct LapList: View {
     let laps: [Lap]
-    let opponent: Opponent
+    let rival: RaceRival
 
     var body: some View {
         if !laps.isEmpty {
@@ -345,12 +354,13 @@ struct LapList: View {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(AppModel.lapRange(lap) + (lap.isCurrent ? "（途中）" : "")).font(.subheadline.monospacedDigit())
-                            Text("\(DurationFormat.japanese(lap.mine))・\(opponent == .goal ? "目標" : "先週") \(DurationFormat.japanese(lap.opponent))")
+                            Text("\(DurationFormat.japanese(lap.mine))・\(rival.shortName) \(DurationFormat.japanese(lap.opponent))")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(DurationFormat.signed(lap.diff)).font(.subheadline.bold().monospacedDigit())
-                            .foregroundStyle(Theme.diffColor(lap.diff))
+                        // 相手が今日なら差は今日−この日（ラップ表と同じ向き）
+                        Text(DurationFormat.signed(rival.lapDiff(lap))).font(.subheadline.bold().monospacedDigit())
+                            .foregroundStyle(Theme.diffColor(rival.lapDiff(lap)))
                     }
                     .accessibilityElement(children: .combine)
                     Divider()
@@ -387,7 +397,8 @@ struct PersonalBestView: View {
             #if DEBUG
                 .task(id: comparison != nil && !top.isEmpty) {
                     guard comparison != nil, let startsScroll else { return }
-                    proxy.scrollTo(startsScroll == "top10" ? "bestTop10" : "bestTheoretical", anchor: .top)
+                    proxy.scrollTo(startsScroll == "top10" ? "bestTop10" : startsScroll == "table" ? "bestLapTable" : "bestTheoretical",
+                                   anchor: .top)
                 }
             #endif
         }
@@ -416,22 +427,29 @@ struct PersonalBestView: View {
             Section {
                 Picker("期間", selection: $period) {
                     Text("全期間").tag(BestPeriod.all)
-                    Text("今月").tag(BestPeriod.month)
-                    Text("今週").tag(BestPeriod.week)
+                    // 今週（今月）に記録のある日がない間は先週（先月）の日で出す（2026-10-11）
+                    (isFallback(.month) ? Text("先月") : Text("今月")).tag(BestPeriod.month)
+                    (isFallback(.week) ? Text("先週") : Text("今週")).tag(BestPeriod.week)
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("bestPeriodPicker")
+                if isFallback(period) {
+                    Text(period == .week ? "今週はまだ記録がないので、先週と比べています" : "今月はまだ記録がないので、先月と比べています")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("bestFallbackNote")
+                }
                 switch bests.map({ $0[period] }) {
                 case .none:
                     ProgressView()
                 case .some(.none):
                     Text(emptyText).foregroundStyle(.secondary)
                 case .some(.some(let best)):
-                    NavigationLink(value: AnalysisRoute.day(best.pointsDay)) {
+                    NavigationLink(value: AnalysisRoute.bestDay(best.pointsDay)) {
                         bestRow("ポイント", value: RaceChart.pointText(best.points), day: best.pointsDay)
                     }
+                    .accessibilityIdentifier("bestPointsRow")
                     if let focus = best.focus {
-                        NavigationLink(value: AnalysisRoute.day(focus.focusDay)) {
+                        NavigationLink(value: AnalysisRoute.bestDay(focus.focusDay)) {
                             bestRow("集中した時間", value: DurationFormat.japanese(focus.focusSeconds), day: focus.focusDay)
                         }
                     }
@@ -453,6 +471,7 @@ struct PersonalBestView: View {
                 if !comparison.rows.isEmpty {
                     Section {
                         BestLapTable(rows: comparison.rows, theirsName: theirsName(comparison))
+                            .id("bestLapTable")
                     } header: {
                         Text("ラップ（2時間ごと・pt）")
                     } footer: {
@@ -463,7 +482,7 @@ struct PersonalBestView: View {
             if !top.isEmpty {
                 Section {
                     ForEach(Array(top.enumerated()), id: \.element.dayStart) { index, day in
-                        NavigationLink(value: AnalysisRoute.day(day.dayStart)) {
+                        NavigationLink(value: AnalysisRoute.bestDay(day.dayStart)) {
                             topRow(rank: index + 1, day: day)
                         }
                         .id(index == 0 ? "bestTop10" : "bestTop\(index + 1)")
@@ -481,6 +500,11 @@ struct PersonalBestView: View {
         var now: Date
         var period: BestPeriod
         var target: LapTarget?
+    }
+
+    /// 今週（今月）に記録のある日がないので、先週（先月）に代えているか
+    private func isFallback(_ period: BestPeriod) -> Bool {
+        bests?[period]?.isFallback == true
     }
 
     private var emptyText: String {
@@ -525,16 +549,30 @@ struct PersonalBestView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// 「1　100.4pt　9月28日(月)」。文字が大きくて入らなければ日付を下に
+    /// 「1　100.4pt　9月28日(月)」。順位・ポイント・日付を縦にそろえる（2026-10-11）：順位とポイントは、
+    /// 一覧の中で一番長いものの幅に右寄せ（100.4pt と 99.0pt で日付がずれない）。文字が大きくて入らなければ日付を下に
     private func topRow(rank: Int, day: DayPoints) -> some View {
-        let points = Text(RaceChart.pointText(day.points ?? 0)).font(.body.bold().monospacedDigit())
+        let widestRank = "\(top.count)"
+        let widestPoints = top.map { RaceChart.pointText($0.points ?? 0) }.max { $0.count < $1.count } ?? ""
+        let points = ZStack(alignment: .trailing) {
+            Text(widestPoints).hidden()
+            Text(RaceChart.pointText(day.points ?? 0))
+        }
+        .font(.body.bold().monospacedDigit())
+        .fixedSize()
         let date = Text(TimeMapView.dayText(day.dayStart)).font(.subheadline).foregroundStyle(.secondary)
         return HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("\(rank)").font(.body.monospacedDigit()).foregroundStyle(.secondary).frame(minWidth: 22, alignment: .leading)
+            ZStack(alignment: .trailing) {
+                Text(widestRank).hidden()
+                Text("\(rank)")
+            }
+            .font(.body.monospacedDigit()).foregroundStyle(.secondary)
+            .fixedSize()
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) { points; date }
                 VStack(alignment: .leading, spacing: 2) { points; date }
             }
+            Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
     }
@@ -592,7 +630,14 @@ struct BestLapTable: View {
         Group {
             if typeSize >= .xxxLarge {
                 VStack(alignment: .leading, spacing: 12) {
-                    ForEach(rows) { stackedRow($0) }
+                    ForEach(rows) { row in
+                        stackedRow(row)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            // 今の区間のまとまりに薄い背景（2026-10-11）
+                            .padding(row.isCurrent ? 6 : 0)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(row.isCurrent ? Self.currentFill : .clear))
+                            .padding(row.isCurrent ? -6 : 0)
+                    }
                 }
             } else {
                 grid
@@ -601,8 +646,15 @@ struct BestLapTable: View {
         .accessibilityIdentifier("bestLapTable")
     }
 
+    /// 今の区間の行の背景。前向きな色・赤・金と紛れない薄い灰色（2026-10-11）
+    static let currentFill = Color(.tertiarySystemFill)
+    /// ★ の幅（列のあいだの 10pt に足して ★ が入る分）
+    @ScaledMetric(relativeTo: .subheadline) private var starGap: CGFloat = 5
+
     private var grid: some View {
-        Grid(alignment: .trailing, horizontalSpacing: 10, verticalSpacing: 8) {
+        // ★ は数字の左の空き（区間の時刻とのあいだ）に置き、列の幅に入れない。★ の分の空きを時刻の列の右に取る
+        let hasGold = rows.contains(where: \.gold)
+        return Grid(alignment: .trailing, horizontalSpacing: 10, verticalSpacing: 8) {
             GridRow {
                 Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
                 Text("今日").gridCellColumns(2).gridCellAnchor(.center)
@@ -626,16 +678,50 @@ struct BestLapTable: View {
                         Text(Self.startText(row))
                         if row.isCurrent { Text("途中").font(.caption2).foregroundStyle(.secondary) }
                     }
-                    todayNumber(row)
+                    // ★ が区間の時刻に重ならないよう、★ があるときは時刻の列の右に少し空きを足す
+                    // （隠した ★ で場所を取ると、リストの行の高さがずれて表の上に空白ができた）
+                    .padding(.trailing, hasGold ? starGap : 0)
+                    .currentRowBounds(row.isCurrent)
+                    gridTodayNumber(row)
                     number(row.todayTotal, wins: row.totalWins)
                     number(row.theirs, wins: false).foregroundStyle(.secondary)
                     number(row.theirsTotal, wins: false).foregroundStyle(.secondary)
-                    gap(row)
+                    gap(row).currentRowBounds(row.isCurrent)
                 }
                 .font(.subheadline.monospacedDigit())
                 .accessibilityElement(children: .combine)
             }
         }
+        // 今の区間の行に薄い背景（2026-10-11）。行の左の端（時刻）と右の端（差）の位置から敷く
+        .backgroundPreferenceValue(CurrentRowBoundsKey.self) { anchors in
+            GeometryReader { proxy in
+                if let first = anchors.first {
+                    let rect = anchors.dropFirst().reduce(proxy[first]) { $0.union(proxy[$1]) }
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Self.currentFill)
+                        .frame(width: rect.width + 12, height: rect.height + 6)
+                        .position(x: rect.midX, y: rect.midY)
+                }
+            }
+        }
+    }
+
+    /// 表の今日の区間の数字。区間ベストを超えたら、数字の左に同じ大きさの金の ★（「★10.6」）。
+    /// ★ は列の幅に入れず、数字の左の空きに重ねる（10pt 以上でも数字が切れず、右端が上下の行とそろう、2026-10-11）
+    private func gridTodayNumber(_ row: BestLapRow) -> some View {
+        number(row.today, wins: row.todayWins)
+            .overlay(alignment: .leading) {
+                if row.gold {
+                    // 幅0の枠の右端に ★ の右端を合わせ、数字の左へはみ出させる（表の幅には入らない）
+                    Text(verbatim: "★")
+                        .foregroundStyle(Theme.gold)
+                        .fixedSize()
+                        .frame(width: 0, alignment: .trailing)
+                        .offset(x: -1)
+                        .accessibilityLabel(Text("区間ベスト更新"))
+                        .accessibilityIdentifier("bestLapGold")
+                }
+            }
     }
 
     private func stackedRow(_ row: BestLapRow) -> some View {
@@ -681,7 +767,7 @@ struct BestLapTable: View {
         }
     }
 
-    /// 今日の区間の数字。区間ベストを超えたら、数字の左に同じ大きさの金の ★（「★9.1」。数字の色は変えず、右端は上下の行とそろう）
+    /// 縦に並べたときの今日の区間の数字。区間ベストを超えたら、数字の左に同じ大きさの金の ★（「今日 ★9.1」）
     @ViewBuilder
     private func todayNumber(_ row: BestLapRow) -> some View {
         if row.gold {
@@ -786,5 +872,19 @@ struct TimeMapView: View {
     /// 例：9月28日（日）
     static func dayText(_ day: Date) -> String {
         day.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
+    }
+}
+
+/// ラップ表の今の区間の行の、端のセルの位置（背景を敷くため）
+private struct CurrentRowBoundsKey: PreferenceKey {
+    static let defaultValue: [Anchor<CGRect>] = []
+    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {
+        value += nextValue()
+    }
+}
+
+private extension View {
+    func currentRowBounds(_ isCurrent: Bool) -> some View {
+        anchorPreference(key: CurrentRowBoundsKey.self, value: .bounds) { isCurrent ? [$0] : [] }
     }
 }
