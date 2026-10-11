@@ -7,6 +7,8 @@ enum Theme {
     static let focus = Color.indigo
     /// デジタルデトックス（掃除・休み・料理・運動）
     static let detox = Color.teal
+    /// 裏のグラフの自分の線の、タイマーを動かしていない時間（一時停止を含む、2026-10-11）。集中の色を薄くしたもの
+    static let idleLine = Color.indigo.opacity(0.35)
     /// 先週の自分にリードしている
     static let lead = Color(light: UIColor(red: 0.72, green: 0.50, blue: 0.05, alpha: 1),
                             dark: UIColor(red: 0.96, green: 0.76, blue: 0.30, alpha: 1))

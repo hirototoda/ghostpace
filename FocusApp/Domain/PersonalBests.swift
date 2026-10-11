@@ -18,6 +18,36 @@ enum BestPeriods {
         }
         return calendar.date(byAdding: .day, value: -back, to: today)
     }
+
+    /// 期間の日の範囲（ANA-06）。`recordDays` は記録のある過ぎた日（その日の 4:00）。
+    /// 今週（今月）に記録のある日が1日もない間は、先週（先月）を期間にする（2026-10-11 オーナー決定）。
+    /// 先週（先月）にも記録のある日がなければ今週（今月）のまま（「まだ記録なし」）。2週・2か月前まではさかのぼらない。
+    /// 今週と今月は別々に決める
+    static func range(_ period: BestPeriod, today: Date, calendar: Calendar, recordDays: [Date]) -> BestRange {
+        guard let start = start(period, today: today, calendar: calendar) else { return BestRange(start: nil, end: today) }
+        let current = BestRange(start: start, end: today)
+        guard !recordDays.contains(where: current.contains) else { return current }
+        let previousStart = switch period {
+        case .all: Date?.none
+        case .week: calendar.date(byAdding: .day, value: -7, to: start)
+        case .month: calendar.date(byAdding: .month, value: -1, to: start)
+        }
+        guard let previousStart else { return current }
+        let previous = BestRange(start: previousStart, end: start, isFallback: true)
+        return recordDays.contains(where: previous.contains) ? previous : current
+    }
+}
+
+/// 期間の日の範囲：`start` の日 〜 `end` の前の日（どちらもその日の 4:00）。全期間は `start` が nil
+struct BestRange: Hashable {
+    var start: Date?
+    var end: Date
+    /// 今週（今月）に記録のある日がないので、先週（先月）に代えた
+    var isFallback = false
+
+    func contains(_ day: Date) -> Bool {
+        (start.map { day >= $0 } ?? true) && day < end
+    }
 }
 
 /// 期間の中の自己ベスト：一番多い1日のポイントとその日の 4:00、集中した時間のベスト（集中した日がなければ nil）
@@ -25,6 +55,8 @@ struct PeriodBest: Hashable {
     var points: Double
     var pointsDay: Date
     var focus: PersonalBest?
+    /// 今週（今月）に記録のある日がないので、先週（先月）の日で出している（切り替えの文字「先週」「先月」、2026-10-11）
+    var isFallback = false
 }
 
 /// ラップ表の比べる相手（ANA-06、2026-10-07 オーナー決定）。どれも選んでいる期間の記録のある日から作る

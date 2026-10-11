@@ -770,7 +770,8 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// 自己ベストの期間・今日と比べる・ラップ表（ANA-06、1b-50）。月曜は今週のベストの日がないので、今日の行と表を出さない
+    /// 自己ベストの期間・今日と比べる・ラップ表（ANA-06、1b-50）。月曜は今週に記録のある日がないので、
+    /// 切り替えが「先週」になり、先週の日で今日の行と表を出す（2026-10-11、1b-56）
     func testPersonalBestPeriodsAndLaps() {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00"])
         let tab = app.tabBars.buttons["分析"]
@@ -786,18 +787,17 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["bestLapTable"].firstMatch.exists)
         XCTAssertTrue(app.segmentedControls["lapTargetPicker"].exists)
 
-        // 記録のない期間では、相手の切り替えも表もベスト10も出さない（ANA-06・09、1b-51・1b-52）
-        picker.buttons["今週"].tap()
-        XCTAssertTrue(app.staticTexts["今週はまだ記録なし（今日が終わると入ります）"].waitForExistence(timeout: timeout))
-        XCTAssertFalse(today.exists)
-        XCTAssertFalse(app.descendants(matching: .any)["bestLapTable"].firstMatch.exists)
-        XCTAssertFalse(app.segmentedControls["lapTargetPicker"].exists)
-        XCTAssertFalse(app.staticTexts["ベスト10"].exists)
-        XCTAssertEqual(app.buttons.matching(identifier: "bestTopDay").count, 0)
+        // 月曜は今週の代わりに先週（2026-10-11、1b-56）
+        XCTAssertFalse(picker.buttons["今週"].exists)
+        picker.buttons["先週"].tap()
+        XCTAssertTrue(app.staticTexts["今週はまだ記録がないので、先週と比べています"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(today.waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.descendants(matching: .any)["bestLapTable"].firstMatch.exists)
 
-        // 今月は前の週の日がベストになり、表がまた出る
+        // 今月はそのまま（今週と今月は別々に決める）。前の週の日がベストになる
         picker.buttons["今月"].tap()
         XCTAssertTrue(today.waitForExistence(timeout: timeout))
+        XCTAssertFalse(app.staticTexts["今週はまだ記録がないので、先週と比べています"].exists)
     }
 
     /// ラップ表の相手の切り替えとベスト10（ANA-06・09・11、1b-51・1b-52）。相手は期間を変えても、ほかのタブへ行って戻ってもそのまま。
@@ -843,6 +843,22 @@ final class RecordingFlowUITests: XCTestCase {
         top.element(boundBy: 0).tap()
         XCTAssertTrue(app.navigationBars.matching(NSPredicate(format: "identifier CONTAINS %@", "10月")).firstMatch
             .waitForExistence(timeout: timeout))
+        // 自己ベストから開いたその日のグラフは、相手が今日（ANA-05、2026-10-11、1b-55）：上の行は「この日 ／ 今日 ／ 差」
+        let summary = app.descendants(matching: .any)["raceSummary"].firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: timeout))
+        XCTAssertTrue(summary.label.contains("この日"), summary.label)
+        XCTAssertTrue(summary.label.contains("今日"), summary.label)
+        XCTAssertTrue(summary.label.contains("差"), summary.label)
+        XCTAssertFalse(summary.label.contains("先週"), summary.label)
+    }
+
+    /// ポイントの推移から開いたその日のグラフは、今までどおり先週の自分と比べる（ANA-05、1b-55）
+    func testDayGraphFromPointsKeepsTheOpponent() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-22T15:20:00+09:00", "-openPoints", "-openDay", "1"])
+        let summary = app.descendants(matching: .any)["raceSummary"].firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: timeout))
+        XCTAssertTrue(summary.label.contains("この日"), summary.label)
+        XCTAssertTrue(summary.label.contains("先週"), summary.label)
     }
 
     /// 今のブロックの最中でもタイマーがなければ次を前倒しで始められる（TMR-15）。計画どおりの点の帯（2秒）は単体テストで確かめる

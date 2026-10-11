@@ -7,8 +7,8 @@ import Foundation
 /// - `-storeName <名前>`: 別名のファイルに保存する（UI テストで再起動をまたぐ確認に使う）。`-resetStore` で開く前に消す
 /// - `-failSave`: 保存を毎回失敗させる。`-failStoreOpen`: ストアを開けなかったことにする（画面の確認用）
 /// - `-openAnalysis`: 起動したら分析のタブを開く。`-openTimeline`: 分析のタブのタイムラインを開く。`-openPoints`: 分析のタブのポイントの推移を開く（`-openDay <何日前>` でその日のグラフまで）
-/// - `-openBest [all|month|week]`: 分析のタブの自己ベストを、その期間で開く（ANA-06 の撮影用）。`-pointsPage <n>`: ポイントの推移を n 期間前で開く（ANA-04 の撮影用）
-/// - `-lapTarget bestDay|average|sectionBest`: 自己ベストのラップ表の相手をこれで始める。`-bestScroll laps|top10`: 自己ベストを理論ベストの行（その下に相手の切り替えとラップ表）・ベスト10まで送って始める（ANA-06・09・11 の撮影用）
+/// - `-openBest [all|month|week]`: 分析のタブの自己ベストを、その期間で開く（ANA-06 の撮影用。`-openDay <何日前>` でその日のグラフ（相手は今日）まで）。`-pointsPage <n>`: ポイントの推移を n 期間前で開く（ANA-04 の撮影用）
+/// - `-lapTarget bestDay|average|sectionBest`: 自己ベストのラップ表の相手をこれで始める。`-bestScroll laps|table|top10`: 自己ベストを理論ベストの行（その下に相手の切り替えとラップ表）・ラップ表・ベスト10まで送って始める（ANA-06・09・11 の撮影用）
 /// - `-openReview`: 起動したら夜の振り返りを開く。`-openSettings`: 設定を開く。`-openPlan`: 計画のタブを開く
 /// - `-openStartSheet`: 起動したら計画外で開始のシートを開く
 /// - `-flipRace`: ホームの円を裏（グラフ）で始める（GHO-13 の撮影用）
@@ -23,6 +23,11 @@ import Foundation
 /// - `-habitIntro`: 初めて使う端末の習慣の画面（PLN-08）を出して始める（撮影・UI テスト用）
 /// - `-openHold [unlocked]`: 起動したら長押しの画面を開く（`unlocked` なら15分開けたあと）。`-holdProgress 0.6`: 押している途中の見た目で始める
 struct LaunchOptions: Hashable {
+    /// 分析のタブで始める
+    var opensAnalysis: Bool { openAnalysis || openTimeline || openPoints || openBest != nil }
+    /// タイマーのタブで始める（ホームの帯はタイマーのタブにいるときだけ出す、2026-10-11）
+    var startsOnTimerTab: Bool { !opensAnalysis && !openPlan }
+
     var fixedNow: Date?
     /// nil ならデモデータを入れない
     var demoScene: DemoScene?

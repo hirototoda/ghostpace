@@ -161,7 +161,8 @@ final class AppLauncher {
                                  sleepSource: Self.sleepSource(options, clock: clock),
                                  offersHabitIntro: Self.offersHabitIntro(options),
                                  widgets: Self.widgets(options),
-                                 ambient: Self.ambient(options))
+                                 ambient: Self.ambient(options),
+                                 startsOnTimerTab: options.startsOnTimerTab)
             state = .ready(model)
         } catch {
             container = nil

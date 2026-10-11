@@ -61,6 +61,8 @@ final class AppModel {
     private(set) var showsHabitIntro = false
     /// ラップ・中間地点の帯を出した回数（ホームで軽く振動させる合図、GHO-06）
     private(set) var raceNoticeCount = 0
+    /// タイマーのタブが見えているか（ホームの帯はそのときだけ出す、2026-10-11）。`setTimerTabVisible` で入れる
+    private(set) var isTimerTabVisible = true
     /// 自己ベストと休み明けの判定の材料（記録の数が変わったときだけ数え直す）
     private var historyCache: (revision: Int, today: Date, byDay: [Date: Int])?
     private var timeMapCache: (revision: Int, today: Date, map: TimeMap)?
@@ -145,7 +147,9 @@ final class AppModel {
          blockLog: any BlockEventLogging = MemoryBlockEventLog(),
          liveActivity: any LiveActivityControlling = NoLiveActivity(), sleepSource: any SleepSource = NoSleepSource(),
          offersHabitIntro: Bool = false, widgets: any WidgetPublishing = MemoryWidgetPublisher(),
-         ambient: any AmbientPlaying = SilentAmbientPlayer()) {
+         ambient: any AmbientPlaying = SilentAmbientPlayer(), startsOnTimerTab: Bool = true) {
+        // 最初のタブがタイマー以外（`-openAnalysis` など）なら、最初の読み直しでホームの帯を出さない
+        isTimerTabVisible = startsOnTimerTab
         self.widgets = widgets
         self.ambient = ambient
         ambientSound = AmbientSound(stored: settings.ambientSound)
@@ -277,8 +281,28 @@ final class AppModel {
                 let draft = stored?.draft ?? newDraft(dayStart: dayStart)
                 morningPlan = MorningPlan(dayKey: dayKey, dayStart: dayStart, draft: draft)
             }
-            // 計画どおりの点はタイマー中も知らせる。ラップの帯はタイマー中は出さない
-            if morningPlan == nil, !announcePlanPoint(dayKey: dayKey), running == nil { announceRace(dayKey: dayKey) }
+            announceNotices(dayKey: dayKey)
+        }
+    }
+
+    /// ホームの帯（計画どおりの点・ラップ・中間地点）を出す。計画どおりの点はタイマー中も（タイマーの画面に）知らせ、
+    /// ラップの帯はタイマー中は出さない。タイマーの画面が出ていないときは、タイマーのタブにいるときだけ出す
+    /// （分析・計画のタブにいる間は出したことにせず、戻ったときに出す。2026-10-11）
+    private func announceNotices(dayKey: String) {
+        guard morningPlan == nil, running != nil || isTimerTabVisible else { return }
+        if !announcePlanPoint(dayKey: dayKey), running == nil { announceRace(dayKey: dayKey) }
+    }
+
+    /// 下のタブでタイマーのタブが見えているか（ContentView が切り替えるたびに入れる）。
+    /// 戻ったときに、出していない帯を出す。戻る前に朝4:00 を過ぎていたら読み直して新しい日の分だけ（前の日の分は出さない）
+    func setTimerTabVisible(_ visible: Bool) {
+        isTimerTabVisible = visible
+        guard visible else { return }
+        let now = clock.now()
+        if DayBoundary.dayStart(containing: now, calendar: calendar) != snapshot.dayStart {
+            reload(quietly: true)
+        } else {
+            announceNotices(dayKey: DayBoundary.dayKey(containing: now, calendar: calendar))
         }
     }
 
@@ -632,6 +656,16 @@ final class AppModel {
         return snapshot
     }
 
+    /// 自己ベストから開いたその日のグラフ（ANA-05、2026-10-11）：相手を今日にする。
+    /// 今日の数字は 4:00 からの経過で揃えて持たせる。押した日が今日なら今までどおり（相手は今日にしない）
+    func daySnapshot(of dayStart: Date, versusToday: Bool) -> HomeSnapshot? {
+        guard var snapshot = daySnapshot(of: dayStart) else { return nil }
+        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        guard versusToday, dayStart < today, let mine = daySnapshot(of: today) else { return snapshot }
+        snapshot.todayRival = TodayRival(today: mine, alignedTo: dayStart)
+        return snapshot
+    }
+
     /// `days` 日（古い日が先）のポイントと、先週の同じ曜日のポイント。`page` は0が今日を右の端にした期間で、
     /// 1つ増えるごとに `days` 日ずつ前へさかのぼる（ANA-04）
     func pointsHistory(days: Int, page: Int = 0) -> [DayPoints] {
@@ -890,26 +924,31 @@ final class AppModel {
         let byDay = (try? focusByDay(calendar: calendar, today: today)) ?? [:]
         var result: [BestPeriod: PeriodBest] = [:]
         for period in BestPeriod.allCases {
-            let start = BestPeriods.start(period, today: today, calendar: calendar) ?? .distantPast
+            // 今週（今月）に記録のある日がなければ先週（先月）の日で（2026-10-11）
+            let range = BestPeriods.range(period, today: today, calendar: calendar, recordDays: history.map(\.dayStart))
             // 同じ値なら新しい日（集中した時間のベストと同じ決まり）
-            guard let best = LapTargets.ranked(history.filter { $0.dayStart >= start }).first, let points = best.points else { continue }
+            guard let best = LapTargets.ranked(history.filter { range.contains($0.dayStart) }).first, let points = best.points else { continue }
             result[period] = PeriodBest(points: points, pointsDay: best.dayStart,
-                                        focus: DailyFocus.best(byDay.filter { $0.key >= start }, before: today))
+                                        focus: DailyFocus.best(byDay.filter { range.contains($0.key) }, before: range.end),
+                                        isFallback: range.isFallback)
         }
         return result
     }
 
-    /// 期間の記録のある日（今日は入れない。古い日が先）。全期間は使い始めの日から
+    /// 期間の記録のある日（今日は入れない。古い日が先）。全期間は使い始めの日から。
+    /// 今週（今月）に記録のある日がなければ先週（先月）の日（2026-10-11、`BestPeriods.range`）
     private func recordedDays(_ period: BestPeriod, events: [BlockEvent]? = nil) -> [DayPoints] {
         let calendar = self.calendar
         let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
         guard let first = oldestRecordDay(calendar: calendar), first < today else { return [] }
-        let from = max(first, BestPeriods.start(period, today: today, calendar: calendar) ?? first)
-        let count = calendar.dateComponents([.day], from: from, to: today).day ?? 0
+        let count = calendar.dateComponents([.day], from: first, to: today).day ?? 0
         guard count > 0 else { return [] }
-        return pointsHistory(dayStarts: (1...count).reversed().compactMap {
+        let all = pointsHistory(dayStarts: (1...count).reversed().compactMap {
             calendar.date(byAdding: .day, value: -$0, to: today)
         }, events: events).filter { $0.points != nil }
+        guard period != .all else { return all }
+        let range = BestPeriods.range(period, today: today, calendar: calendar, recordDays: all.map(\.dayStart))
+        return all.filter { range.contains($0.dayStart) }
     }
 
     /// 期間の記録・理論ベスト・ベスト10（ANA-06・09・11）。期間・記録・日付・ブロックの記録・睡眠の設定が変わったときだけ作る

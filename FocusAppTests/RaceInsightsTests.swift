@@ -154,14 +154,6 @@ struct RaceInsightsTests {
         let peak = try #require(map.peak)
         #expect(peak.weekday == 0 && peak.section == 3)
     }
-
-    @Test func iconsComeFromNamesAndGroups() {
-        #expect(CategoryIcon.symbol(for: CategoryOption(name: "勉強", countsAsFocus: true)) == "pencil")
-        #expect(CategoryIcon.symbol(for: CategoryOption(name: "運動", countsAsFocus: false)) == "figure.run")
-        #expect(CategoryIcon.symbol(for: CategoryOption(name: "ピアノ", countsAsFocus: true)) == "star.fill")
-        #expect(CategoryIcon.symbol(for: CategoryOption(name: "散歩", countsAsFocus: false)) == "leaf.fill")
-        #expect(CategoryIcon.symbol(for: .gameSNS) == "gamecontroller.fill")
-    }
 }
 
 /// 本体：ラップの帯・自己ベスト・休み明け

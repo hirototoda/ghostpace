@@ -34,8 +34,8 @@ struct HomeSnapshot {
     var ghostDetox: DetoxDay? = nil
     /// 目標のゴーストのデトックス：計画どおりに進み、一度も開けない理想の日（2026-10-02 オーナー決定）
     var goalDetox: DetoxDay? = nil
-    /// タイマーを始めた所とカテゴリのアイコン（裏のグラフ、GHO-15）。続けて同じカテゴリのときは最初だけ
-    var sessionIcons: [SessionIcon] = []
+    /// 自己ベストから開いたその日のグラフの相手「今日」（ANA-05、2026-10-11）。AppModel が入れる
+    var todayRival: TodayRival? = nil
     /// 自己ベスト（今日より前、GHO-15・ANA-06）。AppModel が入れる
     var personalBest: PersonalBest? = nil
     /// 先週より前に記録がある（休み明けの文言、GHO-15）。AppModel が入れる
@@ -143,12 +143,6 @@ struct OnPlanContext {
     var lastWeekMorningBlockIds: Set<UUID> = []
 }
 
-/// 裏のグラフのアイコン（GHO-15）
-struct SessionIcon: Hashable {
-    var start: Date
-    var symbol: String
-}
-
 extension HomeSnapshot {
     /// 記録からホームの表示を作る。
     /// - todaySessions: 今日の dayKey のセッション（実行中を含む）と、前の日に始めて4:00をまたいだセッション
@@ -184,8 +178,7 @@ extension HomeSnapshot {
                 ?? dayStart,
             detox: detox,
             ghostDetox: lastWeekDetox.flatMap { $0.isComplete ? $0.shifted(by: dayStart.timeIntervalSince(lastWeekStart)) : nil },
-            goalDetox: goal.map { idealDetox($0, plan: plan, sleep: sleep, sleepCaps: sleepCaps, dayStart: dayStart, dayEnd: dayEnd) },
-            sessionIcons: icons(todaySessions, dayStart: dayStart, now: now)
+            goalDetox: goal.map { idealDetox($0, plan: plan, sleep: sleep, sleepCaps: sleepCaps, dayStart: dayStart, dayEnd: dayEnd) }
         )
         // 計画どおりの点（GHO-16）：自分、目標のゴースト、先週の自分（先週の計画と記録から同じ決まりで、今日に揃える）
         snapshot.planAwards = plan.map {
@@ -201,18 +194,6 @@ extension HomeSnapshot {
         }
         snapshot.startedBlockIds = Set(todaySessions.compactMap(\.planBlockId))
         return snapshot
-    }
-
-    /// タイマーを始めた所のアイコン。続けて同じカテゴリのときは最初だけ。前の日から続くタイマーは 4:00 に置く
-    static func icons(_ sessions: [FocusSession], dayStart: Date, now: Date) -> [SessionIcon] {
-        var result: [SessionIcon] = []
-        var last: UUID?
-        for session in sessions.sorted(by: { $0.startAt < $1.startAt }) where (session.endAt ?? now) > dayStart && session.startAt <= now {
-            defer { last = session.category.id }
-            guard session.category.id != last else { continue }
-            result.append(SessionIcon(start: max(session.startAt, dayStart), symbol: CategoryIcon.symbol(for: session.category)))
-        }
-        return result
     }
 
     /// 目標のゴーストのデトックス：計画どおりに進み、2回だけ（0分）開ける日（GHO-10、2026-10-03）。

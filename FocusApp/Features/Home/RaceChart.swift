@@ -19,7 +19,8 @@ extension EnvironmentValues {
 /// （範囲と動きは RaceChartLayout）
 struct RaceChart: View {
     let snapshot: HomeSnapshot
-    let opponent: Opponent?
+    /// 相手（ホームで選んだ相手、または分析で自己ベストから開いたときの今日、ANA-05）。いなければ nil
+    let rival: RaceRival?
     /// 裏が見えているか（見えたときに動きを始める）
     var isShowing = true
     /// 過ぎた日のグラフ（分析、ANA-05）：4:00〜翌4:00 の1日で始め、開いたときの動きはない。上の行の名前は「この日」
@@ -56,9 +57,12 @@ struct RaceChart: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            header
+            // 上の行も線の先と一緒に動かす（［▶］で流している間は線の先の時刻の値、2026-10-11）
             AnimatedProgress(progress: motionProgress) { progress in
-                chart(motion: motion, progress: progress)
+                VStack(spacing: 8) {
+                    header(head: motion?.kind == .replay ? motion?.frame(progress).head : nil)
+                    chart(motion: motion, progress: progress)
+                }
             }
             legend
         }
@@ -69,7 +73,9 @@ struct RaceChart: View {
         .accessibilityIdentifier("raceChart")
         .onAppear(perform: refreshCurves)
         .onChange(of: snapshot.now) { refreshCurves() }
-        .onChange(of: opponent) { refreshCurves() }
+        .onChange(of: rival) { refreshCurves() }
+        // 今日を相手にした過ぎた日（ANA-05）は、この日の「今」は動かないので、今日が進んだら描き直す
+        .onChange(of: snapshot.todayRival?.now) { refreshCurves() }
         // 開いたまま朝4:00をまたいだら、新しい日の今のまわりの3時間に戻す
         .onChange(of: snapshot.dayStart) { reset() }
         .onChange(of: scenePhase) { _, phase in
@@ -88,18 +94,19 @@ struct RaceChart: View {
     }
 
     private func refreshCurves() {
-        curves = snapshot.raceCurves(opponent: opponent)
+        curves = snapshot.raceCurves(rival: rival)
     }
 
     // MARK: - 上の行と下の行
 
-    /// 今の値と差（グラフの上）。差は右に大きめに
-    private var header: some View {
-        let theirs = opponent.flatMap { snapshot.opponentPoints($0, at: snapshot.now) }
+    /// 今の値と差（グラフの上）。差は右に大きめに。`head` は［▶］で流している線の先（そのときはその時刻の値。
+    /// 開いたときの動きの間・止まっているときは nil で今の値）。相手が今日なら差は今日−この日
+    private func header(head: Date?) -> some View {
+        let values = snapshot.raceHeader(rival, head: head)
         return HStack(spacing: 10) {
-            valueLabel(isPastDay ? Text("この日") : Text("今日"), Self.pointText(snapshot.points), Theme.focus)
-            if let opponent, let theirs, let gap = RaceChartLayout.gap(mine: snapshot.points, theirs: theirs) {
-                valueLabel(Text(verbatim: opponent.shortName), Self.pointText(theirs), Theme.ghost)
+            valueLabel(isPastDay ? Text("この日") : Text("今日"), Self.pointText(values.mine), Theme.focus)
+            if let rival, let theirs = values.theirs, let gap = values.gap {
+                valueLabel(Text(verbatim: rival.shortName), Self.pointText(theirs), Theme.ghost)
                 Spacer(minLength: 0)
                 Text(RaceChartLayout.gapText(gap))
                     .font(.subheadline.bold().monospacedDigit())
@@ -183,19 +190,19 @@ struct RaceChart: View {
         let values = scalePieces.flatMap(\.values).filter { range.contains($0.date) }.map(\.value)
         // 見えている範囲の点と、その外の1つずつだけ描く（線が端まで届くように。外にはみ出た分は切り取る）
         let margin = HomeSnapshot.curveStep
-        let shown = pieces.map { piece in
+        let shown = pieces.flatMap { piece in
             var piece = piece
             piece.values = piece.values.filter {
                 $0.date >= range.lowerBound.addingTimeInterval(-margin) && $0.date <= range.upperBound.addingTimeInterval(margin)
             }
-            return piece
+            return colored(piece)
         }
         return Chart {
             ForEach(shown, id: \.name) { piece in
                 ForEach(piece.values, id: \.date) { value in
                     LineMark(x: .value("時刻", value.date), y: .value("量", value.value),
                              series: .value("線", piece.name))
-                        .foregroundStyle(color(piece.kind))
+                        .foregroundStyle(color(piece))
                         .lineStyle(piece.kind.isOpponent
                                    ? StrokeStyle(lineWidth: 2, dash: [4, 3])
                                    : StrokeStyle(lineWidth: 3, lineCap: .round))
@@ -203,14 +210,14 @@ struct RaceChart: View {
                         .interpolationMethod(.linear)
                 }
             }
-            // 区間のカテゴリのアイコンと開けた鍵（自分の線の上、GHO-15）。動いている間は出さない
+            // 開けた鍵（自分の線の上、GHO-15）。動いている間は出さない。カテゴリのアイコンは 2026-10-11 に線の色へ置き換えた
             if intro == nil, let mine = pieces.first(where: { !$0.kind.isOpponent }) {
                 ForEach(markers(on: mine, in: range), id: \.id) { marker in
                     PointMark(x: .value("時刻", marker.date), y: .value("量", marker.value))
                         .symbol {
-                            Image(systemName: marker.symbol)
+                            Image(systemName: "lock.open.fill")
                                 .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(marker.isUnlock ? Theme.ghost : Theme.focus)
+                                .foregroundStyle(Theme.ghost)
                                 .padding(3)
                                 .background(Circle().fill(Color(.systemBackground).opacity(0.9)))
                                 .offset(y: -14)
@@ -305,8 +312,8 @@ struct RaceChart: View {
     private var legend: some View {
         HStack(spacing: 12) {
             legendItem(dashed: false, Text("自分"))
-            if let opponent, snapshot.opponentPoints(opponent, at: snapshot.now) != nil {
-                legendItem(dashed: true, Text(verbatim: opponent.pickerName))
+            if let rival, snapshot.rivalPoints(rival, at: snapshot.now) != nil {
+                legendItem(dashed: true, Text(verbatim: rival.pickerName))
             }
             Spacer(minLength: 0)
             if !showsWholeDay && motion == nil {
@@ -336,10 +343,21 @@ struct RaceChart: View {
         }
     }
 
-    private func color(_ kind: RaceCurve.Kind) -> Color {
-        switch kind {
-        case .minePoints: Theme.focus
-        case .opponentPoints: Theme.ghost
+    /// 自分の線は何をしていたかの色（2026-10-11）：集中のタイマー中は藍、デトックスのタイマー中は青緑、ほかは薄い藍。相手は灰色
+    private func color(_ piece: Piece) -> Color {
+        switch piece.activity {
+        case nil: Theme.ghost
+        case .focus: Theme.focus
+        case .detox: Theme.detox
+        case .other: Theme.idleLine
+        }
+    }
+
+    /// 自分の線を色ごとに分ける（境目は記録の時刻どおり）。相手の線はそのまま
+    private func colored(_ piece: Piece) -> [Piece] {
+        guard !piece.kind.isOpponent else { return [piece] }
+        return RaceCurve.split(piece.values, activity: snapshot.lineActivity(from:to:)).enumerated().map { index, part in
+            Piece(name: "\(piece.name)-\(index)", kind: piece.kind, values: part.values, isFuture: false, activity: part.activity)
         }
     }
 
@@ -418,8 +436,6 @@ struct RaceChart: View {
         var id: String
         var date: Date
         var value: Double
-        var symbol: String
-        var isUnlock: Bool
     }
 
     private struct Flag {
@@ -428,30 +444,26 @@ struct RaceChart: View {
         var color: Color
     }
 
-    /// 自分の線の上のアイコン（タイマーを始めた所）と開けた鍵。線の値は近い点から取る
+    /// 自分の線の上の開けた鍵。線の値は近い点から取る
     private func markers(on mine: Piece, in range: ClosedRange<Date>) -> [Marker] {
         func value(at date: Date) -> Double? {
             mine.values.last(where: { $0.date <= date })?.value ?? mine.values.first?.value
         }
-        let icons = snapshot.sessionIcons.filter { range.contains($0.start) && $0.start <= snapshot.now }.compactMap { icon in
-            value(at: icon.start).map { Marker(id: "i\($0)\(icon.start)", date: icon.start, value: $0, symbol: icon.symbol, isUnlock: false) }
+        return (snapshot.detox?.unlockStarts ?? []).filter { range.contains($0) && $0 <= snapshot.now }.compactMap { date in
+            value(at: date).map { Marker(id: "u\(date)", date: date, value: $0) }
         }
-        let unlocks = (snapshot.detox?.unlockStarts ?? []).filter { range.contains($0) && $0 <= snapshot.now }.compactMap { date in
-            value(at: date).map { Marker(id: "u\(date)", date: date, value: $0, symbol: "lock.open.fill", isUnlock: true) }
-        }
-        return icons + unlocks
     }
 
     /// 2時間の区切り（そこまでの区間の差）と中間地点。見えている範囲だけ。3時間の窓では数字も出す
     private func flags(in range: ClosedRange<Date>) -> [Flag] {
-        guard let opponent else { return [] }
-        let laps = snapshot.laps(opponent).filter { !$0.isCurrent }
+        guard let rival else { return [] }
+        let laps = snapshot.rivalLaps(rival).filter { !$0.isCurrent }
         let showsText = !showsWholeDay
         var result = laps.filter { range.contains($0.interval.end) }.map { lap in
-            Flag(date: lap.interval.end, text: showsText && !lap.isEmpty ? DurationFormat.signed(lap.diff) : nil,
-                 color: lap.isEmpty ? .secondary : Theme.diffColor(lap.diff))
+            Flag(date: lap.interval.end, text: showsText && !lap.isEmpty ? DurationFormat.signed(rival.lapDiff(lap)) : nil,
+                 color: lap.isEmpty ? .secondary : Theme.diffColor(rival.lapDiff(lap)))
         }
-        if let half = snapshot.halfwayTime(opponent), range.contains(half) {
+        if let half = snapshot.rivalHalfway(rival), range.contains(half) {
             result.append(Flag(date: half, text: showsText ? "中間" : nil, color: Theme.focus))
         }
         return result
@@ -464,6 +476,8 @@ struct RaceChart: View {
         var kind: RaceCurve.Kind
         var values: [RaceCurve.Value]
         var isFuture: Bool
+        /// 自分の線の色（色ごとに分けたあと）。相手の線は nil
+        var activity: LineActivity? = nil
     }
 
     /// 相手の線は、今までと今より先（薄く）に分ける。動いている間は線の先まで描き、相手の先は出さない

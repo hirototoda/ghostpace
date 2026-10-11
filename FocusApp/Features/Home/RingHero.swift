@@ -147,7 +147,7 @@ struct RingHero: View {
         FlipCard(angle: flipAngle) {
             track(current)
         } back: {
-            RaceChart(snapshot: snapshot, opponent: current, isShowing: flipAngle >= 90)
+            RaceChart(snapshot: snapshot, rival: current.map(RaceRival.opponent), isShowing: flipAngle >= 90)
         }
         // 横幅いっぱいで、縦は横の1.25倍（グラフの差を大きく見せる。2026-10-03 オーナー決定、1.1倍と比べた）。
         // 文字の大きい設定では前の大きさ（正方形・最大320）に戻し、下の差の行がボタンの裏に隠れないようにする（Claude 補足）

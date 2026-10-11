@@ -173,19 +173,3 @@ struct TimeMap: Hashable {
         })
     }
 }
-
-/// グラフに出すカテゴリのアイコン（GHO-15）。名前とグループから自動で決める（選べない）
-enum CategoryIcon {
-    static func symbol(for category: CategoryOption) -> String {
-        if category.isUnblock { return "gamecontroller.fill" }
-        switch category.name {
-        case "勉強": return "pencil"
-        case "仕事": return "briefcase.fill"
-        case "読書": return "book.fill"
-        case "家事": return "house.fill"
-        case "運動": return "figure.run"
-        case "休み": return "moon.fill"
-        default: return category.countsAsFocus ? "star.fill" : "leaf.fill"
-        }
-    }
-}
