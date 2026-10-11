@@ -135,12 +135,14 @@ extension HomeSnapshot {
     }
 
     /// `from`〜`to` の自分の線の色（2026-10-11 オーナー決定）：集中のカテゴリのタイマー中は集中、
-    /// デトックスのカテゴリのタイマー中はデトックス、それ以外（一時停止・タイマーなし）はほか。申告した時間もタイマーと同じ。
+    /// デトックスのカテゴリ（集中でもゲーム・SNS でもないもの）のタイマー中はデトックス、
+    /// それ以外（一時停止・タイマーなし・ゲーム・SNS）はほか。申告した時間もタイマーと同じ。
     /// 線の点はタイマーの始まりと終わりにも置くので、点と点のあいだはどれか1つになる（真ん中の時刻で決める）
     func lineActivity(from start: Date, to end: Date) -> LineActivity {
         let middle = start.addingTimeInterval(end.timeIntervalSince(start) / 2)
         guard let segment = sessions.first(where: { $0.start <= middle && middle < $0.end }) else { return .other }
-        return segment.countsAsFocus ? .focus : .detox
+        if segment.countsAsFocus { return .focus }
+        return segment.isUnblock ? .other : .detox
     }
 
     /// 4:00 から5分おきの時刻と、今・終わりの時刻と、`extra` の時刻。

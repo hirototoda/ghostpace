@@ -70,8 +70,7 @@ private struct MainView: View {
 
     init(model: AppModel, options: LaunchOptions) {
         self.model = model
-        let opensAnalysis = options.openAnalysis || options.openTimeline || options.openPoints || options.openBest != nil
-        _tab = State(initialValue: opensAnalysis ? .analysis : options.openPlan ? .plan : .timer)
+        _tab = State(initialValue: options.opensAnalysis ? .analysis : options.openPlan ? .plan : .timer)
         let openDay = options.openDay.map { days in
             let today = DayBoundary.dayStart(containing: model.clock.now(), calendar: model.calendar)
             return model.calendar.date(byAdding: .day, value: -days, to: today) ?? today

@@ -82,7 +82,7 @@ struct FocusSession: Identifiable, Hashable {
         let group = DetoxGroup.of(category)
         func append(until segmentEnd: Date) {
             segments.append(TimeSegment(start: cursor, end: segmentEnd, countsAsFocus: category.countsAsFocus,
-                                        detoxGroup: group, isDeclared: isDeclared))
+                                        detoxGroup: group, isDeclared: isDeclared, isUnblock: category.isUnblock))
         }
         for pause in pauses.sorted(by: { $0.start < $1.start }) {
             let pauseStart = min(max(pause.start, cursor), end)

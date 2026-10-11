@@ -23,6 +23,11 @@ import Foundation
 /// - `-habitIntro`: 初めて使う端末の習慣の画面（PLN-08）を出して始める（撮影・UI テスト用）
 /// - `-openHold [unlocked]`: 起動したら長押しの画面を開く（`unlocked` なら15分開けたあと）。`-holdProgress 0.6`: 押している途中の見た目で始める
 struct LaunchOptions: Hashable {
+    /// 分析のタブで始める
+    var opensAnalysis: Bool { openAnalysis || openTimeline || openPoints || openBest != nil }
+    /// タイマーのタブで始める（ホームの帯はタイマーのタブにいるときだけ出す、2026-10-11）
+    var startsOnTimerTab: Bool { !opensAnalysis && !openPlan }
+
     var fixedNow: Date?
     /// nil ならデモデータを入れない
     var demoScene: DemoScene?

@@ -9,6 +9,8 @@ struct TimeSegment: Hashable {
     var detoxGroup: DetoxGroup? = nil
     /// 押し忘れの申告（TMR-13）の区間。点は0.8倍
     var isDeclared = false
+    /// ゲーム・SNS の時間（BLK-10）のカテゴリ。デトックスにも数えない（裏のグラフの線の色、2026-10-11）
+    var isUnblock = false
 
     /// `until` までに含まれる秒数。
     func seconds(until date: Date) -> Int {

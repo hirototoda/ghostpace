@@ -130,6 +130,22 @@ struct BestPolishTests {
         #expect(m.topDays(period: .month).map(\.dayStart) == [jst("2026-10-05T04:00")])
     }
 
+    /// 月曜かつ1日（2027-02-01）：今週も今月も記録がないので、先週と先月の両方に代わる（別々に決める）
+    @Test func mondayThatIsTheFirstFallsBackTwice() throws {
+        let t = try TestStore(now: jst("2027-02-01T12:00"))
+        let c = try t.seeded()
+        try session(t, try focus(c), from: "2027-01-10T09:00", to: "2027-01-10T14:00")  // 先月（先週ではない）
+        try session(t, try focus(c), from: "2027-01-26T09:00", to: "2027-01-26T10:00")  // 先週の火曜
+        let m = model(t)
+        let week = try #require(m.periodBests()[.week])
+        let month = try #require(m.periodBests()[.month])
+        #expect(week.isFallback && month.isFallback)
+        #expect(week.pointsDay == jst("2027-01-26T04:00"))
+        #expect(month.pointsDay == jst("2027-01-10T04:00"))
+        #expect(m.topDays(period: .week).map(\.dayStart) == [jst("2027-01-26T04:00")])
+        #expect(m.topDays(period: .month).count == 2)
+    }
+
     // MARK: 今日を相手にしたその日のグラフ（ANA-05）
 
     /// 自己ベストから開いた過ぎた日のグラフ：相手は今日。今日の線は今（4:00 からの経過で揃えた時刻）で止まる
@@ -193,6 +209,48 @@ struct BestPolishTests {
         #expect(RaceRival.today.lapDiff(eight) == -12 * 60)
         #expect(RaceRival.opponent(.lastWeek).lapDiff(eight) == 12 * 60)
         #expect(past.rivalHalfway(.today) == nil)
+    }
+
+    /// 今日のタイマーが動いている最中：時計が30分進めば、今日の値と差が増える（1分ごとの数え直しと同じ）
+    @Test func todayRivalFollowsARunningTimer() throws {
+        let t = try TestStore(now: jst("2026-10-22T14:00"))
+        let c = try t.seeded()
+        try session(t, try focus(c), from: "2026-10-13T09:00", to: "2026-10-13T12:00")
+        _ = try t.store.start(StartRequest(category: try focus(c), timeZone: tokyo))  // 14:00 から動いたまま
+        t.clock.set(jst("2026-10-22T14:30"))
+        let m = model(t)
+        let before = try #require(m.daySnapshot(of: jst("2026-10-13T04:00"), versusToday: true))
+        let first = before.raceHeader(.today, head: nil)
+        #expect(before.todayRival?.now == jst("2026-10-13T14:30"))
+        t.clock.set(jst("2026-10-22T15:00"))
+        let after = try #require(m.daySnapshot(of: jst("2026-10-13T04:00"), versusToday: true))
+        let second = after.raceHeader(.today, head: nil)
+        #expect(after.todayRival?.now == jst("2026-10-13T15:00"))
+        // この日は 14:30〜15:00 に何もしていないので、差は今日の30分の集中のぶん（3pt）近く増える
+        let gained = try #require(second.theirs) - (try #require(first.theirs))
+        #expect(gained > 2.9)
+        #expect(try #require(second.gap) - (try #require(first.gap)) > 2.5)
+        let curve = try #require(after.raceCurves(rival: .today).first { $0.kind == .opponentPoints })
+        #expect(curve.values.last?.date == jst("2026-10-13T15:00"))
+    }
+
+    /// 開いたまま 3:59 → 4:00 をまたいで取り直すと、新しい今日（4:00 から0）と比べる
+    @Test func todayRivalStartsOverAtFour() throws {
+        let t = try TestStore(now: jst("2026-10-23T03:59"))  // まだ 10/22
+        let c = try t.seeded()
+        try session(t, try focus(c), from: "2026-10-13T09:00", to: "2026-10-13T12:00")
+        try session(t, try focus(c), from: "2026-10-22T09:00", to: "2026-10-22T13:00")
+        let m = model(t)
+        let late = try #require(m.daySnapshot(of: jst("2026-10-13T04:00"), versusToday: true))
+        #expect(late.todayRival?.now == jst("2026-10-14T03:59"))
+        #expect(try #require(late.raceHeader(.today, head: nil).theirs) > 15)
+        t.clock.set(jst("2026-10-23T04:00"))
+        let fresh = try #require(m.daySnapshot(of: jst("2026-10-13T04:00"), versusToday: true))
+        #expect(fresh.todayRival?.now == jst("2026-10-13T04:00"))
+        let header = fresh.raceHeader(.today, head: nil)
+        #expect(header.theirs?.isApprox(0) == true)
+        #expect(header.mine.isApprox(fresh.myPoints(until: jst("2026-10-13T04:00"))))
+        #expect(fresh.raceCurves(rival: .today).map(\.kind) == [.minePoints])
     }
 
     // MARK: 流している間の上の行（GHO-13）
@@ -294,6 +352,34 @@ struct BestPolishTests {
         // 動いている途中の線（線の先で切ったもの）も同じに分ける
         let cut = RaceChartLayout.cut(mine.values, at: jst("2026-10-19T09:30"))
         #expect(RaceCurve.split(cut, activity: s.lineActivity(from:to:)).last?.activity == .focus)
+    }
+
+    /// 動いている（終わりのない）タイマーの区間は今まで色が付き、集中→デトックスが同じ時刻で切り替わっても境目でつながる
+    @Test func lineColorsForARunningTimerAndAnImmediateSwitch() throws {
+        let t = try TestStore(now: jst("2026-10-19T09:00"))
+        let c = try t.seeded()
+        try session(t, try focus(c), from: "2026-10-19T09:00", to: "2026-10-19T10:00")
+        try session(t, try detox(c), from: "2026-10-19T10:00", to: "2026-10-19T10:30")
+        t.clock.set(jst("2026-10-19T10:40"))
+        _ = try t.store.start(StartRequest(category: try focus(c), timeZone: tokyo))  // 10:40 から動いたまま
+        t.clock.set(jst("2026-10-19T11:07"))
+        let s = model(t).snapshot
+        #expect(s.lineActivity(from: jst("2026-10-19T11:00"), to: jst("2026-10-19T11:05")) == .focus)
+        let mine = try #require(s.raceCurves(rival: nil).first { $0.kind == .minePoints })
+        #expect(mine.values.last?.date == jst("2026-10-19T11:07"))
+        let pieces = RaceCurve.split(mine.values.filter { $0.date >= jst("2026-10-19T08:50") }, activity: s.lineActivity(from:to:))
+        #expect(pieces.map(\.activity) == [.other, .focus, .detox, .other, .focus])
+        #expect(pieces[1].values.last?.date == jst("2026-10-19T10:00"))
+        #expect(pieces[2].values.first?.date == jst("2026-10-19T10:00"))
+        #expect(pieces[4].values.last?.date == jst("2026-10-19T11:07"))
+    }
+
+    /// 色が付くのはデトックスのカテゴリだけ。ゲーム・SNS（タイマーは始めないが、記録があっても）はほか
+    @Test func gameTimeIsNotDetoxColored() {
+        let s = snapshot([
+            TimeSegment(start: jst("2026-10-19T20:00"), end: jst("2026-10-19T20:30"), countsAsFocus: false, isUnblock: true),
+        ], now: "2026-10-19T21:00")
+        #expect(s.lineActivity(from: jst("2026-10-19T20:10"), to: jst("2026-10-19T20:15")) == .other)
     }
 
     // MARK: ホームの帯はタイマーのタブだけ（GHO-06・16）

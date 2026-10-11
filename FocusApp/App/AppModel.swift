@@ -147,7 +147,9 @@ final class AppModel {
          blockLog: any BlockEventLogging = MemoryBlockEventLog(),
          liveActivity: any LiveActivityControlling = NoLiveActivity(), sleepSource: any SleepSource = NoSleepSource(),
          offersHabitIntro: Bool = false, widgets: any WidgetPublishing = MemoryWidgetPublisher(),
-         ambient: any AmbientPlaying = SilentAmbientPlayer()) {
+         ambient: any AmbientPlaying = SilentAmbientPlayer(), startsOnTimerTab: Bool = true) {
+        // 最初のタブがタイマー以外（`-openAnalysis` など）なら、最初の読み直しでホームの帯を出さない
+        isTimerTabVisible = startsOnTimerTab
         self.widgets = widgets
         self.ambient = ambient
         ambientSound = AmbientSound(stored: settings.ambientSound)
