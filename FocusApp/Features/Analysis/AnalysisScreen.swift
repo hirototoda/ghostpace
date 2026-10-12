@@ -322,15 +322,13 @@ struct DayGraphView: View {
     var body: some View {
         // 1分ごとの読み直し（model.snapshot.now）で描き直す
         let _ = model.snapshot.now
-        ScrollView {
+        Group {
             if let snapshot = model.daySnapshot(of: dayStart, versusToday: versusToday) {
                 let rival: RaceRival = snapshot.todayRival != nil ? .today : .opponent(model.opponent)
-                // 過ぎた日（翌4:00 まで数えた日）は1日で始める。今日はホームの裏と同じ
-                RaceChart(snapshot: snapshot, rival: rival, isPastDay: snapshot.now >= snapshot.dayEnd)
-                    .aspectRatio(0.8, contentMode: .fit)
+                // 過ぎた日（翌4:00 まで数えた日）は1日で始める。今日はホームの裏と同じ。
+                // ホームの裏と同じく、上の約6割がグラフ、下の残りがラップの一覧（その中でスクロール、2026-10-12）
+                RaceChart(snapshot: snapshot, rival: rival, isPastDay: snapshot.now >= snapshot.dayEnd, showsLaps: true)
                     .padding(16)
-                LapList(laps: snapshot.rivalLaps(rival).filter { !$0.isEmpty }, rival: rival)
-                    .padding(.horizontal, 16).padding(.bottom, 16)
                     .navigationTitle(Text(snapshot.dayStart.formatted(
                         .dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))))
             } else {
@@ -338,38 +336,6 @@ struct DayGraphView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-/// その日のラップの一覧（GHO-06）：2時間ごとの自分・相手の集中と差
-struct LapList: View {
-    let laps: [Lap]
-    let rival: RaceRival
-
-    var body: some View {
-        if !laps.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("ラップ（2時間ごと）").font(.headline)
-                ForEach(laps) { lap in
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(AppModel.lapRange(lap) + (lap.isCurrent ? "（途中）" : "")).font(.subheadline.monospacedDigit())
-                            Text("\(DurationFormat.japanese(lap.mine))・\(rival.shortName) \(DurationFormat.japanese(lap.opponent))")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        // 相手が今日なら差は今日−この日（ラップ表と同じ向き）
-                        Text(DurationFormat.signed(rival.lapDiff(lap))).font(.subheadline.bold().monospacedDigit())
-                            .foregroundStyle(Theme.diffColor(rival.lapDiff(lap)))
-                    }
-                    .accessibilityElement(children: .combine)
-                    Divider()
-                }
-            }
-            .padding(16)
-            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
-            .accessibilityIdentifier("lapList")
-        }
     }
 }
 

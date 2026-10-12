@@ -31,6 +31,10 @@ struct RaceChartLayout {
     /// 慣性：はじいた速さでこの秒数ぶん進んで止まる（iPhone のふつうのスクロールの減速と同じくらい）
     static let glideTimeConstant = 0.5
 
+    /// カードの中でグラフ（上の行・グラフ・下の行）が占める高さの割合。残りがラップの一覧（2026-10-12 オーナー決定で約6割）。
+    /// 文字の大きい設定では一覧が数行しか入らないので5割（Claude 補足）
+    static func graphShare(isAccessibilitySize: Bool) -> CGFloat { isAccessibilitySize ? 0.5 : 0.6 }
+
     /// 止まったときの3時間（今の2時間前〜1時間先。1日からはみ出すなら端に寄せる）
     var homeWindow: ClosedRange<Date> {
         window(endingAt: now.addingTimeInterval(Self.lookAhead), length: Self.windowLength)

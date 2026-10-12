@@ -49,6 +49,24 @@ enum Laps {
         }
         return nil
     }
+
+    /// 線の先 `head` が通過した最後の2時間の区切り（4:00 から。区切りちょうども通過に数える）。4:00〜翌4:00 の外には出ない。
+    /// ［▶］で流している間、一覧を変えるのは区切りを過ぎたときだけにするため（GHO-06、2026-10-12）
+    static func passedBoundary(dayStart: Date, head: Date) -> Date {
+        let passed = (head.timeIntervalSince(dayStart) / length).rounded(.down)
+        return dayStart.addingTimeInterval(min(max(passed, 0), Double(count)) * length)
+    }
+
+    /// ラップの一覧に出す行（GHO-06、2026-10-12）。自分も相手も集中していない区間は省く（Q39）。
+    /// 流していない（`replayHead` が nil）ときは今の一覧（今の区間の「途中」まで）。
+    /// ［▶］で流している間は、線の先が区切りを過ぎた（ちょうども）区間だけを、区間を最後まで数えた値で出す。今の区間は出さない
+    static func listed(_ laps: [Lap], replayHead: Date?) -> [Lap] {
+        laps.filter { lap in
+            guard !lap.isEmpty else { return false }
+            guard let replayHead else { return true }
+            return !lap.isCurrent && lap.interval.end <= replayHead
+        }
+    }
 }
 
 /// 予想ゴール・追いつく・自己ベストまで（GHO-15）

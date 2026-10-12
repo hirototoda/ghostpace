@@ -25,8 +25,11 @@ struct RaceChart: View {
     var isShowing = true
     /// 過ぎた日のグラフ（分析、ANA-05）：4:00〜翌4:00 の1日で始め、開いたときの動きはない。上の行の名前は「この日」
     var isPastDay = false
+    /// グラフの下にラップの一覧を出す（ホームの裏・その日のグラフ、2026-10-12）。上の約6割がグラフ、下の残りが一覧
+    var showsLaps = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     #if DEBUG
     @Environment(\.raceStartsWholeDay) private var startsWholeDay
@@ -50,25 +53,36 @@ struct RaceChart: View {
     /// （縦のスクロールに取られるなどで終わりが来なくても、次のずらしが前の位置から飛ばないように）
     @State private var dragAnchor: (location: CGPoint, start: Date)?
     @State private var curves: [RaceCurve] = []
+    /// ［▶］で流している間に線の先が通過した最後の2時間の区切り（ラップの一覧はここまでの区間を出す）。流していなければ nil（今の一覧）
+    @State private var replayHead: Date?
 
     private var layout: RaceChartLayout {
         RaceChartLayout(dayStart: snapshot.dayStart, dayEnd: snapshot.dayEnd, now: snapshot.now)
     }
 
+    /// ラップの一覧を出すか。相手の線を出さない日（相手がいない日）は出さずにグラフを伸ばす
+    private var lapRival: RaceRival? {
+        guard showsLaps, let rival, snapshot.rivalPoints(rival, at: snapshot.now) != nil else { return nil }
+        return rival
+    }
+
     var body: some View {
-        VStack(spacing: 8) {
-            // 上の行も線の先と一緒に動かす（［▶］で流している間は線の先の時刻の値、2026-10-11）
-            AnimatedProgress(progress: motionProgress) { progress in
-                VStack(spacing: 8) {
-                    header(head: motion?.kind == .replay ? motion?.frame(progress).head : nil)
-                    chart(motion: motion, progress: progress)
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                graph
+                    .frame(height: lapRival == nil
+                           ? proxy.size.height
+                           : proxy.size.height * RaceChartLayout.graphShare(isAccessibilitySize: dynamicTypeSize.isAccessibilitySize))
+                if let lapRival {
+                    Divider().padding(.vertical, 8)
+                    // 流している間は通過した区切りまで、止まっているときは今の区間まで（2026-10-12）
+                    RaceLapList(laps: Laps.listed(snapshot.rivalLaps(lapRival), replayHead: replayHead), rival: lapRival)
+                        .frame(maxHeight: .infinity, alignment: .top)
                 }
             }
-            legend
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Color(uiColor: .secondarySystemBackground)))
-        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("raceChart")
         .onAppear(perform: refreshCurves)
@@ -91,6 +105,21 @@ struct RaceChart: View {
                 reset()
             }
         }
+    }
+
+    /// 上の行・グラフ・下の行（文字の大きさはグラフに入る大きさまで）
+    private var graph: some View {
+        VStack(spacing: 8) {
+            // 上の行も線の先と一緒に動かす（［▶］で流している間は線の先の時刻の値、2026-10-11）
+            AnimatedProgress(progress: motionProgress) { progress in
+                VStack(spacing: 8) {
+                    header(head: motion?.kind == .replay ? motion?.frame(progress).head : nil)
+                    chart(motion: motion, progress: progress)
+                }
+            }
+            legend
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
     }
 
     private func refreshCurves() {
@@ -545,6 +574,8 @@ struct RaceChart: View {
         dragAnchor = nil
         motion = replay
         motionProgress = 0
+        // ラップの一覧は空から（2026-10-12）
+        replayHead = replay.layout.dayStart
         replayTask = Task {
             // 0 にした進みが描かれてから動かし始める
             try? await Task.sleep(for: .milliseconds(50))
@@ -553,7 +584,20 @@ struct RaceChart: View {
             withAnimation(.linear(duration: seconds)) {
                 motionProgress = 1
             }
-            try? await Task.sleep(for: .seconds(seconds))
+            // 線の先（進みは時間に比例）が2時間の区切りを過ぎたら、その区間の行を一覧に足す
+            let clock = ContinuousClock()
+            let began = clock.now
+            while !Task.isCancelled {
+                let elapsed = began.duration(to: clock.now) / .seconds(1)
+                if elapsed >= seconds { break }
+                let head = replay.frame(elapsed / seconds).head
+                let passed = Laps.passedBoundary(dayStart: replay.layout.dayStart, head: head)
+                if passed != replayHead {
+                    // 足す行はふわっと出す（視差効果を減らす設定なら動きなし）
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { replayHead = passed }
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
             guard !Task.isCancelled else { return }
             stopReplay()
         }
@@ -564,6 +608,8 @@ struct RaceChart: View {
         replayTask?.cancel()
         replayTask = nil
         guard motion?.kind == .replay else { return }
+        // ラップの一覧は今の一覧（今の区間の「途中」まで）に戻す
+        replayHead = nil
         motion = nil
         motionProgress = 1
         scrollStart = layout.homeWindow.lowerBound
@@ -577,6 +623,7 @@ struct RaceChart: View {
         dragAnchor = nil
         showsWholeDay = isPastDay
         scrollStart = layout.homeWindow.lowerBound
+        replayHead = nil
         motion = nil
         motionProgress = 1
     }
