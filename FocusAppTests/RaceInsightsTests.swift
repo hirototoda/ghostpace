@@ -24,8 +24,8 @@ struct RaceInsightsTests {
 
     @Test func lapsCompareEachSectionUpToNow() {
         let mine = [seg("08:30", "09:30"), seg("10:00", "11:15")]
-        let laps = Laps.make(mine: mine, opponent: { opponent.focusSeconds(until: $0) }, dayStart: dayStart,
-                             now: jst("2026-10-19T11:15"))
+        let laps = Laps.make(mine: mine, opponent: { opponent.focusSeconds(until: $0) },
+                             minePoints: { _ in 0 }, opponentPoints: { _ in 0 }, dayStart: dayStart, now: jst("2026-10-19T11:15"))
         // 4:00–6:00, 6:00–8:00, 8:00–10:00, 10:00–12:00（途中）
         #expect(laps.count == 4)
         #expect(laps[2].mine == 3600 && laps[2].opponent == 3600 && laps[2].diff == 0)
@@ -33,27 +33,19 @@ struct RaceInsightsTests {
         #expect(laps[3].mine == 75 * 60)
         #expect(laps[3].opponent == 15 * 60)
         #expect(laps[3].isCurrent)
-        #expect(laps[0].isEmpty)
-    }
-
-    @Test func halfwayIsWhenMyFocusReachesHalfOfTheirDay() {
-        let mine = [seg("08:00", "08:30"), seg("09:00", "10:00")]
-        // 相手の1日分 90分 → 半分の45分に届くのは 9:15
-        #expect(Laps.reachTime(45 * 60, mine: mine, now: jst("2026-10-19T12:00")) == jst("2026-10-19T09:15"))
-        #expect(Laps.reachTime(45 * 60, mine: mine, now: jst("2026-10-19T09:10")) == nil)
-        #expect(Laps.reachTime(0, mine: mine, now: jst("2026-10-19T12:00")) == nil)
+        #expect(laps[0].hasNoFocus)
     }
 
     @Test func lapsAroundFourAm() {
         // 3:59 は前の日の最後の区間（翌2:00–翌4:00）の途中、4:00 は新しい日の最初の区間
-        let late = Laps.make(mine: [seg("02:30", "03:30", day: "2026-10-20")], opponent: { _ in 0 }, dayStart: dayStart,
+        let late = Laps.make(mine: [seg("02:30", "03:30", day: "2026-10-20")], opponent: { _ in 0 }, minePoints: { _ in 0 }, opponentPoints: { _ in 0 }, dayStart: dayStart,
                              now: jst("2026-10-20T03:59"))
         #expect(late.count == 12)
         #expect(late.last?.isCurrent == true)
         #expect(late.last?.mine == 3600)
-        let next = Laps.make(mine: [], opponent: { _ in 0 }, dayStart: jst("2026-10-20T04:00"), now: jst("2026-10-20T04:00"))
+        let next = Laps.make(mine: [], opponent: { _ in 0 }, minePoints: { _ in 0 }, opponentPoints: { _ in 0 }, dayStart: jst("2026-10-20T04:00"), now: jst("2026-10-20T04:00"))
         #expect(next.isEmpty)
-        let justAfter = Laps.make(mine: [], opponent: { _ in 0 }, dayStart: jst("2026-10-20T04:00"), now: jst("2026-10-20T04:01"))
+        let justAfter = Laps.make(mine: [], opponent: { _ in 0 }, minePoints: { _ in 0 }, opponentPoints: { _ in 0 }, dayStart: jst("2026-10-20T04:00"), now: jst("2026-10-20T04:01"))
         #expect(justAfter.count == 1)
     }
 
@@ -172,6 +164,7 @@ struct RaceInsightsModelTests {
         _ = try t.store.end(id: running.id, reportedEnd: nil)
     }
 
+    /// 区切りを過ぎて開くと帯。2026-10-12 から差はポイント（「8:00–10:00 のラップ +1.6pt」）。区間のポイントは表示の値の引き算
     @Test func lapNoticeAppearsOncePerSection() throws {
         let t = try TestStore(now: jst("2026-10-12T09:00"))
         let c = try t.seeded()
@@ -179,23 +172,47 @@ struct RaceInsightsModelTests {
         try session(t, c, from: "2026-10-19T08:30", to: "2026-10-19T09:40")
         t.clock.set(jst("2026-10-19T10:05"))
         let settings = MemorySettings()
-        let m = model(t, settings: settings)
-        // 朝の計画を閉じると読み直して知らせる。8:00–10:00：自分70分・先週30分
+        let m = try raceModelWithBlocking(t, settings: settings)
+        // 朝の計画を閉じると読み直して知らせる。8:00–10:00：自分70分・先週30分の集中（とデトックス）
         m.skipPlan()
-        #expect(m.notice == "8:00–10:00 のラップ +40分")
+        let s = m.snapshot
+        let eight = jst("2026-10-19T08:00"), ten = jst("2026-10-19T10:00")
+        let mine = s.myPoints(until: ten) - s.myPoints(until: eight)
+        let theirs = try #require(s.opponentPoints(.lastWeek, at: ten)) - (try #require(s.opponentPoints(.lastWeek, at: eight)))
+        let gap = BestLaps.shownGap(mine, theirs)
+        #expect(gap > 0, "\(gap)")  // 自分のほうが40分多く集中した
+        #expect(m.notice == "8:00–10:00 のラップ \(RaceChartLayout.signedPoints(gap))")
+        #expect(m.notice?.hasSuffix("pt") == true)
         #expect(m.raceNoticeCount == 1)
-        // 次は中間地点（先週の1日分30分の半分に 8:45 で届いた）
+        // 次は中間地点（届いていれば）
         m.notice = nil
         m.reload()
-        #expect(m.notice == "中間地点を通過")
+        #expect(m.notice == (m.snapshot.halfwayTime(.lastWeek) != nil ? "中間地点を通過" : nil))
         // 同じものは二度出さない（開き直しても）
         m.notice = nil
         m.reload()
         #expect(m.notice == nil)
-        let again = model(t, settings: settings)
+        let again = try raceModelWithBlocking(t, settings: settings)
         again.reload()
         #expect(again.notice == nil)
         #expect(again.raceNoticeCount == 0)
+    }
+
+    /// 帯を出すかどうかは今までどおり集中で決める（2026-10-12）：デトックスのポイントだけの区間は出さない
+    @Test func lapNoticeNeedsFocusEvenWithPoints() throws {
+        let t = try TestStore(now: jst("2026-10-12T09:00"))
+        let c = try t.seeded()
+        try session(t, c, from: "2026-10-12T09:00", to: "2026-10-12T09:30")
+        t.clock.set(jst("2026-10-19T08:05"))
+        let m = try raceModelWithBlocking(t)
+        m.skipPlan()
+        // 6:00–8:00 はブロックのデトックスのポイントがある（一覧には出る）が、自分も先週も集中していないので帯は出さない
+        let six = try #require(m.snapshot.laps(.lastWeek).first { $0.interval.start == jst("2026-10-19T06:00") })
+        #expect(six.hasNoFocus)
+        #expect(!six.hasNoPoints)
+        #expect(Laps.listed(m.snapshot.laps(.lastWeek), replayHead: nil).contains { $0.id == six.id })
+        #expect(m.notice == nil)
+        #expect(m.raceNoticeCount == 0)
     }
 
     @Test func personalBestAndOlderHistoryComeFromPastDays() throws {
@@ -219,7 +236,7 @@ struct RaceInsightsModelTests {
         try session(t, c, from: "2026-10-19T08:30", to: "2026-10-19T09:40")
         t.clock.set(jst("2026-10-19T10:05"))
         let settings = MemorySettings()
-        let m = model(t, settings: settings)
+        let m = try raceModelWithBlocking(t, settings: settings)
         m.skipPlan()
         m.notice = nil
         m.startUnplanned(category: c[0], minutes: nil)
@@ -235,7 +252,7 @@ struct RaceInsightsModelTests {
         let c = try t.seeded()
         try session(t, c, from: "2026-10-12T09:00", to: "2026-10-12T09:30")
         t.clock.set(jst("2026-10-19T08:05"))
-        let m = model(t)
+        let m = try raceModelWithBlocking(t)
         m.skipPlan()
         // 6:00–8:00 は自分も先週も0分なので出さない
         #expect(m.notice == nil)

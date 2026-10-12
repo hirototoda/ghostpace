@@ -122,7 +122,8 @@ extension HomeSnapshot {
         case .opponent(let opponent): return laps(opponent)
         case .today:
             guard let todayRival else { return [] }
-            return Laps.make(mine: sessions, opponent: todayRival.focusSeconds, dayStart: dayStart, now: min(now, todayRival.now))
+            return Laps.make(mine: sessions, opponent: todayRival.focusSeconds, minePoints: myPoints(until:),
+                             opponentPoints: todayRival.points, dayStart: dayStart, now: min(now, todayRival.now))
         }
     }
 
@@ -182,9 +183,9 @@ enum RaceRival: Hashable {
         }
     }
 
-    /// ラップの差（前向きなら＋）。相手が今日なら今日−この日（ラップ表と同じ向き）、ほかは自分−相手
-    func lapDiff(_ lap: Lap) -> Int {
-        self == .today ? -lap.diff : lap.diff
+    /// ラップのポイントの差（前向きなら＋、表示の値の引き算）。相手が今日なら今日−この日（ラップ表と同じ向き）、ほかは自分−相手
+    func lapGap(_ lap: Lap) -> Double {
+        self == .today ? BestLaps.shownGap(lap.opponentPoints, lap.minePoints) : lap.pointsGap
     }
 }
 

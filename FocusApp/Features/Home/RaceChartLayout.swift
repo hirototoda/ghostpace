@@ -31,6 +31,10 @@ struct RaceChartLayout {
     /// 慣性：はじいた速さでこの秒数ぶん進んで止まる（iPhone のふつうのスクロールの減速と同じくらい）
     static let glideTimeConstant = 0.5
 
+    /// カードの中でグラフ（上の行・グラフ・下の行）が占める高さの割合。残りがラップの一覧（2026-10-12 オーナー決定で約6割）。
+    /// 文字の大きい設定では一覧が数行しか入らないので5割（Claude 補足）
+    static func graphShare(isAccessibilitySize: Bool) -> CGFloat { isAccessibilitySize ? 0.5 : 0.6 }
+
     /// 止まったときの3時間（今の2時間前〜1時間先。1日からはみ出すなら端に寄せる）
     var homeWindow: ClosedRange<Date> {
         window(endingAt: now.addingTimeInterval(Self.lookAhead), length: Self.windowLength)
@@ -170,6 +174,14 @@ struct RaceChartLayout {
     /// 上の行の差（例「差 −10.0pt」）。小数1桁に丸め、丸めて0なら符号なし
     static func gapText(_ points: Double) -> String {
         String(localized: "差 \(signedPoints(points))")
+    }
+
+    /// ポイントの数字（小数1桁、例「9.5」「−1.2」）。0.0 に丸まる負の値は「0.0」で、マイナスは差と同じ「−」（2026-10-12）。
+    /// グラフの上の行・ラップの一覧・自己ベストのラップ表で共通
+    static func pointNumber(_ points: Double) -> String {
+        let rounded = (points * 10).rounded() / 10
+        let number = abs(rounded).formatted(.number.precision(.fractionLength(1)))
+        return rounded < 0 ? "−\(number)" : number
     }
 
     /// 符号つきのポイント（例「+4.1pt」「−0.3pt」）。小数1桁に丸め、丸めて0なら符号なし。差の表示で共有する

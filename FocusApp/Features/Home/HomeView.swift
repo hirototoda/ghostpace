@@ -30,8 +30,15 @@ struct HomeView: View {
     /// 下の帯（計画の行が最大3行）は safeAreaInset で別に引かれるので、ここでは数えない
     static let linesUnderCard: CGFloat = 240
     static let minCardHeight: CGFloat = 260
+    /// 裏返したときのカードと下の帯（開始ボタン）のあいだ
+    static let flippedBottomGap: CGFloat = 12
 
     @State private var showsStartSheet = false
+    /// 円を裏返しているか（GHO-13）。裏では円の下の行と今・次の計画を隠し、カードを開始ボタンのすぐ上まで伸ばす（2026-10-12）
+    @State private var raceFlipped = false
+    /// 日付の行の高さ（裏返したカードの高さを出すのに使う）
+    @State private var headerHeight: CGFloat = 44
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// 遅れて始めるときに聞いているブロックと、その開始
     @State private var lateChoice: LateChoice?
 
@@ -48,12 +55,15 @@ struct HomeView: View {
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 0) {
                     header
-                    Spacer(minLength: 0)
-                    RingHero(snapshot: snapshot, opponent: $opponent,
-                             maxCardHeight: max(Self.minCardHeight, proxy.size.height - Self.linesUnderCard))
-                    Spacer(minLength: 0)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+                    Spacer(minLength: raceFlipped ? 24 : 48)
+                    RingHero(snapshot: snapshot, opponent: $opponent, isFlipped: $raceFlipped,
+                             cardSize: Self.cardSize(container: proxy.size, headerHeight: headerHeight, flipped: raceFlipped,
+                                                     isAccessibilitySize: dynamicTypeSize.isAccessibilitySize,
+                                                     maxCardHeight: max(Self.minCardHeight, proxy.size.height - Self.linesUnderCard)))
+                    Spacer(minLength: raceFlipped ? Self.flippedBottomGap : 24)
                 }
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height)
@@ -98,7 +108,8 @@ struct HomeView: View {
 
     private var footer: some View {
         VStack(spacing: 12) {
-            planLine
+            // 円を裏返している間は今・次の計画を隠す（カードを開始ボタンの上まで伸ばす、2026-10-12）
+            if !raceFlipped { planLine }
             if snapshot.showsReviewEntry {
                 Button(action: onOpenReview) {
                     Label("今日を振り返る", systemImage: "moon.stars")
@@ -215,6 +226,26 @@ struct HomeView: View {
             Text(timeRange(block.start, block.end)).foregroundStyle(.secondary).monospacedDigit()
         }
         .font(.subheadline)
+    }
+
+    /// 円のカードの大きさ（GHO-13）。表は横幅いっぱい（最大440）で縦は横の1.25倍（2026-10-03）。文字の大きい設定では正方形・最大320。
+    /// 縦が `maxCardHeight`（下の行が帯の裏に隠れない高さ）を超えるなら縦横比のまま縮める。
+    /// 裏は横幅いっぱい（最大440）で、日付の行の下から開始ボタンのすぐ上まで（2026-10-12。文字の大きい設定でも同じ）
+    static func cardSize(container: CGSize, headerHeight: CGFloat, flipped: Bool, isAccessibilitySize: Bool,
+                         maxCardHeight: CGFloat) -> CGSize {
+        let available = max(container.width - 40, 0)
+        if flipped {
+            let height = container.height - headerHeight - 24 - flippedBottomGap
+            return CGSize(width: min(available, 440), height: max(height, minCardHeight))
+        }
+        let ratio: CGFloat = isAccessibilitySize ? 1 : 1.25
+        var width = min(available, isAccessibilitySize ? 320 : 440)
+        var height = width * ratio
+        if height > maxCardHeight {
+            height = maxCardHeight
+            width = height / ratio
+        }
+        return CGSize(width: width, height: height)
     }
 
     /// 今の計画ブロック。あれば1タップでブロック終了までのカウントダウンを始める。

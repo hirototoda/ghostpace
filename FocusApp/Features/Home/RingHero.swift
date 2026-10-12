@@ -35,8 +35,10 @@ enum Opponent: String, Hashable, CaseIterable {
 struct RingHero: View {
     let snapshot: HomeSnapshot
     @Binding var opponent: Opponent
-    /// カードの高さの上限。下のボタンの帯が高い（「今」と「次」の2行など）ときに、差と予想ゴールの行が帯の裏に隠れないよう縮める
-    var maxCardHeight: CGFloat = .infinity
+    /// 裏返しているか（ホームが下の行の計画を隠し、カードを伸ばすのに使う。2026-10-12）
+    @Binding var isFlipped: Bool
+    /// カードの大きさ（HomeView.cardSize）。表は横の1.25倍（下のボタンの帯が高いときは縮める）、裏は開始ボタンのすぐ上まで
+    var cardSize: CGSize
     @State private var showsPicker = false
     /// 開いたときのアニメーションの進み（0〜1、GHO-12）
     @State private var runFraction = 0.0
@@ -62,16 +64,25 @@ struct RingHero: View {
     var body: some View {
         VStack(spacing: 20) {
             raceCard
-            diffArea
-            if let current { RaceInsightLines(snapshot: snapshot, opponent: current) }
-            if let opened = snapshot.opened { OpenedLabel(opened: opened) }
+            // 裏返している間は円の下の行を隠す（カードをその分伸ばす、2026-10-12）
+            if !isFlipped {
+                Group {
+                    diffArea
+                    if let current { RaceInsightLines(snapshot: snapshot, opponent: current) }
+                    if let opened = snapshot.opened { OpenedLabel(opened: opened) }
+                }
+                .transition(.opacity)
+            }
         }
         .sheet(isPresented: $showsPicker) { opponentPicker }
         // アプリを開くたびに走ってくる。ほかのタブから戻ったときは走らない
         .onAppear {
             if runFraction == 0 {
                 #if DEBUG
-                if startsFlipped { flipAngle = 180 }
+                if startsFlipped {
+                    flipAngle = 180
+                    isFlipped = true
+                }
                 #endif
                 run()
             }
@@ -81,6 +92,7 @@ struct RingHero: View {
             case .background:
                 runFraction = 0
                 flipAngle = 0
+                isFlipped = false
             case .active:
                 if runFraction == 0 { run() }
             default:
@@ -147,20 +159,22 @@ struct RingHero: View {
         FlipCard(angle: flipAngle) {
             track(current)
         } back: {
-            RaceChart(snapshot: snapshot, rival: current.map(RaceRival.opponent), isShowing: flipAngle >= 90)
+            // 裏はグラフの下にラップの一覧（2026-10-12）
+            RaceChart(snapshot: snapshot, rival: current.map(RaceRival.opponent), isShowing: flipAngle >= 90, showsLaps: true)
         }
-        // 横幅いっぱいで、縦は横の1.25倍（グラフの差を大きく見せる。2026-10-03 オーナー決定、1.1倍と比べた）。
-        // 文字の大きい設定では前の大きさ（正方形・最大320）に戻し、下の差の行がボタンの裏に隠れないようにする（Claude 補足）
-        .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1 : 1 / 1.25, contentMode: .fit)
-        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? 320 : 440, maxHeight: maxCardHeight)
+        // 表は横幅いっぱいで縦は横の1.25倍（2026-10-03 オーナー決定）。裏は開始ボタンのすぐ上まで伸ばす（2026-10-12）。
+        // 大きさは HomeView.cardSize で決め、裏返す動きと一緒に伸び縮みする
+        .frame(width: cardSize.width, height: cardSize.height)
         .contentShape(Rectangle())
         .onTapGesture(perform: flip)
         .accessibilityAction(named: flipAngle < 90 ? "グラフに裏返す" : "円に戻す", flip)
     }
 
     private func flip() {
+        // カードの伸び縮み・下の行の出し入れも同じ動きで（視差効果を減らす設定なら動きなし）
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.6)) {
             flipAngle = flipAngle < 90 ? 180 : 0
+            isFlipped = flipAngle >= 90
         }
     }
 

@@ -147,5 +147,6 @@ enum BestLaps {
         (shown(mine) - shown(theirs)) / 10
     }
 
-    private static func shown(_ points: Double) -> Double { (points * 10).rounded() }
+    /// 表示（0.1pt）の値を10倍した整数。ホームのラップ（GHO-06）の 0.0 の判定にも使う
+    static func shown(_ points: Double) -> Double { (points * 10).rounded() }
 }

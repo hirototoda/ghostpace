@@ -305,6 +305,72 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["opponentButton"].isHittable)
     }
 
+    /// 円を裏返すと、円の下の行（差の文）が隠れてカードが開始ボタンのすぐ上まで伸び、グラフの下にラップの一覧。
+    /// 表に戻すと差の文が戻る（GHO-13・06、1b-60、2026-10-12）
+    func testRaceCardFlipShowsLapList() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00"])
+        let diff = app.staticTexts["ghostDiff"]
+        XCTAssertTrue(diff.waitForExistence(timeout: timeout))
+        let laps = app.descendants(matching: .any)["lapList"].firstMatch
+        XCTAssertFalse(laps.exists && laps.isHittable)
+        app.descendants(matching: .any)["todayFocus"].tap()
+        XCTAssertTrue(laps.waitForExistence(timeout: timeout))
+        XCTAssertTrue(laps.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "先週")).firstMatch.exists)
+        XCTAssertTrue(diff.waitForNonExistence(timeout: timeout))
+        // カードは開始ボタンのすぐ上まで伸びる
+        let chart = app.descendants(matching: .any)["raceChart"].firstMatch
+        let start = app.buttons["startButton"]
+        XCTAssertLessThan(start.frame.minY - chart.frame.maxY, 40)
+        // 上のほう（グラフの上の行）を押すと表に戻り、差の文が戻る
+        chart.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)).tap()
+        XCTAssertTrue(diff.waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["opponentButton"].waitForExistence(timeout: timeout))
+    }
+
+    /// ［▶］で流すと、ラップの一覧は少ない行から1行ずつ増え、［■］で止めると今の区間（途中）の行に戻る（GHO-06、1b-61、2026-10-12）
+    func testRaceLapListGrowsWhileReplaying() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00"])
+        app.descendants(matching: .any)["todayFocus"].tap()
+        let zoom = app.buttons["raceZoomButton"]
+        let replay = app.buttons["raceReplayButton"]
+        XCTAssertTrue(zoom.wait(for: \.isEnabled, toEqual: true, timeout: 20))
+        let rows = app.descendants(matching: .any).matching(identifier: "lapRow")
+        func row(_ prefix: String) -> XCUIElement {
+            rows.matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
+        }
+        let current = rows.matching(NSPredicate(format: "label CONTAINS %@", "（途中）")).firstMatch
+        XCTAssertTrue(current.waitForExistence(timeout: timeout))
+        let before = rows.count
+        replay.tap()
+        XCTAssertTrue(replay.wait(for: \.label, toEqual: "止める", timeout: timeout))
+        // 流し始めは空から（今の区間の行は消える）
+        XCTAssertTrue(current.waitForNonExistence(timeout: timeout))
+        let early = rows.count
+        XCTAssertLessThan(early, before)
+        // 線の先が 10:00 を過ぎると 8:00–10:00 の行が足される
+        XCTAssertTrue(row("8:00–10:00").waitForExistence(timeout: 15))
+        XCTAssertGreaterThan(rows.count, early)
+        XCTAssertFalse(current.exists)
+        // ［■］で止めると今の区間（途中）まで
+        replay.tap()
+        XCTAssertTrue(current.waitForExistence(timeout: timeout))
+        XCTAssertEqual(rows.count, before)
+    }
+
+    /// 夜（「今日を振り返る」が出る時刻）に裏返すと、カードはそのボタンのすぐ上まで（ボタンは残る、1b-60）
+    func testFlippedCardStopsAboveTheReviewButton() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T22:10:00+09:00"])
+        let review = app.buttons["reviewButton"]
+        XCTAssertTrue(review.waitForExistence(timeout: timeout))
+        app.descendants(matching: .any)["todayFocus"].tap()
+        let laps = app.descendants(matching: .any)["lapList"].firstMatch
+        XCTAssertTrue(laps.waitForExistence(timeout: timeout))
+        XCTAssertTrue(review.isHittable)
+        let chart = app.descendants(matching: .any)["raceChart"].firstMatch
+        XCTAssertLessThanOrEqual(chart.frame.maxY, review.frame.minY)
+        XCTAssertLessThan(review.frame.minY - chart.frame.maxY, 40)
+    }
+
     /// 裏のグラフ：3時間で始まり、［1日］で24時間、［3時間］で戻る。上の行に差。
     /// 最初の裏返しだけ動き（直前2時間が伸びる約1.5秒。その間は［1日］［▶］を押せない）、2回目はすぐ押せる。裏返し直すと3時間に戻る（GHO-13、1b-15〜17）
     func testRaceChartZoomAndIntroOnlyOnce() {

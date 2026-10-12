@@ -1,6 +1,7 @@
 import Foundation
 
-/// ラップ（GHO-06、docs/product/features/ghost-race.md「ラップ」）。4:00 から2時間ごとの区間で、相手との集中の差を出す。
+/// ラップ（GHO-06、docs/product/features/ghost-race.md「ラップ」）。4:00 から2時間ごとの区間で、相手との差を出す。
+/// 2026-10-12 から差は集中した時間ではなくポイント（旗・帯・一覧のすべて）。帯を出すかどうかだけは今までどおり集中で決める
 struct Lap: Identifiable, Hashable {
     var interval: DateInterval
     /// その区間に自分が集中した秒数（区間の途中は今まで）
@@ -9,11 +10,19 @@ struct Lap: Identifiable, Hashable {
     var opponent: Int
     /// 今の区間（まだ終わっていない）
     var isCurrent: Bool
+    /// その区間で増えた自分のポイント（区間の途中は今まで）。自己ベストのラップ表と同じ数え方で、開けた区間はマイナスもある
+    var minePoints: Double
+    /// その区間で増えた相手のポイント（相手も同じ時刻まで）
+    var opponentPoints: Double
 
     var diff: Int { mine - opponent }
     var id: Date { interval.start }
-    /// 自分も相手も集中していない区間（一覧・帯で省く）
-    var isEmpty: Bool { mine == 0 && opponent == 0 }
+    /// 自分も相手も集中していない区間。帯（区切りの演出）を出さない判定にだけ使う（Q39。一覧は hasNoPoints で省く）
+    var hasNoFocus: Bool { mine == 0 && opponent == 0 }
+    /// ポイントの差（自分−相手）。画面に出す2つの値（0.1pt）の引き算（自己ベストのラップ表と同じ）
+    var pointsGap: Double { BestLaps.shownGap(minePoints, opponentPoints) }
+    /// 自分も相手も区間のポイントが表示で 0.0（一覧で省く、2026-10-12）
+    var hasNoPoints: Bool { BestLaps.shown(minePoints) == 0 && BestLaps.shown(opponentPoints) == 0 }
 }
 
 enum Laps {
@@ -25,29 +34,59 @@ enum Laps {
         (0..<count).map { DateInterval(start: dayStart.addingTimeInterval(Double($0) * length), duration: length) }
     }
 
-    /// `now` までに始まった区間のラップ。`opponent` は相手のその時刻までの集中（秒）
-    static func make(mine: [TimeSegment], opponent: (Date) -> Int, dayStart: Date, now: Date) -> [Lap] {
+    /// `now` までに始まった区間のラップ。`opponent` は相手のその時刻までの集中（秒）、
+    /// `minePoints`・`opponentPoints` はその時刻までにたまった自分・相手のポイント（区間のポイントは終わり−始まり）
+    static func make(mine: [TimeSegment], opponent: (Date) -> Int, minePoints: (Date) -> Double,
+                     opponentPoints: (Date) -> Double, dayStart: Date, now: Date) -> [Lap] {
         sections(dayStart: dayStart).filter { $0.start < now }.map { section in
             let end = min(section.end, now)
             return Lap(interval: section,
                        mine: mine.focusSeconds(until: end) - mine.focusSeconds(until: section.start),
                        opponent: max(0, opponent(end) - opponent(section.start)),
-                       isCurrent: now < section.end)
+                       isCurrent: now < section.end,
+                       minePoints: minePoints(end) - minePoints(section.start),
+                       opponentPoints: opponentPoints(end) - opponentPoints(section.start))
         }
     }
 
-    /// 自分の集中が `target` 秒に届いた時刻（中間地点）。`now` までに届いていなければ nil
-    static func reachTime(_ target: Int, mine: [TimeSegment], now: Date) -> Date? {
-        guard target > 0 else { return nil }
-        var total = 0
-        for segment in mine.filter(\.countsAsFocus).sorted(by: { $0.start < $1.start }) {
-            let end = min(segment.end, now)
-            guard end > segment.start else { continue }
-            let length = Int(end.timeIntervalSince(segment.start))
-            if total + length >= target { return segment.start.addingTimeInterval(Double(target - total)) }
-            total += length
+    /// ポイントが `target` に初めて届いた時刻（中間地点、2026-10-12 からポイントで）。`start`〜`end` を1分ごとに見て、
+    /// 届いた1分の中を秒まで詰める。届いていない・`target` が0以下なら nil。届いたあと開けて下がっても、初めて届いた所
+    static func reachTime(points target: Double, of points: (Date) -> Double, from start: Date, until end: Date) -> Date? {
+        guard target > 0, end > start else { return nil }
+        func reached(_ offset: Int) -> Bool { points(start.addingTimeInterval(Double(offset))) >= target - 1e-9 }
+        let total = Int(end.timeIntervalSince(start))
+        var hi = 0
+        while hi < total {
+            hi = min(hi + 60, total)
+            if reached(hi) { break }
         }
-        return nil
+        guard reached(hi) else { return nil }
+        var lo = max(hi - 60, 0)
+        if reached(lo) { return start.addingTimeInterval(Double(lo)) }
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2
+            if reached(mid) { hi = mid } else { lo = mid }
+        }
+        return start.addingTimeInterval(Double(hi))
+    }
+
+
+    /// 線の先 `head` が通過した最後の2時間の区切り（4:00 から。区切りちょうども通過に数える）。4:00〜翌4:00 の外には出ない。
+    /// ［▶］で流している間、一覧を変えるのは区切りを過ぎたときだけにするため（GHO-06、2026-10-12）
+    static func passedBoundary(dayStart: Date, head: Date) -> Date {
+        let passed = (head.timeIntervalSince(dayStart) / length).rounded(.down)
+        return dayStart.addingTimeInterval(min(max(passed, 0), Double(count)) * length)
+    }
+
+    /// ラップの一覧に出す行（GHO-06、2026-10-12）。自分も相手も区間のポイントが 0.0 の区間は省く。
+    /// 流していない（`replayHead` が nil）ときは今の一覧（今の区間の「途中」まで）。
+    /// ［▶］で流している間は、線の先が区切りを過ぎた（ちょうども）区間だけを、区間を最後まで数えた値で出す。今の区間は出さない
+    static func listed(_ laps: [Lap], replayHead: Date?) -> [Lap] {
+        laps.filter { lap in
+            guard !lap.hasNoPoints else { return false }
+            guard let replayHead else { return true }
+            return !lap.isCurrent && lap.interval.end <= replayHead
+        }
     }
 }
 
