@@ -483,14 +483,16 @@ struct RaceChart: View {
         }
     }
 
-    /// 2時間の区切り（そこまでの区間の差）と中間地点。見えている範囲だけ。3時間の窓では数字も出す
+    /// 2時間の区切り（そこまでの区間のポイントの差）と中間地点。見えている範囲だけ。3時間の窓では数字も出す
     private func flags(in range: ClosedRange<Date>) -> [Flag] {
         guard let rival else { return [] }
         let laps = snapshot.rivalLaps(rival).filter { !$0.isCurrent }
         let showsText = !showsWholeDay
+        // 2026-10-12 からポイントの差（「+1.6」）。両者 0.0 の区間は数字なしの灰色
         var result = laps.filter { range.contains($0.interval.end) }.map { lap in
-            Flag(date: lap.interval.end, text: showsText && !lap.isEmpty ? DurationFormat.signed(rival.lapDiff(lap)) : nil,
-                 color: lap.isEmpty ? .secondary : Theme.diffColor(rival.lapDiff(lap)))
+            let gap = rival.lapGap(lap)
+            return Flag(date: lap.interval.end, text: showsText && !lap.hasNoPoints ? String(RaceChartLayout.signedPoints(gap).dropLast(2)) : nil,
+                        color: lap.hasNoPoints ? .secondary : RaceChartLayout.isAhead(gap) ? Theme.lead : Theme.behind)
         }
         if let half = snapshot.rivalHalfway(rival), range.contains(half) {
             result.append(Flag(date: half, text: showsText ? "中間" : nil, color: Theme.focus))

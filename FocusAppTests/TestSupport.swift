@@ -84,3 +84,19 @@ func session(_ start: String, _ end: String?, category: CategoryOption = Default
         pauses: pauses.map { PauseInterval(start: jst($0.0), end: $0.1.map(jst)) },
         originalEndAt: nil)
 }
+
+/// ブロックを 2026-10-01 から使っている本体（先週のデトックスがあり、先週の自分のポイントとラップが出る）。
+/// 2026-10-12 からラップはポイントで出すので、相手のポイントがない日はラップも帯も出ない
+@MainActor
+func raceModelWithBlocking(_ t: TestStore, settings: MemorySettings = MemorySettings()) throws -> AppModel {
+    let log = MemoryBlockEventLog()
+    try log.append(BlockEvent(occurredAt: jst("2026-10-01T04:00"), timeZoneId: "Asia/Tokyo", kind: .started))
+    settings.didShowBlockingIntro = true
+    settings.didLogBlockStart = true
+    settings.lastBlockingAuthorized = true
+    let blockStore = MemoryBlockStore()
+    blockStore.state = BlockState(isEnabled: true)
+    blockStore.selection = Data("sel".utf8)
+    return AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings,
+                    blocking: FakeBlocking(), blockStore: blockStore, blockLog: log)
+}

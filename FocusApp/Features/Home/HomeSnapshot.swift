@@ -109,15 +109,18 @@ struct HomeSnapshot {
         }
     }
 
-    /// 今までに始まった区間のラップ。相手がいなければ空
+    /// 今までに始まった区間のラップ。相手がいなければ空。2026-10-12 からポイントで比べるので、
+    /// 相手のポイントがない日（先週のデトックスがない日など、グラフに相手の線を出さない日）も空
     func laps(_ opponent: Opponent) -> [Lap] {
-        guard let focus = opponentFocus(opponent) else { return [] }
-        return Laps.make(mine: sessions, opponent: focus, dayStart: dayStart, now: now)
+        guard let focus = opponentFocus(opponent), opponentPoints(opponent, at: dayStart) != nil else { return [] }
+        return Laps.make(mine: sessions, opponent: focus, minePoints: myPoints(until:),
+                         opponentPoints: { opponentPoints(opponent, at: $0) ?? 0 }, dayStart: dayStart, now: now)
     }
 
-    /// 中間地点（相手の1日分の半分）に届いた時刻
+    /// 中間地点：相手の1日分のポイントの半分に、自分のポイントが届いた時刻（2026-10-12 からポイントで。それまでは集中した時間）
     func halfwayTime(_ opponent: Opponent) -> Date? {
-        opponentWholeDaySeconds(opponent).flatMap { Laps.reachTime($0 / 2, mine: sessions, now: now) }
+        guard let whole = opponentPoints(opponent, at: dayEnd) else { return nil }
+        return Laps.reachTime(points: whole / 2, of: myPoints(until:), from: dayStart, until: now)
     }
 
     /// 予想ゴール：計画どおりなら（計画なし日は今までのペースで）今日の集中。出せなければ nil

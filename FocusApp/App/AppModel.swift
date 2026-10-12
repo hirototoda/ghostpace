@@ -1030,7 +1030,8 @@ final class AppModel {
         }
         if let lap = snapshot.laps(opponent).last(where: { !$0.isCurrent && !$0.isEmpty }) {
             let key = "\(dayKey)|\(Int(lap.interval.start.timeIntervalSinceReferenceDate))"
-            if !shown.contains(key) { return show(key, "\(Self.lapRange(lap)) のラップ \(DurationFormat.signed(lap.diff))") }
+            // 出すかどうかは集中で決め（両者が集中していない区間は出さない）、差はポイントで出す（2026-10-12）
+            if !shown.contains(key) { return show(key, "\(Self.lapRange(lap)) のラップ \(RaceChartLayout.signedPoints(lap.pointsGap))") }
         }
         let half = "\(dayKey)|half"
         if snapshot.halfwayTime(opponent) != nil, !shown.contains(half) { show(half, "中間地点を通過") }

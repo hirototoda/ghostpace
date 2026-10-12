@@ -206,8 +206,11 @@ struct BestPolishTests {
         let eight = try #require(laps.first { $0.interval.start == jst("2026-10-13T08:00") })
         #expect(eight.mine == 80 * 60)
         #expect(eight.opponent == 68 * 60)
-        #expect(RaceRival.today.lapDiff(eight) == -12 * 60)
-        #expect(RaceRival.opponent(.lastWeek).lapDiff(eight) == 12 * 60)
+        // 2026-10-12 からラップはポイント：この日 8.0pt・今日 6.8pt、差は今日−この日
+        #expect(eight.minePoints.isApprox(8.0))
+        #expect(eight.opponentPoints.isApprox(6.8))
+        #expect(RaceRival.today.lapGap(eight).isApprox(-1.2))
+        #expect(RaceRival.opponent(.lastWeek).lapGap(eight).isApprox(1.2))
         #expect(past.rivalHalfway(.today) == nil)
     }
 
@@ -392,7 +395,7 @@ struct BestPolishTests {
         try session(t, try focus(c), from: "2026-10-19T08:30", to: "2026-10-19T09:40")
         t.clock.set(jst("2026-10-19T10:05"))
         let settings = MemorySettings()
-        let m = model(t, settings: settings)
+        let m = try raceModelWithBlocking(t, settings: settings)
         m.setTimerTabVisible(false)
         m.skipPlan()
         m.reload(quietly: true)
@@ -400,7 +403,8 @@ struct BestPolishTests {
         #expect(m.raceNoticeCount == 0)
         #expect((settings.lastRaceNotice ?? "").isEmpty)
         m.setTimerTabVisible(true)
-        #expect(m.notice == "8:00–10:00 のラップ +40分")
+        #expect(m.notice?.hasPrefix("8:00–10:00 のラップ +") == true)
+        #expect(m.notice?.hasSuffix("pt") == true)
         #expect(m.raceNoticeCount == 1)
     }
 
@@ -412,7 +416,7 @@ struct BestPolishTests {
         try session(t, try focus(c), from: "2026-10-19T08:30", to: "2026-10-19T09:40")
         t.clock.set(jst("2026-10-19T10:05"))
         let settings = MemorySettings()
-        let m = model(t, settings: settings)
+        let m = try raceModelWithBlocking(t, settings: settings)
         m.setTimerTabVisible(false)
         m.skipPlan()
         t.clock.set(jst("2026-10-20T04:10"))

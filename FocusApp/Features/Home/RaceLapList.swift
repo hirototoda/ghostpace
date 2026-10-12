@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// ラップの一覧（GHO-06）：ホームの裏とその日のグラフの、グラフの下（2026-10-12）。2時間ごとの自分・相手の集中と差
-/// （「10:00–12:00 1時間20分・先週 1時間08分 +12分」。相手が目標なら「目標」）。
+/// ラップの一覧（GHO-06）：ホームの裏とその日のグラフの、グラフの下（2026-10-12）。2時間ごとの自分・相手のポイントと差
+/// （「10:00–12:00　+1.6pt」「9.5pt・先週 7.9pt」。相手が目標なら「目標」、今日なら「今日」）。
 /// 一覧はその中で縦にスクロールし、初めは一番新しい行が見える位置。行が足されたら（［▶］で流している間）最新の行へ送る
 struct RaceLapList: View {
     /// 出す行（Laps.listed で選んだもの）
@@ -48,18 +48,20 @@ struct RaceLapList: View {
         .accessibilityIdentifier("lapList")
     }
 
+    /// 1行目に区間と差「10:00–12:00　+1.6pt」、2行目に「9.5pt・先週 7.9pt」（2026-10-12 オーナー決定。それまでは集中した時間）
     private func row(_ lap: Lap) -> some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
+        // 相手が今日なら差は今日−この日（ラップ表と同じ向き）。0.0 は前向きな色
+        let gap = rival.lapGap(lap)
+        return VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
                     Text(AppModel.lapRange(lap) + (lap.isCurrent ? "（途中）" : "")).font(.subheadline.monospacedDigit())
-                    Text("\(DurationFormat.japanese(lap.mine))・\(rival.shortName) \(DurationFormat.japanese(lap.opponent))")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(RaceChartLayout.signedPoints(gap)).font(.subheadline.bold().monospacedDigit())
+                        .foregroundStyle(RaceChartLayout.isAhead(gap) ? Theme.lead : Theme.behind)
                 }
-                Spacer()
-                // 相手が今日なら差は今日−この日（ラップ表と同じ向き）
-                Text(DurationFormat.signed(rival.lapDiff(lap))).font(.subheadline.bold().monospacedDigit())
-                    .foregroundStyle(Theme.diffColor(rival.lapDiff(lap)))
+                Text("\(RaceChart.pointText(lap.minePoints))・\(rival.shortName) \(RaceChart.pointText(lap.opponentPoints))")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             .accessibilityElement(children: .combine)
             Divider()
