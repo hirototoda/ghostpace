@@ -33,7 +33,7 @@ struct RaceInsightsTests {
         #expect(laps[3].mine == 75 * 60)
         #expect(laps[3].opponent == 15 * 60)
         #expect(laps[3].isCurrent)
-        #expect(laps[0].isEmpty)
+        #expect(laps[0].hasNoFocus)
     }
 
     @Test func lapsAroundFourAm() {
@@ -208,7 +208,7 @@ struct RaceInsightsModelTests {
         m.skipPlan()
         // 6:00–8:00 はブロックのデトックスのポイントがある（一覧には出る）が、自分も先週も集中していないので帯は出さない
         let six = try #require(m.snapshot.laps(.lastWeek).first { $0.interval.start == jst("2026-10-19T06:00") })
-        #expect(six.isEmpty)
+        #expect(six.hasNoFocus)
         #expect(!six.hasNoPoints)
         #expect(Laps.listed(m.snapshot.laps(.lastWeek), replayHead: nil).contains { $0.id == six.id })
         #expect(m.notice == nil)

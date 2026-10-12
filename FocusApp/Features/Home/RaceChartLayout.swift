@@ -176,6 +176,14 @@ struct RaceChartLayout {
         String(localized: "差 \(signedPoints(points))")
     }
 
+    /// ポイントの数字（小数1桁、例「9.5」「−1.2」）。0.0 に丸まる負の値は「0.0」で、マイナスは差と同じ「−」（2026-10-12）。
+    /// グラフの上の行・ラップの一覧・自己ベストのラップ表で共通
+    static func pointNumber(_ points: Double) -> String {
+        let rounded = (points * 10).rounded() / 10
+        let number = abs(rounded).formatted(.number.precision(.fractionLength(1)))
+        return rounded < 0 ? "−\(number)" : number
+    }
+
     /// 符号つきのポイント（例「+4.1pt」「−0.3pt」）。小数1桁に丸め、丸めて0なら符号なし。差の表示で共有する
     static func signedPoints(_ points: Double) -> String {
         let rounded = (points * 10).rounded() / 10

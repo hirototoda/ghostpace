@@ -748,7 +748,7 @@ struct BestLapTable: View {
 
     /// 0.1pt の数字。空の欄（まだ来ていない区間）は「—」
     private func number(_ value: Double?, wins: Bool) -> some View {
-        Text(value.map { $0.formatted(.number.precision(.fractionLength(1))) } ?? "—")
+        Text(value.map(RaceChartLayout.pointNumber) ?? "—")
             .foregroundStyle(wins ? Theme.record : value == nil ? .secondary : .primary)
             .fontWeight(wins ? .bold : .regular)
     }

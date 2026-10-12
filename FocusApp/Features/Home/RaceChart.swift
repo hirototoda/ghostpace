@@ -53,6 +53,10 @@ struct RaceChart: View {
     /// （縦のスクロールに取られるなどで終わりが来なくても、次のずらしが前の位置から飛ばないように）
     @State private var dragAnchor: (location: CGPoint, start: Date)?
     @State private var curves: [RaceCurve] = []
+    /// 相手とのラップと中間地点。線と同じとき（開いたとき・今が進んだとき・相手を変えたとき）に1回だけ数える
+    /// （中間地点は1分ごとに最大1440回ポイントを数えるので、描き直すたびには数えない）
+    @State private var laps: [Lap] = []
+    @State private var halfway: Date?
     /// ［▶］で流している間に線の先が通過した最後の2時間の区切り（ラップの一覧はここまでの区間を出す）。流していなければ nil（今の一覧）
     @State private var replayHead: Date?
 
@@ -60,9 +64,10 @@ struct RaceChart: View {
         RaceChartLayout(dayStart: snapshot.dayStart, dayEnd: snapshot.dayEnd, now: snapshot.now)
     }
 
-    /// ラップの一覧を出すか。相手の線を出さない日（相手がいない日）は出さずにグラフを伸ばす
+    /// ラップの一覧を出すか。ラップがない日（相手がいない・相手のポイントがない日。HomeSnapshot.laps と同じ判定）は
+    /// 出さずにグラフを伸ばす
     private var lapRival: RaceRival? {
-        guard showsLaps, let rival, snapshot.rivalPoints(rival, at: snapshot.now) != nil else { return nil }
+        guard showsLaps, let rival, !laps.isEmpty else { return nil }
         return rival
     }
 
@@ -76,7 +81,7 @@ struct RaceChart: View {
                 if let lapRival {
                     Divider().padding(.vertical, 8)
                     // 流している間は通過した区切りまで、止まっているときは今の区間まで（2026-10-12）
-                    RaceLapList(laps: Laps.listed(snapshot.rivalLaps(lapRival), replayHead: replayHead), rival: lapRival)
+                    RaceLapList(laps: Laps.listed(laps, replayHead: replayHead), rival: lapRival)
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
             }
@@ -86,6 +91,8 @@ struct RaceChart: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("raceChart")
         .onAppear(perform: refreshCurves)
+        // 画面から外れたら（その日のグラフから戻る・タブを変える）流すのをやめる
+        .onDisappear { stopReplay() }
         .onChange(of: snapshot.now) { refreshCurves() }
         .onChange(of: rival) { refreshCurves() }
         // 今日を相手にした過ぎた日（ANA-05）は、この日の「今」は動かないので、今日が進んだら描き直す
@@ -124,6 +131,8 @@ struct RaceChart: View {
 
     private func refreshCurves() {
         curves = snapshot.raceCurves(rival: rival)
+        laps = rival.map(snapshot.rivalLaps) ?? []
+        halfway = rival.flatMap(snapshot.rivalHalfway)
     }
 
     // MARK: - 上の行と下の行
@@ -160,8 +169,9 @@ struct RaceChart: View {
         }
     }
 
+    /// 例「43.4pt」「−0.3pt」（0.0 に丸まる負の値は「0.0pt」）
     static func pointText(_ points: Double) -> String {
-        "\(points.formatted(.number.precision(.fractionLength(1))))pt"
+        "\(RaceChartLayout.pointNumber(points))pt"
     }
 
     /// 3時間と1日の切り替え（下の行の右のボタン1つ）
@@ -486,7 +496,7 @@ struct RaceChart: View {
     /// 2時間の区切り（そこまでの区間のポイントの差）と中間地点。見えている範囲だけ。3時間の窓では数字も出す
     private func flags(in range: ClosedRange<Date>) -> [Flag] {
         guard let rival else { return [] }
-        let laps = snapshot.rivalLaps(rival).filter { !$0.isCurrent }
+        let laps = self.laps.filter { !$0.isCurrent }
         let showsText = !showsWholeDay
         // 2026-10-12 からポイントの差（「+1.6」）。両者 0.0 の区間は数字なしの灰色
         var result = laps.filter { range.contains($0.interval.end) }.map { lap in
@@ -494,7 +504,7 @@ struct RaceChart: View {
             return Flag(date: lap.interval.end, text: showsText && !lap.hasNoPoints ? String(RaceChartLayout.signedPoints(gap).dropLast(2)) : nil,
                         color: lap.hasNoPoints ? .secondary : RaceChartLayout.isAhead(gap) ? Theme.lead : Theme.behind)
         }
-        if let half = snapshot.rivalHalfway(rival), range.contains(half) {
+        if let half = halfway, range.contains(half) {
             result.append(Flag(date: half, text: showsText ? "中間" : nil, color: Theme.focus))
         }
         return result

@@ -11,14 +11,14 @@ struct Lap: Identifiable, Hashable {
     /// 今の区間（まだ終わっていない）
     var isCurrent: Bool
     /// その区間で増えた自分のポイント（区間の途中は今まで）。自己ベストのラップ表と同じ数え方で、開けた区間はマイナスもある
-    var minePoints: Double = 0
+    var minePoints: Double
     /// その区間で増えた相手のポイント（相手も同じ時刻まで）
-    var opponentPoints: Double = 0
+    var opponentPoints: Double
 
     var diff: Int { mine - opponent }
     var id: Date { interval.start }
-    /// 自分も相手も集中していない区間（帯を出さない、Q39）
-    var isEmpty: Bool { mine == 0 && opponent == 0 }
+    /// 自分も相手も集中していない区間。帯（区切りの演出）を出さない判定にだけ使う（Q39。一覧は hasNoPoints で省く）
+    var hasNoFocus: Bool { mine == 0 && opponent == 0 }
     /// ポイントの差（自分−相手）。画面に出す2つの値（0.1pt）の引き算（自己ベストのラップ表と同じ）
     var pointsGap: Double { BestLaps.shownGap(minePoints, opponentPoints) }
     /// 自分も相手も区間のポイントが表示で 0.0（一覧で省く、2026-10-12）

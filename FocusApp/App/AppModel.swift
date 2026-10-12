@@ -1028,7 +1028,7 @@ final class AppModel {
             notice = text
             raceNoticeCount += 1
         }
-        if let lap = snapshot.laps(opponent).last(where: { !$0.isCurrent && !$0.isEmpty }) {
+        if let lap = snapshot.laps(opponent).last(where: { !$0.isCurrent && !$0.hasNoFocus }) {
             let key = "\(dayKey)|\(Int(lap.interval.start.timeIntervalSinceReferenceDate))"
             // 出すかどうかは集中で決め（両者が集中していない区間は出さない）、差はポイントで出す（2026-10-12）
             if !shown.contains(key) { return show(key, "\(Self.lapRange(lap)) のラップ \(RaceChartLayout.signedPoints(lap.pointsGap))") }

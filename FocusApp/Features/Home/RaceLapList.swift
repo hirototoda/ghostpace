@@ -8,37 +8,43 @@ struct RaceLapList: View {
     let laps: [Lap]
     let rival: RaceRival
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// 一覧の位置（行を足したら最新の行へ送る）
+    @State private var position = ScrollPosition(edge: .bottom)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
+            // 見出しはスクロールの外。下の線から先だけが送られる（行が見出しに重ならない）
             Text("ラップ（2時間ごと）").font(.subheadline.bold()).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.7)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(laps) { lap in
-                            row(lap)
-                                .id(lap.id)
-                                // 足すときはふわっと出す（動きは足す側の withAnimation で。視差効果を減らす設定なら動きなし）
-                                .transition(.opacity)
-                        }
+                .padding(.bottom, 6)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(laps) { lap in
+                        row(lap)
+                            .id(lap.id)
+                            // 足すときはふわっと出す（動きは足す側の withAnimation で。視差効果を減らす設定なら動きなし）
+                            .transition(.opacity)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                // 初めは一番新しい行が見える位置（カードが伸び縮みしても下に合わせる）。行が少なく入りきるときは上から並べる
-                .defaultScrollAnchor(.bottom, for: .initialOffset)
-                .defaultScrollAnchor(.bottom, for: .sizeChanges)
-                .defaultScrollAnchor(.top, for: .alignment)
-                .scrollBounceBehavior(.basedOnSize)
-                .onAppear {
-                    if let last = laps.last?.id { proxy.scrollTo(last, anchor: .bottom) }
-                }
-                // 行を足したら、手でスクロールしていても最新の行へ送る
-                .onChange(of: laps.last?.id) { _, last in
-                    guard let last else { return }
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
-                        proxy.scrollTo(last, anchor: .bottom)
-                    }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+            }
+            .scrollPosition($position)
+            // 初めは一番新しい行が見える位置（カードが伸び縮みしても下に合わせる）。行が少なく入りきるときは上から並べる
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .defaultScrollAnchor(.top, for: .alignment)
+            .scrollBounceBehavior(.basedOnSize)
+            .clipped()
+            .onAppear {
+                if !laps.isEmpty { position.scrollTo(edge: .bottom) }
+            }
+            // 行を足したら、手でスクロールしていても最新の行へ送る（位置は並べ終えてから合わせる）
+            .onChange(of: laps.last?.id) { _, last in
+                guard last != nil else { return }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
+                    position.scrollTo(edge: .bottom)
                 }
             }
         }
@@ -55,16 +61,31 @@ struct RaceLapList: View {
         return VStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(AppModel.lapRange(lap) + (lap.isCurrent ? "（途中）" : "")).font(.subheadline.monospacedDigit())
+                    Text(Self.titleText(lap)).font(.subheadline.monospacedDigit())
                     Spacer(minLength: 8)
-                    Text(RaceChartLayout.signedPoints(gap)).font(.subheadline.bold().monospacedDigit())
+                    Text(Self.gapText(lap, rival: rival)).font(.subheadline.bold().monospacedDigit())
                         .foregroundStyle(RaceChartLayout.isAhead(gap) ? Theme.lead : Theme.behind)
                 }
-                Text("\(RaceChart.pointText(lap.minePoints))・\(rival.shortName) \(RaceChart.pointText(lap.opponentPoints))")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text(Self.detailText(lap, rival: rival)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("lapRow")
             Divider()
         }
+    }
+
+    /// 1行目の左「10:00–12:00」。今の区間は「（途中）」を付ける
+    static func titleText(_ lap: Lap) -> String {
+        AppModel.lapRange(lap) + (lap.isCurrent ? "（途中）" : "")
+    }
+
+    /// 1行目の右の差「+1.6pt」（表示の値の引き算。相手が今日なら今日−この日）
+    static func gapText(_ lap: Lap, rival: RaceRival) -> String {
+        RaceChartLayout.signedPoints(rival.lapGap(lap))
+    }
+
+    /// 2行目「9.5pt・先週 7.9pt」（相手が目標なら「目標」、今日なら「今日」）
+    static func detailText(_ lap: Lap, rival: RaceRival) -> String {
+        "\(RaceChart.pointText(lap.minePoints))・\(rival.shortName) \(RaceChart.pointText(lap.opponentPoints))"
     }
 }

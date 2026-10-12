@@ -191,11 +191,13 @@ struct RaceLapListTests {
             Lap(interval: base, mine: 0, opponent: 0, isCurrent: false, minePoints: mine, opponentPoints: theirs)
         }
         #expect(Laps.listed([lap(0.04, -0.04)], replayHead: nil).isEmpty)
+        #expect(Laps.listed([lap(-0.04, 0)], replayHead: nil).isEmpty)
+        #expect(Laps.listed([lap(-0.05, 0)], replayHead: nil).count == 1)
         #expect(Laps.listed([lap(0.04, -0.04)], replayHead: jst("2026-10-19T10:00")).isEmpty)
         #expect(Laps.listed([lap(0.05, 0)], replayHead: nil).count == 1)
         #expect(Laps.listed([lap(0, -0.3)], replayHead: jst("2026-10-19T10:00")).count == 1)
         // 自分も相手も集中していなくても（mine・opponent が0秒でも）、ポイントがあれば一覧に出る
-        #expect(lap(0.5, 0).isEmpty)
+        #expect(lap(0.5, 0).hasNoFocus)
         #expect(!lap(0.5, 0).hasNoPoints)
     }
 
@@ -260,6 +262,63 @@ struct RaceLapListTests {
         #expect(s.opponentPoints(.lastWeek, at: s.now) == nil)
         #expect(s.laps(.lastWeek).isEmpty)
         #expect(s.halfwayTime(.lastWeek) == nil)
+    }
+
+    // MARK: 表示の値と行の文言
+
+    /// 0.0 に丸まる負の値は「0.0」（「-0.0」にしない）。マイナスは差と同じ「−」
+    @Test func pointNumbersNeverShowMinusZero() {
+        #expect(RaceChartLayout.pointNumber(-0.04) == "0.0")
+        #expect(RaceChartLayout.pointNumber(-0.05) == "−0.1")
+        #expect(RaceChartLayout.pointNumber(-1.25) == "−1.3")
+        #expect(RaceChartLayout.pointNumber(0.04) == "0.0")
+        #expect(RaceChartLayout.pointNumber(9.46) == "9.5")
+        #expect(RaceChart.pointText(-0.04) == "0.0pt")
+        #expect(RaceChart.pointText(-2) == "−2.0pt")
+        #expect(RaceChartLayout.signedPoints(-0.04) == "0.0pt")
+    }
+
+    /// 一覧の行の文言：1行目「10:00–12:00」と「+1.6pt」、2行目「9.5pt・先週 7.9pt」（目標なら「目標」、今日なら「今日」で差は今日−この日）
+    @Test func lapRowTexts() {
+        let lap = Lap(interval: DateInterval(start: jst("2026-10-19T10:00"), duration: Laps.length), mine: 0, opponent: 0,
+                      isCurrent: false, minePoints: 9.46, opponentPoints: 7.94)
+        #expect(RaceLapList.titleText(lap) == "10:00–12:00")
+        #expect(RaceLapList.gapText(lap, rival: .opponent(.lastWeek)) == "+1.6pt")
+        #expect(RaceLapList.detailText(lap, rival: .opponent(.lastWeek)) == "9.5pt・先週 7.9pt")
+        #expect(RaceLapList.detailText(lap, rival: .opponent(.goal)) == "9.5pt・目標 7.9pt")
+        #expect(RaceLapList.detailText(lap, rival: .today) == "9.5pt・今日 7.9pt")
+        #expect(RaceLapList.gapText(lap, rival: .today) == "−1.6pt")
+        var current = lap
+        current.isCurrent = true
+        #expect(RaceLapList.titleText(current) == "10:00–12:00（途中）")
+        let negative = Lap(interval: lap.interval, mine: 0, opponent: 0, isCurrent: false, minePoints: -0.04, opponentPoints: -1.2)
+        #expect(RaceLapList.detailText(negative, rival: .opponent(.lastWeek)) == "0.0pt・先週 −1.2pt")
+        #expect(RaceLapList.gapText(negative, rival: .opponent(.lastWeek)) == "+1.2pt")
+    }
+
+    // MARK: 4:00 をまたぐ
+
+    /// 翌3:59 は最後の区間（翌2:00–翌4:00）の途中で一覧に入り、流すと線の先が翌4:00 に着くまで足さない。
+    /// 翌4:00 は新しい日で、区間はまだない（一覧は空）
+    @Test func lastSectionAroundFourAm() throws {
+        let mine = [seg("02:30", "03:30", day: "2026-10-20")]
+        let late = Laps.make(mine: mine, opponent: { _ in 0 }, minePoints: tenMinutes(mine), opponentPoints: { _ in 0 },
+                             dayStart: dayStart, now: jst("2026-10-20T03:59"))
+        let last = try #require(Laps.listed(late, replayHead: nil).last)
+        #expect(last.interval.start == jst("2026-10-20T02:00"))
+        #expect(last.isCurrent)
+        #expect(last.minePoints.isApprox(6.0))
+        #expect(!Laps.listed(late, replayHead: jst("2026-10-20T03:59")).contains { $0.interval.start == jst("2026-10-20T02:00") })
+        // 過ぎた日（今が翌4:00）は最後の区間も終わっていて、線の先が翌4:00 に着いたら足す
+        let whole = Laps.make(mine: mine, opponent: { _ in 0 }, minePoints: tenMinutes(mine), opponentPoints: { _ in 0 },
+                              dayStart: dayStart, now: jst("2026-10-20T04:00"))
+        #expect(whole.last?.isCurrent == false)
+        #expect(Laps.listed(whole, replayHead: jst("2026-10-20T04:00")).last?.interval.start == jst("2026-10-20T02:00"))
+        #expect(Laps.listed(whole, replayHead: jst("2026-10-20T03:59")).last?.interval.start != jst("2026-10-20T02:00"))
+        // 新しい日の 4:00 ちょうどは区間がなく、一覧も空
+        let next = Laps.make(mine: mine, opponent: { _ in 0 }, minePoints: tenMinutes(mine), opponentPoints: { _ in 0 },
+                             dayStart: jst("2026-10-20T04:00"), now: jst("2026-10-20T04:00"))
+        #expect(Laps.listed(next, replayHead: nil).isEmpty)
     }
 
     // MARK: 大きさ（GHO-13）
