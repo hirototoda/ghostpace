@@ -4,8 +4,8 @@ import SwiftUI
 struct TimelineScreen: View {
     @Bindable var model: AppModel
     @State private var daysAgo = 0
-    /// 終了時刻を早めている記録
-    @State private var editing: FocusSession?
+    /// 出しているシート（終了時刻を早める・手動で記録・手動の記録を直す）
+    @State private var sheet: TimelineSheet?
     /// 保存したら読み直す（タイムラインは開くたびに記録から作る）
     @State private var version = 0
     var body: some View {
@@ -25,17 +25,11 @@ struct TimelineScreen: View {
                 ContentUnavailableView("記録を読めませんでした", systemImage: "exclamationmark.triangle")
             }
         }
-        .sheet(item: $editing) { session in
-            ShortenEndSheet(session: session,
-                            showsDate: model.crossesDate(from: session.startAt, to: session.endAt ?? session.startAt)) { newEnd in
-                if model.shortenEnd(session, to: newEnd) {
-                    editing = nil
-                    version += 1
-                }
-            }
-            .saveErrorAlert($model.errorMessage)
+        .sheet(item: $sheet, onDismiss: { version += 1 }) { sheet in
+            sheetContent(sheet)
+                .saveErrorAlert($model.errorMessage)
         }
-        .saveErrorAlert($model.errorMessage, when: editing == nil)
+        .saveErrorAlert($model.errorMessage, when: sheet == nil)
         .navigationTitle("タイムライン")
         .navigationBarTitleDisplayMode(.inline)
         .tint(Theme.focus)
@@ -89,7 +83,66 @@ struct TimelineScreen: View {
             Text("この日の計画と記録はありません。").font(.subheadline).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity).padding(.top, 40)
         } else {
-            TimelineCardsView(day: day) { editing = $0 }
+            TimelineCardsView(day: day) { session in
+                sheet = session.isDeclared ? .editManual(session) : .shorten(session)
+            }
+        }
+        // 今日と昨日の画面の一番下に「＋ 手動で記録」（TML-06）
+        if day.canAddManual {
+            Button {
+                sheet = .addManual(daysAgo: daysAgo)
+            } label: {
+                Label("手動で記録", systemImage: "plus").font(.headline).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .padding(.top, 8)
+            .accessibilityIdentifier("addManualButton")
+        }
+    }
+
+    @ViewBuilder
+    private func sheetContent(_ sheet: TimelineSheet) -> some View {
+        switch sheet {
+        case .shorten(let session):
+            ShortenEndSheet(session: session,
+                            showsDate: model.crossesDate(from: session.startAt, to: session.endAt ?? session.startAt)) { newEnd in
+                if model.shortenEnd(session, to: newEnd) { self.sheet = nil }
+            }
+        case .addManual(let daysAgo):
+            ManualRecordSheet(mode: .choose(.init(categories: model.categories, projects: model.projects,
+                                                  onCreateProject: { model.createProject(name: $0, category: $1) },
+                                                  onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) })),
+                              initial: model.manualInitial(daysAgo: daysAgo), range: model.manualRange(),
+                              problem: { model.manualProblem(start: $0, end: $1) }) { entry in
+                guard let category = entry.category else { return false }
+                return model.addManual(category: category, project: entry.project, start: entry.start, end: entry.end) == .saved
+            }
+        case .editManual(let session):
+            ManualRecordSheet(mode: .edit(session),
+                              initial: DateInterval(start: session.startAt, end: max(session.startAt, session.endAt ?? session.startAt)),
+                              range: model.manualRange(),
+                              problem: { model.manualProblem(start: $0, end: $1, editing: session.id) },
+                              onSave: { model.updateManual(session, start: $0.start, end: $0.end) == .saved },
+                              onDelete: { model.deleteManual(session) })
+        }
+    }
+}
+
+/// タイムラインから出すシート
+private enum TimelineSheet: Identifiable {
+    /// タイマーの記録の終了時刻を早める（TML-04）
+    case shorten(FocusSession)
+    /// 手動で記録（TML-06）。その日の画面から（今日は0、昨日は1）
+    case addManual(daysAgo: Int)
+    /// 手動の記録を直す・消す（TML-06）
+    case editManual(FocusSession)
+
+    var id: String {
+        switch self {
+        case .shorten(let session): "shorten-\(session.id)"
+        case .addManual(let daysAgo): "add-\(daysAgo)"
+        case .editManual(let session): "manual-\(session.id)"
         }
     }
 }
@@ -100,13 +153,14 @@ private func color(_ countsAsFocus: Bool) -> Color { countsAsFocus ? Theme.focus
 
 private let hm = Date.FormatStyle.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)
 
-/// 記録の説明（時刻・集中した時間・中断回数・実行中・申告・修正済み）
+/// 記録の説明（時刻・集中した時間・中断回数・実行中・手動・修正済み）
 func sessionCaption(_ s: FocusSession, now: Date) -> String {
     var parts = ["\(s.startAt.formatted(hm))–\(s.endAt.map { $0.formatted(hm) } ?? "")"]
     parts.append(DurationFormat.japanese(s.activeSeconds(at: now)))
     if s.pauseCount > 0 { parts.append("中断\(s.pauseCount)回") }
     if s.isRunning { parts.append("実行中") }
-    if s.isDeclared { parts.append("申告") }
+    // 手動の記録（TMR-13。2026-10-20 までの「申告」も同じ印なので「手動」と出す）
+    if s.isDeclared { parts.append(String(localized: "手動")) }
     if s.originalEndAt != nil { parts.append("修正済み") }
     return parts.joined(separator: "・")
 }
@@ -222,7 +276,7 @@ private struct TimelineCardsView: View {
         .background(RoundedRectangle(cornerRadius: 12).strokeBorder(tint.opacity(0.35)))
     }
 
-    /// 記録の行。今日と昨日の終わった記録だけタップで終了時刻を早められる（「›」付き）
+    /// 記録の行。今日と昨日の終わった記録だけタップで直せる（「›」付き）。タイマーの記録は終了時刻を早め、手動の記録は直す・消す
     @ViewBuilder
     private func sessionRow(_ session: FocusSession) -> some View {
         let caption = Text(sessionCaption(session, now: day.now)).font(.caption).foregroundStyle(.secondary)
@@ -236,8 +290,8 @@ private struct TimelineCardsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint("終了時刻を早めます")
-            .accessibilityIdentifier("sessionRow")
+            .accessibilityHint(session.isDeclared ? "手動の記録を直します" : "終了時刻を早めます")
+            .accessibilityIdentifier(session.isDeclared ? "manualSessionRow" : "sessionRow")
         } else {
             caption
         }

@@ -437,8 +437,8 @@ final class SwiftDataStore: RecordStore {
         }
     }
 
-    /// 押し忘れの申告（TMR-13）。終わった記録として、申告の印を付けて足す。できるかどうかは呼ぶ側で確かめる
-    func declare(_ request: DeclareRequest) throws -> FocusSession {
+    /// 手動の記録（TMR-13）。終わった記録として手動の印（isDeclared）を付けて足す。できるかどうかは呼ぶ側で確かめる
+    func addManual(_ request: ManualRecordRequest, adjustingPlannedEnd: (id: UUID, end: Date)?) throws -> FocusSession {
         try write {
             guard request.end > request.start else { throw SessionError.invalidEnd }
             let record = FocusSessionRecord(
@@ -450,7 +450,34 @@ final class SwiftDataStore: RecordStore {
             record.endAt = request.end
             record.isDeclared = true
             context.insert(record)
+            if let adjusting = adjustingPlannedEnd {
+                let running = try sessionRecord(id: adjusting.id)
+                guard running.endAt == nil else { throw RecordError.notFound }
+                running.plannedEndAt = adjusting.end
+                running.updatedAt = clock.now()
+            }
             return try value(record)
+        }
+    }
+
+    func updateManual(id: UUID, start: Date, end: Date) throws {
+        try write {
+            let record = try sessionRecord(id: id)
+            guard record.isDeclared == true else { throw RecordError.notManual }
+            guard end > start else { throw SessionError.invalidEnd }
+            let timeZone = TimeZone(identifier: record.timeZoneId) ?? .current
+            record.dayKey = DayBoundary.dayKey(containing: start, calendar: .app(timeZone: timeZone))
+            record.startAt = start
+            record.endAt = end
+            record.updatedAt = clock.now()
+        }
+    }
+
+    func deleteManual(id: UUID) throws {
+        try write {
+            let record = try sessionRecord(id: id)
+            guard record.isDeclared == true else { throw RecordError.notManual }
+            context.delete(record)
         }
     }
 

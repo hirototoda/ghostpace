@@ -23,8 +23,8 @@ struct BlockEditorSheet: View {
     var onEndNow: (() -> Void)?
     /// 保存できない理由（習慣の画面はほかのブロックの数も見る、PLN-08）。nil なら計画の決まり
     var problem: ((PlanBlockDraft) -> String?)?
-    /// 押し忘れの申告（TMR-13）。終わった朝の計画のブロックで記録がないときだけ渡す
-    var declaration: DeclarationOption?
+    /// 手動の記録（TMR-13）。終わったブロックの時刻に記録のない部分があるときだけ渡す
+    var manual: ManualOption?
     /// 終わったブロックを今から遅れて始める（TMR-15）。開始から1時間以内で記録がないときだけ渡す
     var onStartNow: (() -> Void)?
 
@@ -53,7 +53,7 @@ struct BlockEditorSheet: View {
                         .controlSize(.large)
                         .accessibilityIdentifier("startLateButton")
                     }
-                    if let declaration { DeclarationCard(block: original, option: declaration) }
+                    if let manual { ManualCard(block: original, option: manual) }
                     whatSection
                     timeSection
                     if isOngoingUnblock {
@@ -286,58 +286,56 @@ struct StepTimePicker: UIViewRepresentable {
     }
 }
 
-/// 押し忘れの申告（TMR-13）を出すときの値。
-struct DeclarationOption {
-    /// `end` まで申告できないときの理由
-    var problem: (Date) -> Declaration.Problem?
-    /// 申告する。できたら true（画面を閉じる）
-    var onDeclare: (Date) -> Bool
+/// 計画のタブの「やった（手動で記録）」（TMR-13）を出すときの値。
+struct ManualOption {
+    /// 初めの時刻：ブロックの時刻のうち記録のない一番長い部分
+    var initial: DateInterval
+    /// 選べる時刻（昨日の 4:00〜今）
+    var range: ClosedRange<Date>
+    /// 記録できない理由（開始, 終わり）
+    var problem: (Date, Date) -> ManualRecord.Problem?
+    /// 「手動で記録」の画面を出しているか（下の画面は、その間は知らせを出さない）
+    var isPresented: Binding<Bool>
+    /// 保存できなかったときの知らせ（「手動で記録」の画面の上に出す）
+    var errorMessage: Binding<String?>
+    /// 記録する。できたら true（編集の画面も閉じる）
+    var onRecord: (Date, Date) -> Bool
 }
 
-/// 編集の画面の上に出す「やった（申告）」。終わりは早めることだけできる（5分きざみ）
-struct DeclarationCard: View {
+/// 編集の画面の上に出す「やった（手動で記録）」。押すと「手動で記録」の画面（そのブロックのカテゴリ・ブロック名で）
+struct ManualCard: View {
     let block: PlanBlockDraft
-    let option: DeclarationOption
-    @State private var end: Date
-
-    init(block: PlanBlockDraft, option: DeclarationOption) {
-        self.block = block
-        self.option = option
-        _end = State(initialValue: block.end)
-    }
+    let option: ManualOption
 
     var body: some View {
-        let problem = option.problem(end)
         VStack(alignment: .leading, spacing: 10) {
-            Label("このブロックの記録がありません", systemImage: "questionmark.circle")
+            Label("記録のない時間があります", systemImage: "questionmark.circle")
                 .font(.subheadline.bold())
-            Text(block.category.countsAsFocus
-                 ? "タイマーを押し忘れたけれどやったときは、申告できます。集中した時間に入り、点は0.8倍です。"
-                 : "タイマーを押し忘れたけれどやったときは、申告できます。点は10分0.6pt です（タイマーは0.75pt）。")
+            Text("タイマーを押し忘れたけれどやったときは、手動で記録できます。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Text("終わり").font(.subheadline).foregroundStyle(.secondary)
-                Spacer()
-                StepTimePicker(date: $end, minuteInterval: PlanDraft.minuteStep)
-                    .accessibilityLabel("申告の終わり")
-                    .accessibilityIdentifier("declareEndPicker")
-            }
-            if let problem {
-                Label(problem.message, systemImage: "exclamationmark.circle")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
             Button {
-                _ = option.onDeclare(end)
+                option.isPresented.wrappedValue = true
             } label: {
-                Label("やった（申告）", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                Label("やった（手動で記録）", systemImage: "checkmark.circle.fill")
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(problem != nil)
-            .accessibilityIdentifier("declareButton")
+            .accessibilityIdentifier("manualRecordButton")
         }
+        // 大きな文字でもボタンが切れないよう上限を付ける（文字サイズ最大で「記録）」が切れていた）
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.focus.opacity(0.08)))
+        .sheet(isPresented: option.isPresented) {
+            ManualRecordSheet(mode: .block(title: block.title, category: block.category), initial: option.initial,
+                              range: option.range, problem: option.problem) { entry in
+                option.onRecord(entry.start, entry.end)
+            }
+            .saveErrorAlert(option.errorMessage)
+        }
     }
 }

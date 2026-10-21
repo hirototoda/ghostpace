@@ -830,7 +830,7 @@ enum SchemaV5: VersionedSchema {
         /// 終了時刻を早めたときの元の終了時刻（TMR-08）
         var originalEndAt: Date?
         var note: String?
-        /// 押し忘れの申告（TMR-13、第5版）。true なら申告した記録。nil・false はタイマーで計った記録
+        /// 手動の記録（TMR-13、第5版。2026-10-20 までは「押し忘れの申告」）。true なら手で入れた記録。nil・false はタイマーで計った記録
         var isDeclared: Bool?
 
         init(id: UUID = UUID(), dayKey: String, timeZoneId: String, planBlockId: UUID?, categoryId: UUID, countsAsFocus: Bool,
