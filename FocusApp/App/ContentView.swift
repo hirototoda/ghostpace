@@ -66,6 +66,8 @@ private struct MainView: View {
     @State private var holdProgress: Double
     /// 最初の説明の「続ける」のあとの選択画面（BLK-01）
     @State private var showsIntroPicker = false
+    /// タイマーの画面の「前の分を足す」で開いた区間（TMR-13）。nil なら「手動で記録」の画面を出していない
+    @State private var addingPrevious: DateInterval?
     @Environment(\.scenePhase) private var scenePhase
 
     init(model: AppModel, options: LaunchOptions) {
@@ -194,13 +196,28 @@ private struct MainView: View {
                                  onEnd: model.requestEnd, onSwitch: model.switchToBlock,
                                  ambient: AmbientControl(sound: model.ambientSound, volume: model.ambientVolume,
                                                          onSelect: { model.setAmbientSound($0) },
-                                                         onVolume: { model.setAmbientVolume($0) }))
+                                                         onVolume: { model.setAmbientVolume($0) }),
+                                 previousPart: model.previousPart,
+                                 onAddPrevious: { addingPrevious = model.previousPart })
                     .sheet(item: $model.endTimeCheck) { check in
                         EndTimeSheet(check: check) { model.end(reportedEnd: $0) }
                             .saveErrorAlert($model.errorMessage)
                     }
-                    .saveErrorAlert($model.errorMessage, when: model.endTimeCheck == nil)
-                    .holdUnlockCover(model: model, when: model.endTimeCheck == nil)
+                    .background {
+                        // 「前の分を足す」：「11:00〜11:20 を手動で記録（点は0.8倍）」。終わりは変えられず、開始は遅くだけできる
+                        Color.clear.sheet(isPresented: Binding(get: { addingPrevious != nil }, set: { if !$0 { addingPrevious = nil } })) {
+                            if let part = addingPrevious {
+                                ManualRecordSheet(mode: .previous(title: timer.title, category: timer.session.category),
+                                                  initial: part, range: part.start...part.end, calendar: model.calendar,
+                                                  problem: { model.manualProblem(start: $0, end: $1) }) { entry in
+                                    model.addPreviousPart(from: entry.start) == .saved
+                                }
+                                .saveErrorAlert($model.errorMessage)
+                            }
+                        }
+                    }
+                    .saveErrorAlert($model.errorMessage, when: model.endTimeCheck == nil && addingPrevious == nil)
+                    .holdUnlockCover(model: model, when: model.endTimeCheck == nil && addingPrevious == nil)
                     // 計画どおりの点（GHO-16）はタイマーの画面にも出す
                     .overlay(alignment: .top) { noticeBanner }
                     .sensoryFeedback(.impact(weight: .light), trigger: model.raceNoticeCount)
@@ -262,9 +279,7 @@ private struct MainView: View {
                  opponent: Binding(get: { model.opponent }, set: { model.selectOpponent($0) }),
                  onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) },
                  projects: model.projects,
-                 onCreateProject: { model.createProject(name: $0, category: $1) },
-                 lateStart: { model.lateStart(for: $0) },
-                 onStartFromBlockStart: { model.startPlanned(block: $0, fromBlockStart: true) })
+                 onCreateProject: { model.createProject(name: $0, category: $1) })
     }
 
     @ViewBuilder
@@ -284,8 +299,9 @@ private struct MainView: View {
                           candidates: { model.candidates(for: $0, dayStart: model.snapshot.dayStart, excludingEnded: true) },
                           habits: model.habits, habitsEditor: { AnyView(HabitsView(model: model)) },
                           awake: model.awakeRange(dayStart: model.snapshot.dayStart),
-                          declarationProblem: { model.declarationProblem(for: $0, end: $1) },
-                          onDeclare: { model.declare($0, end: $1) },
+                          manual: PlanManualActions(start: { model.manualStart(for: $0) }, range: { model.manualRange() },
+                                                    problem: { model.manualProblem(start: $0, end: $1) },
+                                                    record: { model.addManual(for: $0, start: $1, end: $2) == .saved }),
                           canStartLate: { model.canStartLate($0) },
                           onStartLate: { model.startLate($0) })
                 .id(model.snapshot.dayStart)

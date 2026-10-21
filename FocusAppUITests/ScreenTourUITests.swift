@@ -149,21 +149,55 @@ final class ScreenTourUITests: XCTestCase {
         }
     }
 
-    /// 押し忘れの申告（TMR-13）：計画のタブの申告の画面と、遅れて始めるときの聞き方
-    func testDeclaration() {
+    /// 手動の記録（TMR-13・TML-06）：計画のタブの「やった（手動で記録）」と画面、タイマーの画面の「前の分を足す」と画面、
+    /// タイムラインの「＋ 手動で記録」と画面・「手動」の行・「手動の記録を直す」
+    func testManualRecord() {
         var app = demo("day", "2026-10-19T15:20:00", ["-openPlan"])
         let zemi = app.buttons.matching(identifier: "gridBlock").matching(NSPredicate(format: "label BEGINSWITH %@", "ゼミ準備 ")).firstMatch
         XCTAssertTrue(zemi.waitForExistence(timeout: timeout))
         zemi.tap()
-        XCTAssertTrue(app.buttons["declareButton"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["manualRecordButton"].waitForExistence(timeout: timeout))
         Thread.sleep(forTimeInterval: 1)
-        shoot("declare-sheet")
+        shoot("manual-plan-card")
+        app.buttons["manualRecordButton"].tap()
+        XCTAssertTrue(app.buttons["manualSaveButton"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("manual-plan-sheet")
         app.terminate()
+
         app = demo("day", "2026-10-19T11:20:00")
         app.buttons["startButton"].tap()
-        XCTAssertTrue(app.buttons["今から始める"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.buttons["addPreviousButton"].waitForExistence(timeout: timeout))
         Thread.sleep(forTimeInterval: 1)
-        shoot("late-start-dialog")
+        shoot("manual-timer-previous")
+        app.buttons["addPreviousButton"].tap()
+        XCTAssertTrue(app.buttons["manualSaveButton"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("manual-previous-sheet")
+        app.terminate()
+
+        app = demo("day", "2026-10-19T15:20:00", ["-openTimeline"])
+        let add = app.buttons["addManualButton"]
+        XCTAssertTrue(add.waitForExistence(timeout: timeout))
+        for _ in 0..<15 where !(add.isHittable && add.frame.maxY < app.frame.maxY - 120) { app.swipeUp() }
+        Thread.sleep(forTimeInterval: 1)
+        shoot("manual-timeline-button")
+        app.buttons["previousDayButton"].tap()
+        for _ in 0..<15 where !(add.exists && add.isHittable) { app.swipeUp() }
+        add.tap()
+        XCTAssertTrue(app.buttons["manualSaveButton"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("manual-timeline-sheet")
+        app.buttons["manualSaveButton"].tap()
+        let row = app.buttons["manualSessionRow"]
+        for _ in 0..<15 where !(row.exists && row.isHittable) { app.swipeUp() }
+        XCTAssertTrue(row.waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("manual-timeline-row")
+        row.tap()
+        XCTAssertTrue(app.buttons["manualDeleteButton"].waitForExistence(timeout: timeout))
+        Thread.sleep(forTimeInterval: 1)
+        shoot("manual-edit-sheet")
     }
 
     /// 時間の格子（PLN-10）：計画のタブ（今の線、終わったブロックは薄い）と、長押しで動かしている途中

@@ -14,6 +14,10 @@ struct TimerRunningView: View {
     var onSwitch: ((PlanBlockSummary) -> Void)?
     /// 環境音（TMR-14）。nil なら「♪」を出さない
     var ambient: AmbientControl?
+    /// 「11:00 から始めていた？［前の分を足す］」の区間（TMR-13）。nil なら出さない
+    var previousPart: DateInterval?
+    /// ［前の分を足す］を押したとき（「手動で記録」の画面を出す）
+    var onAddPrevious: (() -> Void)?
     @Environment(\.clock) private var clock
     @State private var showsAmbient = false
 
@@ -34,6 +38,7 @@ struct TimerRunningView: View {
                     switchCard(block, onSwitch)
                 }
                 buttons
+                if let previousPart, let onAddPrevious { previousLine(previousPart, onAddPrevious) }
             }
             .padding(20)
             .overlay(alignment: .topTrailing) {
@@ -140,6 +145,28 @@ struct TimerRunningView: View {
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 16).fill(color.opacity(0.1)))
+    }
+
+    /// ブロックの開始から5分以上たって始めたとき、下に小さく「11:00 から始めていた？［前の分を足す］」（TMR-13）。
+    /// 入りきらない大きな文字では、ボタンを下に回す
+    private func previousLine(_ part: DateInterval, _ onAdd: @escaping () -> Void) -> some View {
+        let start = part.start.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute(.twoDigits))
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { previousContent(start, onAdd) }
+            VStack(spacing: 8) { previousContent(start, onAdd) }
+        }
+    }
+
+    @ViewBuilder
+    private func previousContent(_ start: String, _ onAdd: @escaping () -> Void) -> some View {
+        Text("\(start) から始めていた？")
+            .font(.subheadline).foregroundStyle(.secondary)
+            .accessibilityIdentifier("previousPartLabel")
+        Button("前の分を足す", action: onAdd)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .font(.subheadline.bold())
+            .accessibilityIdentifier("addPreviousButton")
     }
 
     private var buttons: some View {

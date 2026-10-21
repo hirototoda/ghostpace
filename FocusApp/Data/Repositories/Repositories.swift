@@ -16,6 +16,8 @@ enum RecordError: Error, Equatable {
     case lastCategory
     /// テンプレートは最大7つ（PLN-07）
     case tooManyTemplates
+    /// 手動の記録（TMR-13）ではない（タイマーの記録は手動として直す・消すことはできない）
+    case notManual
 }
 
 /// タイマーを始めるときの値。
@@ -29,15 +31,16 @@ struct StartRequest {
     var timeZone: TimeZone
 }
 
-/// 押し忘れの申告（TMR-13）の値。
-struct DeclareRequest {
+/// 手動の記録（TMR-13）の値。計画外なら planBlockId は nil。
+struct ManualRecordRequest {
     var category: CategoryOption
     var project: ProjectOption?
-    var planBlockId: UUID
+    var planBlockId: UUID?
     var start: Date
     var end: Date
-    /// ブロックの終わり（タイムラインでブロックの記録として出すため）
-    var plannedEndAt: Date
+    /// ブロックの記録なら、ブロックの終わり（それまでの申告と同じ）。計画外は nil
+    var plannedEndAt: Date?
+    /// 始めた日（dayKey）を決めるタイムゾーン。保存もする
     var timeZone: TimeZone
 }
 
@@ -119,8 +122,19 @@ protocol SessionRepository {
     var revision: Int { get }
     /// 終わった記録の終了時刻を早める（TMR-08）。直せる日かどうかは呼ぶ側で確かめる
     func shortenEnd(id: UUID, to newEnd: Date) throws
-    /// 押し忘れの申告（TMR-13）。申告の印を付けた終わった記録を足す
-    func declare(_ request: DeclareRequest) throws -> FocusSession
+    /// 手動の記録（TMR-13）を足す：手動の印を付けた終わった記録。できるかどうかは呼ぶ側で確かめる。
+    /// `adjustingPlannedEnd` があれば、同じ保存で実行中のタイマーの終わりも変える（タイマーの画面の「前の分を足す」）
+    func addManual(_ request: ManualRecordRequest, adjustingPlannedEnd: (id: UUID, end: Date)?) throws -> FocusSession
+    /// 手動の記録の開始・終わりを変える。始めた日は開始で決め直す。手動の記録でなければ notManual
+    func updateManual(id: UUID, start: Date, end: Date) throws
+    /// 手動の記録を消す（手で入れた記録なので、印を付けて残さず実際に削除する）。手動の記録でなければ notManual
+    func deleteManual(id: UUID) throws
+}
+
+extension SessionRepository {
+    func addManual(_ request: ManualRecordRequest) throws -> FocusSession {
+        try addManual(request, adjustingPlannedEnd: nil)
+    }
 }
 
 /// 睡眠の記録（DTX-02、保存データ第3版）。

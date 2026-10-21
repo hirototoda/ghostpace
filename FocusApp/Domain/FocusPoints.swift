@@ -35,17 +35,17 @@ enum FocusPoints {
         var end: Date
         var rate: Double = 1
         var continuous = true
-        /// 点の重み。押し忘れの申告（TMR-13）は0.8
+        /// 点の重み。手動の記録（TMR-13）は0.8
         var weight: Double = 1
     }
 
-    /// 押し忘れの申告の倍率（TMR-13）
-    static let declaredFactor = 0.8
+    /// 手動の記録の倍率（TMR-13）
+    static let manualFactor = 0.8
 
     /// 記録の区間の `until` までの集中のポイント（デトックスのカテゴリの区間は数えない）。
     /// `opened` は開けていた時間（DTX-05）。その間は点を付けない
     static func points(_ segments: [TimeSegment], until date: Date, opened: [DateInterval] = []) -> Double {
-        points(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? declaredFactor : 1) },
+        points(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? manualFactor : 1) },
                until: date, opened: opened)
     }
 
@@ -67,7 +67,7 @@ enum FocusPoints {
         var rate: Double = 1
         /// 1回の長さの倍率（もとの日のまま）
         var runFactor: Double = 1
-        /// 点の重み（申告は0.8）
+        /// 点の重み（手動の記録は0.8）
         var weight: Double = 1
         /// 開けていた時間。0点だが1日の合計は進む
         var opened = false
@@ -93,7 +93,7 @@ enum FocusPoints {
 
     /// 記録の区間の `until` までの集中の一切れ（デトックスのカテゴリの区間は入れない）。時刻の順
     static func pieces(_ segments: [TimeSegment], until date: Date, opened: [DateInterval] = []) -> [Piece] {
-        pieces(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? declaredFactor : 1) },
+        pieces(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? manualFactor : 1) },
                until: date, opened: opened)
     }
 
