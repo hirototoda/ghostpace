@@ -35,6 +35,20 @@ struct DetoxDayTests {
         #expect(d.isComplete)
     }
 
+    /// 区切り 22:00 の例の日（前の夜 22:00〜22:00、睡眠は 0:00〜7:00 の一晩分だけ）でもデトックス 21時間（1b-72、2026-10-21）
+    @Test func exampleDayWithTheEveningBoundaryIsTwentyOneHours() {
+        let d = DetoxDay.make(.init(
+            dayStart: jst("2026-10-18T22:00"), dayEnd: jst("2026-10-19T22:00"), until: jst("2026-10-19T22:00"),
+            events: [event(.started, "2026-10-01T09:00"), event(.unlocked, "2026-10-19T10:00", minutes: 15),
+                     event(.reblocked, "2026-10-19T10:15"), event(.unblockStarted, "2026-10-19T20:00"),
+                     event(.unblockEnded, "2026-10-19T20:30")],
+            focus: [interval("2026-10-19T09:00", "2026-10-19T12:00")],
+            detoxTimers: [DetoxTimer(interval: interval("2026-10-19T17:00", "2026-10-19T17:30"), group: .rest)],
+            sleep: [interval("2026-10-19T00:00", "2026-10-19T07:00")],
+            gameWindows: [interval("2026-10-19T20:00", "2026-10-19T20:30")]))
+        #expect(d.detoxSeconds(until: jst("2026-10-19T22:00")) == 21 * 3600)
+    }
+
     /// ポイントの例：起きてから3時間、開けずにブロック中 → 9.0pt（2026-10-03 から続けたボーナスなし、ADR-0019）
     @Test func threeHoursBlockedIsNinePoints() {
         let d = day(until: jst("2026-10-19T07:00"))

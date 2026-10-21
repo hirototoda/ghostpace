@@ -266,6 +266,23 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["reviewButton"].waitForExistence(timeout: timeout))
     }
 
+    /// 区切り（22:00）の直後は新しい日：前の夜に入れた予定がホームの「次」に出て、朝の計画は出ない。
+    /// 朝4:00以降に開くと朝の計画が出て、格子は起きた時刻から（前の夜の分は格子に出さない）（PLN-01・PLN-11・GHO-17、1b-71・1b-73・1b-74）
+    func testPreviousNightPlanAndMorningPlanFromFour() {
+        var app = launch(["-seedDemoData", "night", "-fixedNow", "2026-10-19T22:05:00+09:00"])
+        let line = app.descendants(matching: .any)["planLine"].firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: timeout))
+        XCTAssertTrue(line.label.contains("読書"), line.label)
+        XCTAssertTrue(app.buttons["reviewButton"].exists)
+        XCTAssertFalse(app.buttons["confirmPlanButton"].exists)
+        app.terminate()
+
+        app = launch(["-seedDemoData", "night", "-fixedNow", "2026-10-20T07:10:00+09:00"])
+        XCTAssertTrue(app.buttons["confirmPlanButton"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "英語").waitForExistence(timeout: timeout))
+        XCTAssertFalse(planBlock(app, "読書").exists)
+    }
+
     /// デトックスのカテゴリを作るときにグループを一覧から選べ、設定の一覧の右に出る（CAT-04、DTX-03、BD-26）
     func testAddDetoxCategoryWithGroup() {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00"])

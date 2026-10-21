@@ -1500,11 +1500,13 @@ final class AppModel {
 
     /// 日中の計画の変更（PLN-04）。朝のスナップショットは変わらない。
     @discardableResult
-    /// 区切りから朝の計画を確定するまでは下書きを直す（すぐ保存、PLN-11・Q47）
+    /// 区切りから朝の計画を確定するまでは下書きを直す（すぐ保存、PLN-11・Q47）。まだ下書きもなければ下書きを作る
     func savePlanChanges(_ draft: PlanDraft) -> Bool {
         let dayKey = boundary.dayKey(containing: clock.now())
         let saved = perform {
-            if try store.plan(dayKey: dayKey)?.status == .draft {
+            let status = try store.plan(dayKey: dayKey)?.status
+            // まだ計画がない夜（区切り〜朝の計画）に計画のタブで足したときも下書きとして保存する
+            if status == nil || status == .draft {
                 try store.saveDraft(draft, dayKey: dayKey, timeZone: timeZone())
             } else {
                 try store.saveChanges(draft, dayKey: dayKey)

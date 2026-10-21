@@ -264,6 +264,20 @@ struct DayBoundaryModelTests {
         #expect(m.timelineDay(daysAgo: 0)?.planBlocks.count == 1)
     }
 
+    /// 区切りの後（朝の計画の前）に計画のタブでブロックを足すと、今日の下書きとして保存する（PLN-11）
+    @Test func planTabAtNightSavesADraft() throws {
+        let t = try TestStore(now: jst("2026-10-20T09:00"))
+        let m = model(t)
+        m.skipPlan()
+        t.clock.set(jst("2026-10-20T22:10"))
+        m.reload()
+        #expect(m.plan == PlanDraft())
+        #expect(m.savePlanChanges(PlanDraft(blocks: [block("2026-10-20T22:30", 30, m.categories[0])])))
+        #expect(m.errorMessage == nil)
+        #expect(try t.store.plan(dayKey: "2026-10-21")?.status == .draft)
+        #expect(m.snapshot.nextBlock?.start == jst("2026-10-20T22:30"))
+    }
+
     /// 下書きがない日は、区切りより後に最初に読み直したときに習慣で作る。区切りより前から次の日の前の夜の分を登録しておく
     @Test func habitDraftIsMadeAfterTheBoundary() throws {
         let t = try TestStore(now: jst("2026-10-20T09:00"))
