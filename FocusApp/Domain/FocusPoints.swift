@@ -40,12 +40,12 @@ enum FocusPoints {
     }
 
     /// 手動の記録の倍率（TMR-13）
-    static let declaredFactor = 0.8
+    static let manualFactor = 0.8
 
     /// 記録の区間の `until` までの集中のポイント（デトックスのカテゴリの区間は数えない）。
     /// `opened` は開けていた時間（DTX-05）。その間は点を付けない
     static func points(_ segments: [TimeSegment], until date: Date, opened: [DateInterval] = []) -> Double {
-        points(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? declaredFactor : 1) },
+        points(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? manualFactor : 1) },
                until: date, opened: opened)
     }
 
@@ -93,7 +93,7 @@ enum FocusPoints {
 
     /// 記録の区間の `until` までの集中の一切れ（デトックスのカテゴリの区間は入れない）。時刻の順
     static func pieces(_ segments: [TimeSegment], until date: Date, opened: [DateInterval] = []) -> [Piece] {
-        pieces(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? declaredFactor : 1) },
+        pieces(segments.filter(\.countsAsFocus).map { Flow(start: $0.start, end: $0.end, weight: $0.isDeclared ? manualFactor : 1) },
                until: date, opened: opened)
     }
 

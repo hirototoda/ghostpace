@@ -208,7 +208,7 @@ private struct MainView: View {
                         Color.clear.sheet(isPresented: Binding(get: { addingPrevious != nil }, set: { if !$0 { addingPrevious = nil } })) {
                             if let part = addingPrevious {
                                 ManualRecordSheet(mode: .previous(title: timer.title, category: timer.session.category),
-                                                  initial: part, range: part.start...part.end,
+                                                  initial: part, range: part.start...part.end, calendar: model.calendar,
                                                   problem: { model.manualProblem(start: $0, end: $1) }) { entry in
                                     model.addPreviousPart(from: entry.start) == .saved
                                 }

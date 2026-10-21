@@ -123,6 +123,20 @@ struct ManualRecordTests {
         #expect(ManualRecord.Problem.overlapsSleep.message == "寝ていた時間と重なっています（睡眠の時刻を直すと記録できます）")
     }
 
+    /// 睡眠の端が触れるだけならよい（起きた時刻から・寝る時刻まで）
+    @Test func sleepEdgeTouchingIsAllowed() {
+        let tonight = DateInterval(start: at("23:30", day: "2026-10-18"), end: at("06:30"))
+        let c = context(sleep: [tonight])
+        #expect(check("22:30", "23:30", day: "2026-10-18", c) == nil)
+        #expect(check("06:30", "07:30", c) == nil)
+        #expect(check("22:30", "23:31", day: "2026-10-18", c) == .overlapsSleep)
+    }
+
+    /// 睡眠の区間がなければ（材料が空）、睡眠では断らない
+    @Test func noSleepRecordedIsAllowed() {
+        #expect(check("06:30", "07:30", context(sleep: [])) == nil)
+    }
+
     // MARK: 計画のタブ：記録のない一番長い部分
 
     @Test func longestUnrecordedPartOfABlock() {
@@ -619,6 +633,144 @@ struct ManualRecordModelTests {
         #expect(m.errorMessage == AppModel.cannotEditMessage)
         #expect(!m.deleteManual(today))
         #expect(try sessions(t, "2026-10-19").count == 1)
+    }
+
+    /// ブロックを 10-01 から始めている本体と、あとから開けた記録を足せるブロックの記録
+    private func modelWithLog(_ t: TestStore) throws -> (AppModel, MemoryBlockEventLog) {
+        let log = MemoryBlockEventLog()
+        try log.append(BlockEvent(occurredAt: jst("2026-10-01T04:00"), timeZoneId: "Asia/Tokyo", kind: .started))
+        let settings = MemorySettings()
+        settings.didShowBlockingIntro = true
+        settings.didLogBlockStart = true
+        settings.lastBlockingAuthorized = true
+        let blockStore = MemoryBlockStore()
+        blockStore.state = BlockState(isEnabled: true)
+        blockStore.selection = Data("sel".utf8)
+        return (AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings,
+                         blocking: FakeBlocking(), blockStore: blockStore, blockLog: log), log)
+    }
+
+    private func unlock(_ log: MemoryBlockEventLog, _ from: String, _ to: String) throws {
+        try log.append(BlockEvent(occurredAt: jst("2026-10-19T\(from)"), timeZoneId: "Asia/Tokyo", kind: .unlocked))
+        try log.append(BlockEvent(occurredAt: jst("2026-10-19T\(to)"), timeZoneId: "Asia/Tokyo", kind: .reblocked))
+    }
+
+    /// 足したあとの終わり（足した開始＋ブロックの長さ）が今より前になるときは、タイマーの終わりを動かさず記録だけ足す
+    @Test func previousPartKeepsTheEndWhenItWouldBeInThePast() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let m = try raceModelWithBlocking(t)
+        m.confirmPlan(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T11:00"), minutes: 30, category: c[0])]))
+        t.clock.set(jst("2026-10-19T11:20"))
+        m.reload()
+        m.startPlanned(block: try #require(m.snapshot.currentBlock))
+        #expect(m.running?.session.plannedEndAt == jst("2026-10-19T11:50"))
+        t.clock.set(jst("2026-10-19T11:35"))
+        m.reload()
+        #expect(m.previousPart == DateInterval(start: jst("2026-10-19T11:00"), end: jst("2026-10-19T11:20")))
+        #expect(m.addPreviousPart(from: jst("2026-10-19T11:00")) == .saved)
+        #expect(try sessions(t).first?.isDeclared == true)
+        // 11:00＋30分＝11:30 は今（11:35）より前なので、終わりは 11:50 のまま
+        #expect(m.running?.session.plannedEndAt == jst("2026-10-19T11:50"))
+    }
+
+    /// 昨日の画面の初めの時刻は、昨日の 4:00〜今日の 4:00 の中の最後の記録の終わりから（4:00 をまたぐ記録は今日の 4:00 で切る）
+    @Test func yesterdayInitialClipsRecordsAtFourAm() throws {
+        let t = try TestStore(now: jst("2026-10-19T12:00"))
+        let c = try t.seeded()
+        let m = try raceModelWithBlocking(t)
+        // 今朝の睡眠を 5:00〜7:00 に直す（夜中は起きていた）
+        #expect(m.setSleepManually(start: jst("2026-10-19T05:00"), end: jst("2026-10-19T07:00")))
+        #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-18T23:00"), end: jst("2026-10-19T04:30")) == .saved)
+        // 今日の記録（4:30 まで）は昨日の最後の記録ではない
+        #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-19T08:00"), end: jst("2026-10-19T09:00")) == .saved)
+        #expect(m.manualInitial(daysAgo: 1) == DateInterval(start: jst("2026-10-19T04:00"), end: jst("2026-10-19T04:30")))
+    }
+
+    /// 手動の記録を直す画面の選べる時刻は、秒つきの終わり（前の分を足した記録）も入る
+    @Test func editRangeIncludesTheRecordEnd() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let m = try confirmedPlan(t, c)
+        t.clock.set(jst("2026-10-19T11:20:40"))
+        m.reload()
+        m.startPlanned(block: try #require(m.snapshot.currentBlock))
+        #expect(m.addPreviousPart(from: jst("2026-10-19T11:00")) == .saved)
+        let manual = try #require(try sessions(t).first { $0.isDeclared })
+        #expect(manual.endAt == jst("2026-10-19T11:20:40"))
+        // 今（11:20:40）を分に切り捨てると 11:20 だが、記録の終わりまでは選べる
+        let range = m.manualEditRange(for: manual)
+        let end = try #require(manual.endAt)
+        #expect(range.contains(manual.startAt) && range.contains(end))
+        #expect(range.upperBound == jst("2026-10-19T11:20:40"))
+        #expect(m.manualEditRange(for: manual).lowerBound == jst("2026-10-18T04:00"))
+    }
+
+    @Test func editingIntoSleepOrOpenedTimeIsRefused() throws {
+        let t = try TestStore(now: jst("2026-10-19T12:00"))
+        let c = try t.seeded()
+        let (m, log) = try modelWithLog(t)
+        #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-19T09:00"), end: jst("2026-10-19T10:00")) == .saved)
+        let record = try #require(try sessions(t).first)
+        // 睡眠（0:00〜7:00）にかかる
+        #expect(m.updateManual(record, start: jst("2026-10-19T06:30"), end: jst("2026-10-19T10:00")) == .refused(.overlapsSleep))
+        // 開けていた時間にかかる
+        try unlock(log, "10:20", "10:30")
+        #expect(m.updateManual(record, start: jst("2026-10-19T09:00"), end: jst("2026-10-19T10:40")) == .refused(.opened))
+        let kept = try #require(try sessions(t).first)
+        #expect(kept.startAt == jst("2026-10-19T09:00") && kept.endAt == jst("2026-10-19T10:00"))
+        // 開けた時間に触れるだけならよい
+        #expect(m.updateManual(record, start: jst("2026-10-19T09:00"), end: jst("2026-10-19T10:20")) == .saved)
+    }
+
+    @Test func deletingManualRecordRemovesItsPoints() throws {
+        let t = try TestStore(now: jst("2026-10-19T12:00"))
+        let c = try t.seeded()
+        let m = try raceModelWithBlocking(t)
+        let before = m.snapshot.points
+        #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-19T09:00"), end: jst("2026-10-19T10:00")) == .saved)
+        // 集中の0.8倍（4.8pt）が、ブロック中の点（10分0.5pt＝3pt）の代わりに付く
+        #expect(abs(m.snapshot.points - before - 1.8) < 0.0001)
+        #expect(m.deleteManual(try #require(try sessions(t).first)))
+        #expect(abs(m.snapshot.points - before) < 0.0001)
+        #expect(m.snapshot.focusSeconds == 0)
+    }
+
+    @Test func addPreviousPartRefusedWhenOverlapsRecordOrOpened() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let (m, log) = try modelWithLog(t)
+        m.confirmPlan(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T11:00"), minutes: 120, category: c[0])]))
+        t.clock.set(jst("2026-10-19T11:20"))
+        m.reload()
+        m.startPlanned(block: try #require(m.snapshot.currentBlock))
+        #expect(m.previousPart != nil)
+        // 「前の分を足す」の画面を開いている間に、その時間に開けていた記録が届いた
+        try unlock(log, "11:05", "11:08")
+        #expect(m.addPreviousPart(from: jst("2026-10-19T11:00")) == .refused(.opened))
+        #expect(m.errorMessage == ManualRecord.Problem.opened.message)
+        #expect(m.running?.session.plannedEndAt == jst("2026-10-19T13:20"))
+        #expect(m.addPreviousPart(from: jst("2026-10-19T11:10")) == .saved)
+        // 足した記録と重なる
+        #expect(m.addPreviousPart(from: jst("2026-10-19T11:15")) == .refused(.overlapsRecord))
+        #expect(try sessions(t).filter(\.isDeclared).count == 1)
+        #expect(m.running?.session.plannedEndAt == jst("2026-10-19T13:10"))
+    }
+
+    @Test func previousPartAppearsWhilePaused() throws {
+        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let c = try t.seeded()
+        let m = try confirmedPlan(t, c)
+        t.clock.set(jst("2026-10-19T11:20"))
+        m.reload()
+        m.startPlanned(block: try #require(m.snapshot.currentBlock))
+        t.clock.set(jst("2026-10-19T11:30"))
+        m.pause()
+        #expect(m.running?.session.isPaused == true)
+        // 一時停止のまま1分ごとの読み直しがあっても出し続ける
+        t.clock.set(jst("2026-10-19T11:45"))
+        m.reload(quietly: true)
+        #expect(m.previousPart == DateInterval(start: jst("2026-10-19T11:00"), end: jst("2026-10-19T11:20")))
     }
 
     /// 第4版の記録が第5版で読め、手動の印は空（タイマーの記録）

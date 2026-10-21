@@ -113,7 +113,7 @@ struct TimelineScreen: View {
             ManualRecordSheet(mode: .choose(.init(categories: model.categories, projects: model.projects,
                                                   onCreateProject: { model.createProject(name: $0, category: $1) },
                                                   onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) })),
-                              initial: model.manualInitial(daysAgo: daysAgo), range: model.manualRange(),
+                              initial: model.manualInitial(daysAgo: daysAgo), range: model.manualRange(), calendar: model.calendar,
                               problem: { model.manualProblem(start: $0, end: $1) }) { entry in
                 guard let category = entry.category else { return false }
                 return model.addManual(category: category, project: entry.project, start: entry.start, end: entry.end) == .saved
@@ -121,7 +121,7 @@ struct TimelineScreen: View {
         case .editManual(let session):
             ManualRecordSheet(mode: .edit(session),
                               initial: DateInterval(start: session.startAt, end: max(session.startAt, session.endAt ?? session.startAt)),
-                              range: model.manualRange(),
+                              range: model.manualEditRange(for: session), calendar: model.calendar,
                               problem: { model.manualProblem(start: $0, end: $1, editing: session.id) },
                               onSave: { model.updateManual(session, start: $0.start, end: $0.end) == .saved },
                               onDelete: { model.deleteManual(session) })
@@ -290,7 +290,7 @@ private struct TimelineCardsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(session.isDeclared ? "手動の記録を直します" : "終了時刻を早めます")
+            .accessibilityHint(session.isDeclared ? Text("手動の記録を直します") : Text("終了時刻を早めます"))
             .accessibilityIdentifier(session.isDeclared ? "manualSessionRow" : "sessionRow")
         } else {
             caption

@@ -292,6 +292,7 @@ struct ManualOption {
     var initial: DateInterval
     /// 選べる時刻（昨日の 4:00〜今）
     var range: ClosedRange<Date>
+    var calendar: Calendar
     /// 記録できない理由（開始, 終わり）
     var problem: (Date, Date) -> ManualRecord.Problem?
     /// 「手動で記録」の画面を出しているか（下の画面は、その間は知らせを出さない）
@@ -332,7 +333,7 @@ struct ManualCard: View {
         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.focus.opacity(0.08)))
         .sheet(isPresented: option.isPresented) {
             ManualRecordSheet(mode: .block(title: block.title, category: block.category), initial: option.initial,
-                              range: option.range, problem: option.problem) { entry in
+                              range: option.range, calendar: option.calendar, problem: option.problem) { entry in
                 option.onRecord(entry.start, entry.end)
             }
             .saveErrorAlert(option.errorMessage)

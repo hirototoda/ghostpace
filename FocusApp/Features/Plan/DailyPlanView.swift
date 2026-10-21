@@ -264,7 +264,7 @@ struct DailyPlanView: View {
     /// 記録できない時刻（開けていた・重なるなど）なら、「手動で記録」の画面で理由を出す
     private func manualOption(for block: PlanBlockDraft) -> ManualOption? {
         guard mode == .tab, let manual, let initial = manual.start(block) else { return nil }
-        return ManualOption(initial: initial, range: manual.range(), problem: manual.problem,
+        return ManualOption(initial: initial, range: manual.range(), calendar: calendar, problem: manual.problem,
                             isPresented: $showsManual, errorMessage: $errorMessage) { start, end in
             guard manual.record(block, start, end) else { return false }
             showsManual = false

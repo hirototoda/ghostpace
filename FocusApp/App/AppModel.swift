@@ -1071,16 +1071,25 @@ final class AppModel {
         return yesterday...max(yesterday, ManualRecord.floorToMinute(clock.now()))
     }
 
+    /// 「手動の記録を直す」で選べる時刻：昨日の 4:00〜今（分に切り捨て）。前の分を足した記録の終わりは秒つきなので、
+    /// それより前に切り捨てないよう、記録の終わりまでは選べるようにする
+    func manualEditRange(for session: FocusSession) -> ClosedRange<Date> {
+        let range = manualRange()
+        return range.lowerBound...max(range.upperBound, session.endAt ?? range.upperBound)
+    }
+
     /// タイムラインの「＋ 手動で記録」の初めの時刻。今日は今の30分前〜今、
-    /// 昨日は昨日の最後の記録の終わりから30分（記録がなければ起きた時刻から30分）
+    /// 昨日は昨日の 4:00〜今日の 4:00 の中の最後の記録の終わりから30分（4:00 をまたぐ記録は今日の 4:00 で切る。
+    /// 記録がなければ起きた時刻から30分）
     func manualInitial(daysAgo: Int) -> DateInterval {
         let now = ManualRecord.floorToMinute(clock.now())
         let length: TimeInterval = 30 * 60
         guard daysAgo == 1 else { return DateInterval(start: now.addingTimeInterval(-length), end: now) }
         let calendar = self.calendar
         let yesterday = yesterdayStart(now: now)
-        let lastEnd = (try? store.sessions(dayKey: DayBoundary.dayKey(containing: yesterday, calendar: calendar)))?
-            .compactMap(\.endAt).max()
+        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
+        let lastEnd = (try? manualContext())?.sessions.filter { $0.startAt < today }.compactMap(\.endAt)
+            .map { min($0, today) }.filter { $0 > yesterday }.max()
         let wake = (try? sleepLine(dayStart: yesterday, calendar: calendar))?.end
         let start = min(ManualRecord.ceilToMinute(max(lastEnd ?? wake ?? yesterday, yesterday)), now)
         return DateInterval(start: start, end: min(start.addingTimeInterval(length), now))
@@ -1125,9 +1134,11 @@ final class AppModel {
         }
         guard start >= block.start else { return refuse(.outOfRange) }
         let length = TimeInterval(session.plannedDurationSec ?? Int(block.end.timeIntervalSince(block.start)))
+        let newEnd = start.addingTimeInterval(length)
+        // 戻した終わりが今以下になるときは、タイマーの終わりを動かさず記録だけ足す（すぐ超過にしない。Claude 補足、Q45）
         return saveManual(ManualRecordRequest(category: session.category, project: session.project, planBlockId: blockId,
                                               start: start, end: session.startAt, plannedEndAt: block.end, timeZone: timeZone()),
-                          adjusting: (session.id, start.addingTimeInterval(length)))
+                          adjusting: newEnd > clock.now() ? (session.id, newEnd) : nil)
     }
 
     /// タイムラインの「手動の記録を直す」：開始・終わりを変える（今日と昨日の記録だけ）

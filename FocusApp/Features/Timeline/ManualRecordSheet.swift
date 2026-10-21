@@ -34,6 +34,8 @@ struct ManualRecordSheet: View {
     let mode: Mode
     /// 選べる時刻（前の分を足すときは、ブロックの開始〜タイマーを始めた時刻）
     let range: ClosedRange<Date>
+    /// 日付が変わるかを決める暦（アプリのタイムゾーン）
+    let calendar: Calendar
     /// 記録できない理由（開始, 終わり）。できるなら nil
     let problem: (Date, Date) -> ManualRecord.Problem?
     /// 保存する。できたら true（画面を閉じる）。できなければ呼ぶ側が理由・「保存できませんでした」を出す
@@ -49,10 +51,11 @@ struct ManualRecordSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(mode: Mode, initial: DateInterval, range: ClosedRange<Date>, problem: @escaping (Date, Date) -> ManualRecord.Problem?,
+    init(mode: Mode, initial: DateInterval, range: ClosedRange<Date>, calendar: Calendar, problem: @escaping (Date, Date) -> ManualRecord.Problem?,
          onSave: @escaping (Entry) -> Bool, onDelete: (() -> Bool)? = nil) {
         self.mode = mode
         self.range = range
+        self.calendar = calendar
         self.problem = problem
         self.onSave = onSave
         self.onDelete = onDelete
@@ -200,7 +203,7 @@ struct ManualRecordSheet: View {
 
     /// 今日と昨日のどちらの時刻か分かるよう日付も出す（前の分を足すときは日付が変わる場合だけ）
     private var components: DatePickerComponents {
-        if isPrevious, Calendar.current.isDate(range.lowerBound, inSameDayAs: range.upperBound) { return .hourAndMinute }
+        if isPrevious, calendar.isDate(range.lowerBound, inSameDayAs: range.upperBound) { return .hourAndMinute }
         return [.date, .hourAndMinute]
     }
 

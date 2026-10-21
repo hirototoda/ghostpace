@@ -100,7 +100,7 @@ struct DetoxDay: Hashable {
                     let boosted = min(seconds, max(0, group.dailyCap - used[group, default: 0]))
                     used[group, default: 0] += boosted
                     // 手動の記録の分は0.8倍。ブロック中の0.5pt より下げない（TMR-13）
-                    let rate = piece.isDeclared ? max(Self.timerPerSecond * FocusPoints.declaredFactor, Self.detoxPerSecond) : Self.timerPerSecond
+                    let rate = piece.isDeclared ? max(Self.timerPerSecond * FocusPoints.manualFactor, Self.detoxPerSecond) : Self.timerPerSecond
                     earned = rate * boosted + Self.detoxPerSecond * (seconds - boosted)
                 } else {
                     earned = Self.detoxPerSecond * seconds
