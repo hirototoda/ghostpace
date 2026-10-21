@@ -93,7 +93,8 @@ struct PointsHistoryTests {
         try t.seeded()
         let m = model(t)
         #expect(m.daySnapshot(daysAgo: 0)?.dayStart == jst("2026-10-19T22:00"))
-        #expect(m.daySnapshot(daysAgo: 1)?.dayStart == jst("2026-10-18T22:00"))
+        // 新しく入れた端末の最初の日の前の日は 4:00〜22:00
+        #expect(m.daySnapshot(daysAgo: 1)?.dayStart == jst("2026-10-19T04:00"))
         #expect(m.daySnapshot(daysAgo: 1)?.now == jst("2026-10-19T22:00"))
         #expect(m.pointsHistory(days: 7).last?.dayStart == jst("2026-10-19T22:00"))
     }

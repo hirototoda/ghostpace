@@ -38,6 +38,10 @@ struct DemoDataTests {
             // 朝の計画の下書きに、ゲーム・SNS の時間が2つ（BLK-10）
             #expect(plan?.status == .draft)
             #expect(plan?.draft.unblockCount == 2)
+        case .night:
+            // 前の夜に入れた今日の下書き（前の夜の読書・ゲーム・SNS と 9:00 の英語、PLN-11）
+            #expect(plan?.status == .draft)
+            #expect(plan?.draft.blocks.count == 3)
         default: #expect(plan?.status == .confirmed)
         }
 
