@@ -203,8 +203,8 @@ struct DetoxModelTests {
         m.end(reportedEnd: nil)
         t.clock.set(jst("2026-10-19T12:00"))
         m.reload()
-        // デトックス（ポイントに使う）：4:00〜12:00 の8時間から、集中の1時間と開けた15分を除く
-        #expect(m.snapshot.detox?.detoxSeconds(until: m.snapshot.now) == 7 * 3600 - 15 * 60)
+        // デトックス（ポイントに使う）：一日の始まり（前の夜 22:00、2026-10-21）〜12:00 の14時間から、集中の1時間と開けた15分を除く
+        #expect(m.snapshot.detox?.detoxSeconds(until: m.snapshot.now) == 13 * 3600 - 15 * 60)
         // 画面の数字は開けた時間（DTX-05）。ホームと振り返りで同じ
         #expect(m.snapshot.opened == OpenedTime(seconds: 15 * 60, count: 1))
         #expect(m.reviewContent()?.opened == m.snapshot.opened)
@@ -267,11 +267,13 @@ struct DetoxModelTests {
         blockStore.selection = Data("sel".utf8)
         let m = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings,
                          blocking: FakeBlocking(), blockStore: blockStore, blockLog: log)
-        // 設定の 0:00〜5:00 を 23:00〜8:00 に直した → 4:00〜8:00（寝てから5〜9時間目）は長くした所
+        // 設定の 0:00〜5:00 を 23:00〜8:00 に直した → 4:00〜8:00（寝てから5〜9時間目）は長くした所。
+        // 一晩分まとめてこの日（前の夜 22:00 から、2026-10-21）に付く
         #expect(m.setSleepManually(start: jst("2026-10-18T23:00"), end: jst("2026-10-19T08:00")))
         m.reload()
-        // 6.0（5〜7時間目を0.5pt）＋3.0（7〜8時間目）＋0 ＝ 9.0（直す前と比べなければ 12.0）
-        #expect(abs(try #require(m.snapshot.detox).points(until: jst("2026-10-19T08:00")) - 9.0) < 0.0001)
+        // 前の夜 22:00〜23:00 ブロック中 3.0 ＋ 23:00〜4:00（0〜5時間目）22.5 ＋ 6.0（5〜7時間目を0.5pt）＋3.0（7〜8時間目）＋0 ＝ 34.5
+        // （直す前と比べなければ 37.5）
+        #expect(abs(try #require(m.snapshot.detox).points(until: jst("2026-10-19T08:00")) - 34.5) < 0.0001)
     }
 
     /// 長押しで開けて戻ったあと、開き直す（reload）とホームの数字が増える（DTX-05）

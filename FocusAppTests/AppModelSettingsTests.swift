@@ -108,37 +108,78 @@ struct AppModelSettingsTests {
         m.startUnplanned(category: m.categories[0], minutes: 25)
         m.setPlannedEndNotifications(false)
         #expect(notifications.scheduled.map(\.id) == [AppNotification.reviewID])
-        m.setReviewMinutes(21 * 60)
-        #expect(notifications.scheduled.first?.trigger == .daily(minutes: 21 * 60))
+        #expect(notifications.scheduled.first?.trigger == .daily(minutes: 22 * 60))
+        // 区切りを 21:00 にすると、今日は 22:00、次の日から 21:00（GHO-17、REV-02）
+        m.setBoundary(endMinutes: 21 * 60)
+        let reviews = notifications.scheduled.filter { $0.id.hasPrefix(AppNotification.reviewID) }
+        #expect(reviews.first?.trigger == .at(jst("2026-10-19T22:00")))
+        #expect(reviews.dropFirst().first?.trigger == .at(jst("2026-10-20T21:00")))
     }
 
-    // MARK: 振り返りの入口（REV-02）
+    // MARK: 振り返りの入口（REV-02、2026-10-21 からその日の区切りから次の朝の計画を確定するまで）
 
-    @Test func reviewEntryFollowsSettingUntil4AM() throws {
-        let t = try TestStore(now: jst("2026-10-19T21:30"))
-        let settings = MemorySettings()
-        let m = model(t, settings: settings)
-        #expect(!m.snapshot.showsReviewEntry)
-        m.setReviewMinutes(21 * 60)
-        #expect(m.snapshot.showsReviewEntry)
-        #expect(settings.reviewMinutes == 21 * 60)
-
-        t.clock.set(jst("2026-10-20T03:59"))
-        m.reload()
-        #expect(m.snapshot.showsReviewEntry)
-        t.clock.set(jst("2026-10-20T04:00"))
-        m.reload()
-        #expect(!m.snapshot.showsReviewEntry)
-    }
-
-    @Test func reviewTimeAfterMidnightBelongsToThatNight() throws {
-        let t = try TestStore(now: jst("2026-10-19T23:30"))
+    @Test func reviewEntryFromTheBoundaryUntilTheMorningPlan() throws {
+        let t = try TestStore(now: jst("2026-10-19T09:00"))
         let m = model(t)
-        m.setReviewMinutes(60)  // 1:00
+        m.confirmPlan(PlanDraft())
+        t.clock.set(jst("2026-10-19T21:59"))
+        m.reload()
         #expect(!m.snapshot.showsReviewEntry)
-        t.clock.set(jst("2026-10-20T01:00"))
+        t.clock.set(jst("2026-10-19T22:00"))
         m.reload()
         #expect(m.snapshot.showsReviewEntry)
+        #expect(m.reviewDay().key == "2026-10-19")
+        t.clock.set(jst("2026-10-20T04:30"))
+        m.reload()
+        #expect(m.snapshot.showsReviewEntry)
+        // 次の朝の計画を確定したら出さない
+        m.confirmPlan(PlanDraft())
+        #expect(!m.snapshot.showsReviewEntry)
+        #expect(m.reviewDay().key == "2026-10-20")
+    }
+
+    @Test func skippingTheMorningPlanAlsoHidesTheReviewEntry() throws {
+        let t = try TestStore(now: jst("2026-10-19T09:00"))
+        let m = model(t)
+        m.skipPlan()
+        t.clock.set(jst("2026-10-19T23:00"))
+        m.reload()
+        #expect(m.snapshot.showsReviewEntry)
+        t.clock.set(jst("2026-10-20T07:00"))
+        m.reload()
+        m.skipPlan()
+        #expect(!m.snapshot.showsReviewEntry)
+    }
+
+    /// 朝の計画を開かずに一日が過ぎても、2つ前の日の振り返りは出さない（遅くとも次の区切りまで、Q47）
+    @Test func reviewEntryLastsUntilTheNextBoundaryAtMost() throws {
+        let t = try TestStore(now: jst("2026-10-19T09:00"))
+        let m = model(t)
+        m.skipPlan()
+        t.clock.set(jst("2026-10-20T21:00"))
+        m.reload()
+        #expect(m.reviewDay().key == "2026-10-19")
+        t.clock.set(jst("2026-10-20T22:30"))
+        m.reload()
+        #expect(m.reviewDay().key == "2026-10-20")
+    }
+
+    /// 区切りを夜中（翌1:00）にしたら、その夜中から出る
+    @Test func boundaryAfterMidnightShowsTheEntryThatNight() throws {
+        let t = try TestStore(now: jst("2026-10-19T09:00"))
+        let m = model(t)
+        m.skipPlan()
+        m.setBoundary(endMinutes: 25 * 60)
+        t.clock.set(jst("2026-10-20T09:00"))
+        m.reload()
+        m.skipPlan()
+        t.clock.set(jst("2026-10-20T23:30"))
+        m.reload()
+        #expect(!m.snapshot.showsReviewEntry)
+        t.clock.set(jst("2026-10-21T01:00"))
+        m.reload()
+        #expect(m.snapshot.showsReviewEntry)
+        #expect(m.reviewDay().key == "2026-10-20")
     }
 
     // MARK: 夜の振り返り（REV-01）
@@ -183,12 +224,17 @@ struct AppModelSettingsTests {
     // MARK: 明日の計画（REV-01）
 
     @Test func tomorrowDraftBecomesNextMorningPlan() throws {
-        let t = try TestStore(now: jst("2026-10-19T22:30"))
+        let t = try TestStore(now: jst("2026-10-19T21:30"))
         let m = model(t)
         m.skipPlan()
         let tomorrow = m.tomorrowPlan()
         #expect(tomorrow.dayKey == "2026-10-20")
-        #expect(tomorrow.dayStart == jst("2026-10-20T04:00"))
+        // 明日は今日の区切り 22:00 から（2026-10-21 までは 4:00 から）
+        #expect(tomorrow.dayStart == jst("2026-10-19T22:00"))
+        // 区切りを過ぎても同じ日（振り返っている日の次の日）
+        t.clock.set(jst("2026-10-19T22:30"))
+        m.reload()
+        #expect(m.tomorrowPlan().dayKey == "2026-10-20")
         m.saveTomorrowDraft(PlanDraft(blocks: [block("2026-10-20T08:00", 60, m.categories[0])]), for: tomorrow)
         #expect(m.tomorrowPlan().draft.blocks.count == 1)  // 続きから
 
@@ -275,10 +321,11 @@ struct AppModelSettingsTests {
     }
 
     @Test func tomorrowDraftMadeAfterMidnightAppearsThatMorning() throws {
-        let t = try TestStore(now: jst("2026-10-20T02:30"))  // 10/19 の夜中
+        let t = try TestStore(now: jst("2026-10-20T02:30"))  // 10/19 の夜中（区切り 22:00 の後なので、もう 10/20 の日）
         let m = model(t)
-        m.skipPlan()  // 10/19 は計画なし日として終わっている
+        // 振り返っているのは終わったばかりの 10/19 で、明日の計画は 10/20
         let tomorrow = m.tomorrowPlan()
+        #expect(tomorrow.dayKey == "2026-10-20")
         m.saveTomorrowDraft(PlanDraft(blocks: [block("2026-10-20T08:00", 30, m.categories[2])]), for: tomorrow)
         t.clock.set(jst("2026-10-20T04:00"))
         m.reload()
@@ -356,13 +403,14 @@ struct AppModelGoalTemplateTests {
         let t = try TestStore(now: jst("2026-10-19T07:00"))
         let m = model(t)
         var draft = PlanDraft(blocks: [block("2026-10-19T09:00", 60, m.categories[0]), block("2026-10-19T11:00", 60, m.categories[0])])
-        // 計画より1時間多い → 起きている 7:00〜0:00（設定の睡眠）の空き 7:00–9:00・10:00–11:00・12:00–0:00（15時間）に足す
+        // 計画より1時間多い → 起きている 7:00〜22:00（設定の睡眠は 0:00 だが区切り 22:00 まで、2026-10-21）の
+        // 空き 7:00–9:00・10:00–11:00・12:00–22:00（13時間）に足す
         draft.goalSeconds = 3 * 3600
         m.confirmPlan(draft)
         t.clock.set(jst("2026-10-19T10:30"))
         m.reload()
         #expect(m.snapshot.goal?.goalSeconds == 3 * 3600)
-        #expect(m.snapshot.opponentFocusSeconds(.goal) == 70 * 60)  // 2.5時間×4分＋60分
+        #expect(m.snapshot.opponentFocusSeconds(.goal) == 4292)  // 2.5時間×(60/13)分＋60分＝71分32秒
         #expect(model(t).plan?.goalSeconds == 3 * 3600)  // 開き直しても残る
     }
 

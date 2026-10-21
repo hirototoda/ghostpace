@@ -202,14 +202,14 @@ struct PointsHistoryView: View {
         let yesterday = past.last
         ForEach(past) { day in
             if let points = day.points {
-                LineMark(x: .value("日", day.dayStart, unit: .day), y: .value("ポイント", points), series: .value("線", "自分"))
+                LineMark(x: .value("日", day.displayDate, unit: .day), y: .value("ポイント", points), series: .value("線", "自分"))
                     .foregroundStyle(Theme.focus)
                     .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round))
-                PointMark(x: .value("日", day.dayStart, unit: .day), y: .value("ポイント", points))
+                PointMark(x: .value("日", day.displayDate, unit: .day), y: .value("ポイント", points))
                     .foregroundStyle(Theme.focus)
             }
             if let lastWeek = day.lastWeek {
-                LineMark(x: .value("日", day.dayStart, unit: .day), y: .value("先週", lastWeek), series: .value("線", "先週"))
+                LineMark(x: .value("日", day.displayDate, unit: .day), y: .value("先週", lastWeek), series: .value("線", "先週"))
                     .foregroundStyle(Theme.ghost)
                     .lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
             }
@@ -217,18 +217,18 @@ struct PointsHistoryView: View {
         if let today {
             ForEach([yesterday, today].compactMap { $0 }) { day in
                 if let points = day.points {
-                    LineMark(x: .value("日", day.dayStart, unit: .day), y: .value("ポイント", points), series: .value("線", "自分・今日"))
+                    LineMark(x: .value("日", day.displayDate, unit: .day), y: .value("ポイント", points), series: .value("線", "自分・今日"))
                         .foregroundStyle(Theme.focus.opacity(0.35))
                         .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round))
                 }
                 if let lastWeek = day.lastWeek {
-                    LineMark(x: .value("日", day.dayStart, unit: .day), y: .value("先週", lastWeek), series: .value("線", "先週・今日"))
+                    LineMark(x: .value("日", day.displayDate, unit: .day), y: .value("先週", lastWeek), series: .value("線", "先週・今日"))
                         .foregroundStyle(Theme.ghost.opacity(0.35))
                         .lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
                 }
             }
             if let points = today.points {
-                PointMark(x: .value("日", today.dayStart, unit: .day), y: .value("ポイント", points))
+                PointMark(x: .value("日", today.displayDate, unit: .day), y: .value("ポイント", points))
                     .foregroundStyle(Theme.focus.opacity(0.35))
             }
         }
@@ -290,7 +290,7 @@ struct PointsHistoryView: View {
     }
 
     private func dayTitle(_ day: DayPoints) -> some View {
-        Text(day.dayStart.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
+        Text(day.displayDate.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
              + (day.isToday ? "（今日）" : ""))
     }
 
@@ -329,7 +329,7 @@ struct DayGraphView: View {
                 // ホームの裏と同じく、上の約6割がグラフ、下の残りがラップの一覧（その中でスクロール、2026-10-12）
                 RaceChart(snapshot: snapshot, rival: rival, isPastDay: snapshot.now >= snapshot.dayEnd, showsLaps: true)
                     .padding(16)
-                    .navigationTitle(Text(snapshot.dayStart.formatted(
+                    .navigationTitle(Text(snapshot.dayDate.formatted(
                         .dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))))
             } else {
                 ContentUnavailableView("記録を読めませんでした", systemImage: "exclamationmark.triangle")
@@ -803,7 +803,7 @@ struct TimeMapView: View {
             }
             ForEach(0..<Laps.count, id: \.self) { section in
                 GridRow {
-                    Text("\((DayBoundary.hour + section * 2) % 24):00").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    Text(map.sectionLabel(section)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                         .lineLimit(1).fixedSize()
                         .gridColumnAlignment(.trailing)
                     ForEach(0..<7, id: \.self) { weekday in
@@ -811,7 +811,7 @@ struct TimeMapView: View {
                         RoundedRectangle(cornerRadius: 3)
                             .fill(value == 0 ? Color.secondary.opacity(0.08) : Theme.focus.opacity(0.15 + 0.85 * Double(value) / Double(maxValue)))
                             .frame(height: 22)
-                            .accessibilityLabel("\(Self.weekdays[weekday])曜 \((DayBoundary.hour + section * 2) % 24)時から")
+                            .accessibilityLabel("\(Self.weekdays[weekday])曜 \(map.sectionLabel(section))から")
                             .accessibilityValue(DurationFormat.japanese(value))
                     }
                 }
@@ -825,8 +825,7 @@ struct TimeMapView: View {
     /// 例：よく集中するのは 水曜の 10:00–12:00
     static func peakText(_ map: TimeMap) -> String? {
         map.peak.map { peak in
-            let start = (DayBoundary.hour + peak.section * 2) % 24
-            return "よく集中するのは \(weekdays[peak.weekday])曜の \(start):00–\((start + 2) % 24):00"
+            return "よく集中するのは \(weekdays[peak.weekday])曜の \(map.sectionLabel(peak.section))–\(map.sectionLabel(peak.section + 1))"
         }
     }
 

@@ -139,7 +139,7 @@ struct EarlyStartTests {
 
     private func notifications(_ running: FocusSession?, now: String, blocks: [PlanBlockSummary], enabled: Bool = true)
         -> AppNotification? {
-        NotificationPlan.make(running: running, now: jst(now), plannedEndEnabled: enabled, reviewMinutes: 22 * 60,
+        NotificationPlan.make(running: running, now: jst(now), plannedEndEnabled: enabled, review: .daily(minutes: 22 * 60),
                               calendar: tokyoCalendar, planBlocks: blocks)
             .first { $0.id == AppNotification.blockStartID }
     }
@@ -319,22 +319,23 @@ struct EarlyStartModelTests {
         #expect(m.running?.session.isPaused == false)
     }
 
-    /// 3:30 に計画外を始めて 4:00 を過ぎても、前の日の記録なので新しい日の計画には切り替えない
-    /// （タイマー中は新しい日の朝の計画を出さないため、まだ新しい日の計画は確定していない）
-    @Test func noSwitchAcrossFourAm() throws {
-        let t = try TestStore(now: jst("2026-10-19T03:30"))
+    /// 21:30 に計画外を始めて区切り（22:00）を過ぎると、新しい日の前の夜の予定（明日の計画の下書き）に切り替えられる。
+    /// 前の夜の予定はふつうの計画と同じに動く（PLN-11、2026-10-21）。記録は始めた日のまま
+    @Test func switchToThePreviousNightPlanAcrossTheBoundary() throws {
+        let t = try TestStore(now: jst("2026-10-19T21:00"))
         let settings = MemorySettings()
         settings.didShowBlockingIntro = true
         let m = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings)
         m.skipPlan()
+        let tomorrow = m.tomorrowPlan()
+        m.saveTomorrowDraft(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T22:30"), minutes: 60, category: m.categories[0])]),
+                            for: tomorrow, reloads: true)
+        t.clock.set(jst("2026-10-19T21:30"))
         m.startUnplanned(category: m.categories[0], minutes: nil)
-        try t.store.confirm(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T05:00"), minutes: 60,
-                                                              category: m.categories[0])]),
-                            dayKey: "2026-10-19", timeZone: tokyo)
-        t.clock.set(jst("2026-10-19T05:10"))
+        t.clock.set(jst("2026-10-19T22:35"))
         m.reload()
-        #expect(m.running?.session.dayKey == "2026-10-18")
-        #expect(m.running?.switchableBlock(at: t.clock.now()) == nil)
+        #expect(m.running?.session.dayKey == "2026-10-19")
+        #expect(m.running?.switchableBlock(at: t.clock.now())?.start == jst("2026-10-19T22:30"))
     }
 
     /// 下書きのままの計画（未確定）のブロックでは、切り替えも通知も出さない

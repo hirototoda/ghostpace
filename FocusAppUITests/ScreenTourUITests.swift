@@ -276,7 +276,7 @@ final class ScreenTourUITests: XCTestCase {
         shoot("add-category")
 
         // 夜の振り返りと明日の計画
-        app = demo("day", "2026-10-19T22:30:00")
+        app = demo("night", "2026-10-19T22:30:00")
         shoot("home-night")
         app.buttons["reviewButton"].tap()
         XCTAssertTrue(app.buttons["planTomorrowButton"].waitForExistence(timeout: timeout))

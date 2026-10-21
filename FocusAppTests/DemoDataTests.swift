@@ -68,7 +68,8 @@ struct DemoDataTests {
 
     @Test func forgotAcrossDayBoundaryLeavesTodayEmpty() throws {
         let t = try seeded(.forgot, at: jst("2026-10-20T04:10"))
-        #expect(try t.store.runningSession()?.dayKey == "2026-10-19")
+        // 5時間前（10/19 23:10）は区切り 22:00 より後なので今日（10/20）の記録。朝の計画はまだ（2026-10-21 までは前の日の記録）
+        #expect(try t.store.runningSession()?.dayKey == "2026-10-20")
         #expect(try t.store.plan(dayKey: "2026-10-20") == nil)
 
         // 前日の他のセッションとは重ならず、終えるときに終了時刻を聞く（台本 J の前提）

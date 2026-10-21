@@ -5,7 +5,7 @@ struct TimelineDay {
     var dayKey: String
     var dayStart: Date
     var now: Date
-    /// 今日（朝4:00区切り）の画面か
+    /// 今日（その日の区切りで分けた日）の画面か
     var isToday: Bool
     /// 変更後の今の計画（消したブロックは入らない）
     var planBlocks: [PlanBlockSummary]
@@ -15,6 +15,11 @@ struct TimelineDay {
     var editableDayKeys: Set<String>
     /// その日に開けた時間と回数（TML-05。ホームと同じ DTX-05 の数え方）。ブロックが一度も効いていない日は nil
     var opened: OpenedTime? = nil
+    /// 日の名前の日の 0:00（見出しの日付）。nil ならその日の始まりの日
+    var dayDate: Date? = nil
+
+    /// 見出しの日付
+    var displayDate: Date { dayDate ?? dayStart }
 
     private var segments: [TimeSegment] { sessions.flatMap { $0.activeSegments(now: now) } }
     var focusSeconds: Int { segments.focusSeconds(until: now) }

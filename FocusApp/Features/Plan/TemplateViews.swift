@@ -29,8 +29,8 @@ struct TemplateStrip: View {
             context.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2),
                          with: .color(.secondary.opacity(0.12)))
             for block in template.blocks {
-                // 0:00〜3:59 は1日の終わり（朝4:00区切り）なので、24時より後ろに置く
-                let hour = block.hour < DayBoundary.hour ? block.hour + 24 : block.hour
+                // 0:00〜3:59 は夜中なので、24時より後ろに置く
+                let hour = block.hour < DayBoundary.morningHour ? block.hour + 24 : block.hour
                 let offset = max(0, Double((hour - Self.startHour) * 60 + block.minute))
                 let rect = CGRect(x: size.width * offset / Self.span, y: 0,
                                   width: max(2, size.width * Double(block.minutes) / Self.span), height: size.height)
@@ -66,7 +66,9 @@ struct TemplateEditView: View {
     /// 保存されている今のテンプレート
     private var current: PlanTemplate { model.templates.first { $0.id == template.id } ?? template }
     private var dayStart: Date { model.snapshot.dayStart }
-    private var draft: PlanDraft { current.draft(dayStart: dayStart, calendar: model.calendar) }
+    private var draft: PlanDraft {
+        current.draft(dayStart: dayStart, dayEnd: model.snapshot.dayEnd, dayDate: model.snapshot.dayDate, calendar: model.calendar)
+    }
 
     var body: some View {
         List {
@@ -93,7 +95,7 @@ struct TemplateEditView: View {
                 }
                 Button {
                     let start = draft.blocks.isEmpty
-                        ? (model.calendar.date(byAdding: .hour, value: 8 - DayBoundary.hour, to: dayStart) ?? dayStart)
+                        ? model.boundary.wallClock(model.snapshot.dayDate, minutes: 8 * 60)
                         : draft.nextStart(now: dayStart)
                     editing = EditorTarget(block: PlanBlockDraft(start: start, minutes: PlanDraft.defaultMinutes,
                                                                  category: model.categories.first ?? .unknown), isNew: true)
@@ -116,7 +118,8 @@ struct TemplateEditView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear(perform: saveName)
         .sheet(item: $editing) { target in
-            BlockEditorSheet(block: target.block, isNew: target.isNew, plan: draft, dayStart: dayStart,
+            BlockEditorSheet(block: target.block, isNew: target.isNew, plan: draft, dayStart: dayStart, dayEnd: model.snapshot.dayEnd,
+                             boundaryLabel: BoundaryText.time(model.todayEndMinutes), calendar: model.calendar,
                              categories: model.categories, projects: model.projects,
                              onCreateProject: { model.createProject(name: $0, category: $1) },
                              onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) },

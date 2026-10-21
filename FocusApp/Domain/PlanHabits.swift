@@ -17,17 +17,23 @@ struct PlanHabits: Hashable {
         blocks = PlanTemplate(name: "", plan: plan, calendar: calendar).blocks
     }
 
-    /// `dayStart`（その日の4:00）の日に当てはめた下書き。0:00〜3:59 は暦の翌日
-    func draft(dayStart: Date, calendar: Calendar) -> PlanDraft {
-        PlanTemplate(name: "", blocks: blocks).draft(dayStart: dayStart, calendar: calendar)
+    /// その日に当てはめた下書き（当てはめ方は PlanTemplate.draft と同じ。区切りをまたぐブロックは入れない）。
+    /// `dayStart` だけなら朝4:00区切り（0:00〜3:59 は暦の翌日）
+    func draft(dayStart: Date, dayEnd: Date? = nil, dayDate: Date? = nil, calendar: Calendar) -> PlanDraft {
+        PlanTemplate(name: "", blocks: blocks).draft(dayStart: dayStart, dayEnd: dayEnd, dayDate: dayDate, calendar: calendar)
     }
 
-    /// 習慣の画面で保存できない理由。計画と同じ理由（重なり・4:00 またぎ・ゲーム・SNS は3つまで）に、ほかのブロックは3つまでを足す
-    static func problem(with block: PlanBlockDraft, in draft: PlanDraft, dayStart: Date) -> String? {
+    func draft(day: BoundaryDay, calendar: Calendar) -> PlanDraft {
+        PlanTemplate(name: "", blocks: blocks).draft(day: day, calendar: calendar)
+    }
+
+    /// 習慣の画面で保存できない理由。計画と同じ理由（重なり・区切りまたぎ・ゲーム・SNS は3つまで）に、ほかのブロックは3つまでを足す
+    static func problem(with block: PlanBlockDraft, in draft: PlanDraft, dayStart: Date, dayEnd: Date? = nil,
+                        boundaryLabel: String? = nil) -> String? {
         if !block.isUnblock, draft.blocks.filter({ !$0.isUnblock && $0.id != block.id }).count >= blockLimit {
             return "習慣のブロックは\(blockLimit)つまでです"
         }
-        return draft.problem(with: block, dayStart: dayStart)
+        return draft.problem(with: block, dayStart: dayStart, dayEnd: dayEnd, boundaryLabel: boundaryLabel)
     }
 }
 

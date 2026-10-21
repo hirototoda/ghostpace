@@ -94,25 +94,26 @@ struct BestPolishTests {
         #expect(bestDay.theirsAtSameTime.isApprox(sunday.myPoints(until: jst("2026-10-18T12:00"))))
     }
 
-    /// 月曜 3:59 はまだ日曜（今日）。4:00 に月曜になると、さっきまでの今日（日曜）を含む先週に代わる。
-    /// 火曜 4:00 に月曜が記録のある日になると今週に戻る（開いたままでも数え直しで切り替わる）
-    @Test func fallbackFollowsTheFourAMBoundary() throws {
-        let t = try TestStore(now: jst("2026-10-19T03:59"))
+    /// 区切り 22:00：日曜 21:59 はまだ日曜（今日）。22:00 に月曜の日になると、さっきまでの今日（日曜）を含む先週に代わる。
+    /// 月曜の区切り（22:00）を過ぎて月曜が記録のある日になると今週に戻る（開いたままでも数え直しで切り替わる。週は日の名前で分ける、2026-10-21）
+    @Test func fallbackFollowsTheDayBoundary() throws {
+        let t = try TestStore(now: jst("2026-10-18T21:59"))
         let c = try t.seeded()
+        try t.store.setBoundary(endMinutes: 22 * 60, fromDayKey: "2026-10-01", timeZone: tokyo)
         try session(t, try focus(c), from: "2026-10-18T09:00", to: "2026-10-18T10:00")  // 日曜
         let m = model(t)
-        // 3:59 は日曜が今日で、今週（10/12〜）にほかの記録はなく、その前の週も空
+        // 21:59 は日曜が今日で、今週（10/12〜）にほかの記録はなく、その前の週も空
         #expect(m.periodBests()[.week] == nil)
-        t.clock.set(jst("2026-10-19T04:00"))
+        t.clock.set(jst("2026-10-18T22:00"))
         #expect(m.periodBests()[.week]?.isFallback == true)
-        #expect(m.periodBests()[.week]?.pointsDay == jst("2026-10-18T04:00"))
+        #expect(m.periodBests()[.week]?.pointsDay == jst("2026-10-17T22:00"))
         try session(t, try focus(c), from: "2026-10-19T09:00", to: "2026-10-19T09:30")  // 月曜
-        t.clock.set(jst("2026-10-20T03:59"))
+        t.clock.set(jst("2026-10-19T21:59"))
         #expect(m.periodBests()[.week]?.isFallback == true)
-        t.clock.set(jst("2026-10-20T04:00"))
+        t.clock.set(jst("2026-10-19T22:00"))
         #expect(m.periodBests()[.week]?.isFallback == false)
-        #expect(m.periodBests()[.week]?.pointsDay == jst("2026-10-19T04:00"))
-        #expect(m.topDays(period: .week).map(\.dayStart) == [jst("2026-10-19T04:00")])
+        #expect(m.periodBests()[.week]?.pointsDay == jst("2026-10-18T22:00"))
+        #expect(m.topDays(period: .week).map(\.dayStart) == [jst("2026-10-18T22:00")])
     }
 
     /// 1日は先月。先月にも記録がなければ「まだ記録なし」（nil）で、比べる相手もベスト10も出さない
@@ -314,8 +315,8 @@ struct BestPolishTests {
 
     private func snapshot(_ segments: [TimeSegment], now: String) -> HomeSnapshot {
         let dayStart = jst("2026-10-19T04:00")
-        return HomeSnapshot(now: jst(now), dayStart: dayStart, dayEnd: jst("2026-10-20T04:00"), sessions: segments,
-                            planBlocks: [], isNoPlanDay: true, ghost: nil, reviewTime: jst("2026-10-19T22:00"))
+        return HomeSnapshot(now: jst(now), dayStart: dayStart, dayEnd: jst("2026-10-20T04:00"), dayKey: "2026-10-19",
+                            dayDate: jst("2026-10-19T00:00"), sessions: segments, planBlocks: [], isNoPlanDay: true, ghost: nil)
     }
 
     /// 集中のタイマー中＝集中、デトックスのカテゴリのタイマー中＝デトックス、それ以外（一時停止を含む）＝ほか。申告もタイマーと同じ

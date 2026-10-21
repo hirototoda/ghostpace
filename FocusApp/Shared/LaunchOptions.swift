@@ -2,7 +2,7 @@ import Foundation
 
 /// 検証用の起動引数。Debug ビルドでのみ有効にする。
 /// - `-fixedNow <日時>`: その時刻から時計を始める。例 `-fixedNow 2026-10-19T14:30`（タイムゾーン省略時は端末のタイムゾーン）
-/// - `-seedDemoData [場面]`: メモリ内のストアにデモデータを入れる。場面は day（既定）/ morning / noplan / running / forgot / firstweek
+/// - `-seedDemoData [場面]`: メモリ内のストアにデモデータを入れる。場面は day（既定）/ morning / noplan / running / forgot / firstweek / switchweek など（DemoScene）。見本の日は 22:00 区切り（switchweek は区切りを変えた週）
 /// - `-inMemoryStore`: メモリ内のストアを使う（本物のデータに触れない）
 /// - `-storeName <名前>`: 別名のファイルに保存する（UI テストで再起動をまたぐ確認に使う）。`-resetStore` で開く前に消す
 /// - `-failSave`: 保存を毎回失敗させる。`-failStoreOpen`: ストアを開けなかったことにする（画面の確認用）
@@ -21,6 +21,7 @@ import Foundation
 /// - `-realAmbient`: 見本データ・テストでも本物の環境音を鳴らす（音のスレッドで落ちないかの UI テスト用、TMR-14）
 /// - `-widgetGallery`: 起動したらウィジェットの見本を出す（画面の確認用、WID-01）
 /// - `-habitIntro`: 初めて使う端末の習慣の画面（PLN-08）を出して始める（撮影・UI テスト用）
+/// - `-boundaryTomorrow <分>`: 起動したら設定の一日の区切りをこの時刻に変える（日の名前の日の 0:00 からの分。23:00 なら 1380。次の日から効く。GHO-17 の撮影用）
 /// - `-openHold [unlocked]`: 起動したら長押しの画面を開く（`unlocked` なら15分開けたあと）。`-holdProgress 0.6`: 押している途中の見た目で始める
 struct LaunchOptions: Hashable {
     /// 分析のタブで始める
@@ -64,6 +65,8 @@ struct LaunchOptions: Hashable {
     var opponent: Opponent?
     /// 見本データの今日の計画の目標（分）。nil なら計画の集中の合計
     var demoGoalMinutes: Int?
+    /// 起動したら変える一日の区切り（`-boundaryTomorrow`）
+    var boundaryTomorrow: Int?
     /// 裏のグラフを1日全体で始める（撮影用）
     var raceStartsWholeDay = false
     var slowRaceIntro = false
@@ -203,6 +206,11 @@ struct LaunchOptions: Hashable {
                 options.habitIntro = true
             case "-widgetGallery":
                 options.widgetGallery = true
+            case "-boundaryTomorrow":
+                if let value = next(), let minutes = Int(value) {
+                    options.boundaryTomorrow = minutes
+                    index += 1
+                }
             case "-holdProgress":
                 if let value = next(), let progress = Double(value) {
                     options.holdProgress = min(max(progress, 0), 1)

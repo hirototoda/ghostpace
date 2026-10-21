@@ -13,7 +13,7 @@ struct BlockNoticeTests {
 
     private func make(_ blocks: [PlanBlockSummary], now: String, lead: Int? = 5, running: FocusSession? = nil,
                       started: Set<UUID> = [], plannedEndEnabled: Bool = true) -> [AppNotification] {
-        NotificationPlan.make(running: running, now: jst(now), plannedEndEnabled: plannedEndEnabled, reviewMinutes: 22 * 60,
+        NotificationPlan.make(running: running, now: jst(now), plannedEndEnabled: plannedEndEnabled, review: .daily(minutes: 22 * 60),
                               calendar: tokyoCalendar, planBlocks: running == nil ? [] : blocks,
                               blockNotice: BlockNotice(leadMinutes: lead, blocks: blocks, startedBlockIds: started))
     }
@@ -318,18 +318,18 @@ struct BlockNoticeModelTests {
         #expect(noticeTimes(n).isEmpty)
     }
 
-    /// 4:00 を過ぎて次の日になると、前の日の計画の予約は消える（次の日はまだ確定していない）
-    @Test func rollingOverFourDropsYesterdaysNotices() async throws {
+    /// その日の区切り（22:00）を過ぎて次の日になると、前の日の計画の予約は消える（次の日はまだ確定していない。前の夜の予定もない）
+    @Test func rollingOverTheBoundaryDropsYesterdaysNotices() async throws {
         let t = try TestStore(now: jst("2026-10-19T08:00"))
         let n = NoNotifications(status: .authorized)
         let m = try await model(t, notifications: n)
         var draft = try #require(m.plan)
-        draft.blocks.append(PlanBlockDraft(start: jst("2026-10-20T03:30"), minutes: 20, category: m.categories[0]))
+        draft.blocks.append(PlanBlockDraft(start: jst("2026-10-19T21:40"), minutes: 20, category: m.categories[0]))
         #expect(m.savePlanChanges(draft))
-        t.clock.set(jst("2026-10-19T23:00"))
+        t.clock.set(jst("2026-10-19T21:30"))
         m.reload()
-        #expect(noticeTimes(n) == [.at(jst("2026-10-20T03:25"))])
-        t.clock.set(jst("2026-10-20T04:00"))
+        #expect(noticeTimes(n) == [.at(jst("2026-10-19T21:35"))])
+        t.clock.set(jst("2026-10-19T22:00"))
         m.reload()
         #expect(noticeTimes(n).isEmpty)
     }

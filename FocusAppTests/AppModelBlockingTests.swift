@@ -369,7 +369,9 @@ struct AppModelBlockingTests {
         let f = try fixture()
         let s = try #require(f.blockStore.raceSnapshot)
         #expect(s.dayKey == "2026-10-19")
-        #expect(s.dayStart == jst("2026-10-19T04:00"))
+        // 一日は前の夜 22:00 から（2026-10-21）
+        #expect(s.dayStart == jst("2026-10-18T22:00"))
+        #expect(s.dayEnd == jst("2026-10-19T22:00"))
         #expect(s.writtenAt == jst("2026-10-19T11:20"))
         #expect(!s.isFocusRunning)
 

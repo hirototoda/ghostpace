@@ -163,6 +163,9 @@ final class AppLauncher {
                                  widgets: Self.widgets(options),
                                  ambient: Self.ambient(options),
                                  startsOnTimerTab: options.startsOnTimerTab)
+            #if DEBUG
+            if let minutes = options.boundaryTomorrow { model.setBoundary(endMinutes: minutes) }
+            #endif
             state = .ready(model)
         } catch {
             container = nil

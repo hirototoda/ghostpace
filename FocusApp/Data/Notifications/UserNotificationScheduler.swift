@@ -35,7 +35,7 @@ final class SystemNotificationCenter: NotificationCenterScheduling {
         content.title = request.title
         content.body = request.body
         content.sound = .default
-        content.userInfo = ["kind": request.identifier]
+        content.userInfo = ["kind": AppNotification.kind(of: request.identifier)]
         let trigger: UNNotificationTrigger
         switch request.trigger {
         case .at(let date):

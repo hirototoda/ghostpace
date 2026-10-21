@@ -7,15 +7,19 @@ struct ShieldRaceSnapshot: Codable, Equatable, Sendable {
     static let step: TimeInterval = 15 * 60
 
     var writtenAt: Date
-    /// 4:00 区切りの日
+    /// その日の名前
     var dayKey: String
+    /// その日の始まり（前の日の区切り）
     var dayStart: Date
+    /// その日の区切り（2026-10-21 に足した）。拡張は区切りの履歴を読めないので、これで同じ日かを決める。
+    /// 前の版の材料にこの項目がなければ dayStart の24時間後として読む
+    var dayEnd: Date? = nil
     var focusSecAtWrite: Int
     /// 書いた時点で集中のタイマーが動いていたか（一時停止中・デトックスは false）
     var isFocusRunning: Bool
     /// 「先週の自分より」「目標より」
     var opponentPrefix: String
-    /// 相手の累積集中（日付の区切りから15分ごと、秒）。相手がいなければ空
+    /// 相手の累積集中（その日の始まりから15分ごと、その日の長さぶん、秒）。相手がいなければ空
     var opponentCurve: [Int]
 
     func focusSeconds(at now: Date) -> Int {
@@ -34,10 +38,10 @@ struct ShieldRaceSnapshot: Codable, Equatable, Sendable {
         return Int((from + (to - from) * fraction).rounded())
     }
 
-    /// 相手との差（プラスならリード）。別の日・相手なしなら nil
+    /// 相手との差（プラスならリード）。別の日（その日の始まりより前・区切り以降）・相手なしなら nil
     func diffSeconds(at now: Date, calendar: Calendar) -> Int? {
-        guard DayBoundary.dayKey(containing: now, calendar: calendar) == dayKey,
-              let opponent = opponentSeconds(at: now) else { return nil }
+        let end = dayEnd ?? dayStart.addingTimeInterval(24 * 3600)
+        guard now >= dayStart, now < end, let opponent = opponentSeconds(at: now) else { return nil }
         return focusSeconds(at: now) - opponent
     }
 }

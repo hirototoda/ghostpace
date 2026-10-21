@@ -72,8 +72,8 @@ private struct MainView: View {
         self.model = model
         _tab = State(initialValue: options.opensAnalysis ? .analysis : options.openPlan ? .plan : .timer)
         let openDay = options.openDay.map { days in
-            let today = DayBoundary.dayStart(containing: model.clock.now(), calendar: model.calendar)
-            return model.calendar.date(byAdding: .day, value: -days, to: today) ?? today
+            let boundary = model.boundary
+            return boundary.day(-days, from: boundary.day(containing: model.clock.now())).start
         }
         _analysisPath = State(initialValue: options.openTimeline ? [.timeline]
                               // 自己ベストから開いたその日のグラフ（相手は今日、ANA-05）は `-openBest … -openDay <何日前>`
@@ -154,7 +154,9 @@ private struct MainView: View {
         // 計画・分析のタブは、それぞれの画面が自分で知らせを出す
         .saveErrorAlert($model.errorMessage, when: tab == .timer && isHomeTopmost)
         .fullScreenCover(item: Binding(get: { model.morningPlan }, set: { _ in })) { morning in
-            DailyPlanView(mode: .morning, dayStart: morning.dayStart, now: model.clock.now(), plan: morning.draft,
+            DailyPlanView(mode: .morning, dayStart: morning.dayStart, now: model.clock.now(), dayEnd: morning.dayEnd,
+                          dayDate: morning.day.date, gridStart: morning.gridStart,
+                          boundaryLabel: BoundaryText.time(morning.day.endMinutes), plan: morning.draft,
                           categories: model.categories, projects: model.projects,
                           onCreateProject: { model.createProject(name: $0, category: $1) },
                           onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) },
@@ -165,7 +167,7 @@ private struct MainView: View {
                           showsGoal: true, templates: model.templates, calendar: model.calendar,
                           onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) },
                           sleep: sleepRow(dayStart: morning.dayStart),
-                          habitDraft: model.habits.draft(dayStart: morning.dayStart, calendar: model.calendar),
+                          habitDraft: model.habits.draft(day: morning.day, calendar: model.calendar),
                           candidates: { model.candidates(for: $0, dayStart: morning.dayStart, excludingEnded: false) },
                           awake: model.awakeRange(dayStart: morning.dayStart))
         }
@@ -180,7 +182,7 @@ private struct MainView: View {
         }
         .background {
             Color.clear.sheet(isPresented: Binding(get: { presentsIntro }, set: { if !$0 { model.postponeNotifications() } })) {
-                NotificationIntroSheet(reviewMinutes: model.reviewMinutes) {
+                NotificationIntroSheet(boundaryLabel: BoundaryText.time(model.todayEndMinutes)) {
                     Task { await model.enableNotifications() }
                 } onLater: {
                     model.postponeNotifications()
@@ -234,7 +236,7 @@ private struct MainView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
                 model.reload(quietly: true)
-                // 開いたまま朝4:00をまたいだ日も、ヘルスケアに入っていれば置き換える（DTX-02）
+                // 開いたまま朝4:00をまたいだ日も、ヘルスケアに入っていれば置き換える（DTX-02。その日の区切りまで）
                 await model.refreshSleep(onlyIfSetting: true)
             }
         }
@@ -270,7 +272,8 @@ private struct MainView: View {
     @ViewBuilder
     private var planTab: some View {
         if let plan = model.plan {
-            DailyPlanView(mode: .tab, dayStart: model.snapshot.dayStart, now: model.snapshot.now, plan: plan,
+            DailyPlanView(mode: .tab, dayStart: model.snapshot.dayStart, now: model.snapshot.now, dayEnd: model.snapshot.dayEnd,
+                          dayDate: model.snapshot.dayDate, boundaryLabel: BoundaryText.time(model.todayEndMinutes), plan: plan,
                           categories: model.categories, projects: model.projects,
                           onCreateProject: { model.createProject(name: $0, category: $1) },
                           onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) },
@@ -280,7 +283,8 @@ private struct MainView: View {
                           onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) },
                           templateEditor: { AnyView(TemplateEditView(model: model, template: $0)) },
                           sleep: sleepRow(dayStart: model.snapshot.dayStart),
-                          habitDraft: model.habits.draft(dayStart: model.snapshot.dayStart, calendar: model.calendar),
+                          habitDraft: model.habits.draft(dayStart: model.snapshot.dayStart, dayEnd: model.snapshot.dayEnd,
+                                                         dayDate: model.snapshot.dayDate, calendar: model.calendar),
                           candidates: { model.candidates(for: $0, dayStart: model.snapshot.dayStart, excludingEnded: true) },
                           habits: model.habits, habitsEditor: { AnyView(HabitsView(model: model)) },
                           awake: model.awakeRange(dayStart: model.snapshot.dayStart),
@@ -299,19 +303,24 @@ private struct MainView: View {
         if let content = model.reviewContent() {
             ReviewView(content: content) { tomorrow = model.tomorrowPlan() }
                 .sheet(item: $tomorrow) { plan in
-                    DailyPlanView(mode: .tomorrow, dayStart: plan.dayStart, now: model.clock.now(), plan: plan.draft,
+                    DailyPlanView(mode: .tomorrow, dayStart: plan.dayStart, now: model.clock.now(), dayEnd: plan.dayEnd,
+                                  dayDate: plan.day.date, boundaryLabel: BoundaryText.time(plan.day.endMinutes), plan: plan.draft,
                                   categories: model.categories, projects: model.projects,
                                   onCreateProject: { model.createProject(name: $0, category: $1) },
                                   onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) },
                                   onChange: { model.saveTomorrowDraft($0, for: plan) },
-                                  onConfirm: { if model.saveTomorrowDraft($0, for: plan) { tomorrow = nil } },
-                                  onDismiss: { _ in tomorrow = nil },
+                                  onConfirm: { if model.saveTomorrowDraft($0, for: plan, reloads: true) { tomorrow = nil } },
+                                  onDismiss: { _ in
+                                      tomorrow = nil
+                                      // 前の夜の予定の通知・ゲーム・SNS の時間を登録し直す（PLN-11）
+                                      model.reload(quietly: true)
+                                  },
                                   errorMessage: $model.errorMessage,
                                   // 明日の最初のブロックは 8:00 から（review.md）
-                                  firstStart: model.calendar.date(byAdding: .hour, value: 8 - DayBoundary.hour, to: plan.dayStart),
+                                  firstStart: model.boundary.wallClock(plan.day.date, minutes: 8 * 60),
                                   showsGoal: true, templates: model.templates, calendar: model.calendar,
                                   onSaveAsTemplate: { model.saveAsTemplate(name: $0, plan: $1) },
-                                  habitDraft: model.habits.draft(dayStart: plan.dayStart, calendar: model.calendar),
+                                  habitDraft: model.habits.draft(day: plan.day, calendar: model.calendar),
                                   candidates: { model.candidates(for: $0, dayStart: plan.dayStart, excludingEnded: false) },
                                   awake: model.awakeRange(dayStart: plan.dayStart))
                 }

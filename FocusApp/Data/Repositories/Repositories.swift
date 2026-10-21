@@ -131,4 +131,18 @@ protocol SleepRepository {
     func saveSleep(_ sleep: SleepLine, dayKey: String, timeZone: TimeZone) throws
 }
 
+/// 一日の区切りの履歴（GHO-17、保存データ第6版、data-model.md「DayBoundaryChange」）。
+@MainActor
+protocol BoundaryRepository {
+    /// 区切りの履歴（すべての行）
+    func boundaryChanges() throws -> [DayBoundaryChange]
+    /// `fromDayKey` から `endMinutes` で区切る行を足す。同じ fromDayKey の行があれば書き換える
+    func setBoundary(endMinutes: Int, fromDayKey: String, timeZone: TimeZone) throws
+    /// 区切りの履歴（呼んだ時点の行。タイマーの記録の dayKey を決めるのに使う）
+    func dayBoundary(timeZone: TimeZone) throws -> DayBoundary
+    /// タイマーの記録か1日の計画が1つでもあるか（区切りの履歴を足すとき、移す端末か新しく入れた端末かを決める）
+    func hasAnyRecord() throws -> Bool
+}
+
 typealias RecordStore = CategoryRepository & PlanRepository & SessionRepository & TemplateRepository & SleepRepository
+    & BoundaryRepository

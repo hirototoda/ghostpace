@@ -11,6 +11,17 @@ func jst(_ text: String) -> Date { LaunchOptions.parseDate(text, timeZone: tokyo
 
 var tokyoCalendar: Calendar { Calendar.app(timeZone: tokyo) }
 
+/// 区切りの履歴がないとき（朝4:00区切り、2026-10-21 の版より前の日の数え方）の日。今までのテストの見本の記録に使う
+extension DayBoundary {
+    static func dayKey(containing date: Date, calendar: Calendar) -> String { DayBoundary(calendar: calendar).dayKey(containing: date) }
+    static func dayStart(containing date: Date, calendar: Calendar) -> Date { DayBoundary(calendar: calendar).dayStart(containing: date) }
+}
+
+/// 区切りの履歴（`[(fromDayKey, endMinutes)]`）からの区切り
+func boundary(_ rows: [(String, Int)]) -> DayBoundary {
+    DayBoundary(calendar: tokyoCalendar, changes: rows.map { DayBoundaryChange(fromDayKey: $0.0, endMinutes: $0.1) })
+}
+
 /// 途中で進められる時計。
 final class MutableClock: AppClock {
     private let date: Mutex<Date>

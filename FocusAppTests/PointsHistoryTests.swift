@@ -62,16 +62,19 @@ struct PointsHistoryTests {
         let m = model(t)
         #expect(m.daySnapshot(daysAgo: -1) == nil)
         #expect(m.daySnapshot(of: jst("2026-10-20T04:00")) == nil)
-        #expect(m.daySnapshot(of: jst("2026-10-18T04:00"))?.now == jst("2026-10-19T04:00"))
+        // 過ぎた日はその日の区切りまで（新しく入れた端末の最初の日の前の日は 4:00〜22:00）
+        #expect(m.daySnapshot(of: jst("2026-10-18T04:00"))?.now == jst("2026-10-18T22:00"))
     }
 
-    /// 0:00〜3:59 は前の日が「今日」
-    @Test func beforeFourIsStillThePreviousDay() throws {
-        let t = try TestStore(now: jst("2026-10-20T03:59"))
+    /// 区切り 22:00 より後は次の日が「今日」（2026-10-21 までは 0:00〜3:59 が前の日だった）
+    @Test func afterTheBoundaryIsTheNextDay() throws {
+        let t = try TestStore(now: jst("2026-10-19T22:30"))
         try t.seeded()
         let m = model(t)
-        #expect(m.daySnapshot(daysAgo: 0)?.dayStart == jst("2026-10-19T04:00"))
-        #expect(m.pointsHistory(days: 7).last?.dayStart == jst("2026-10-19T04:00"))
+        #expect(m.daySnapshot(daysAgo: 0)?.dayStart == jst("2026-10-19T22:00"))
+        #expect(m.daySnapshot(daysAgo: 0)?.dayKey == "2026-10-20")
+        #expect(m.pointsHistory(days: 7).last?.dayStart == jst("2026-10-19T22:00"))
+        #expect(m.pointsHistory(days: 7).last?.displayDate == jst("2026-10-20T00:00"))
     }
 
     /// 前の日に始めて4:00をまたいだタイマーは、4:00より後の分をその日に入れる（ホームと同じ）
@@ -84,15 +87,15 @@ struct PointsHistoryTests {
         #expect(m.daySnapshot(daysAgo: 1)?.focusSeconds == 3600)
     }
 
-    /// 4:00 ちょうどは新しい日。前の日は翌4:00 までの過ぎた日
-    @Test func atFourSharpTodayIsTheNewDay() throws {
-        let t = try TestStore(now: jst("2026-10-20T04:00"))
+    /// 区切り 22:00 ちょうどは新しい日。前の日は区切りまでの過ぎた日
+    @Test func atTheBoundaryTodayIsTheNewDay() throws {
+        let t = try TestStore(now: jst("2026-10-19T22:00"))
         try t.seeded()
         let m = model(t)
-        #expect(m.daySnapshot(daysAgo: 0)?.dayStart == jst("2026-10-20T04:00"))
-        #expect(m.daySnapshot(daysAgo: 1)?.dayStart == jst("2026-10-19T04:00"))
-        #expect(m.daySnapshot(daysAgo: 1)?.now == jst("2026-10-20T04:00"))
-        #expect(m.pointsHistory(days: 7).last?.dayStart == jst("2026-10-20T04:00"))
+        #expect(m.daySnapshot(daysAgo: 0)?.dayStart == jst("2026-10-19T22:00"))
+        #expect(m.daySnapshot(daysAgo: 1)?.dayStart == jst("2026-10-18T22:00"))
+        #expect(m.daySnapshot(daysAgo: 1)?.now == jst("2026-10-19T22:00"))
+        #expect(m.pointsHistory(days: 7).last?.dayStart == jst("2026-10-19T22:00"))
     }
 
     // MARK: ポイントの推移（ANA-04）
@@ -132,7 +135,8 @@ struct PointsHistoryTests {
         let week = m.pointsHistory(days: 7)
         #expect(week.count == 7)
         #expect(week.first?.dayStart == jst("2026-10-13T04:00"))
-        #expect(week.last?.dayStart == jst("2026-10-19T04:00"))
+        // 新しく入れた端末は使い始めた日から 22:00 区切り（今日は前の夜 22:00 から）
+        #expect(week.last?.dayStart == jst("2026-10-18T22:00"))
         #expect(week.last?.isToday == true)
         #expect(week.dropLast().allSatisfy { !$0.isToday })
         #expect(m.pointsHistory(days: 30).count == 30)

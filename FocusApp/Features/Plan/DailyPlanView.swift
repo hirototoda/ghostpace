@@ -13,8 +13,17 @@ struct DailyPlanView: View {
     }
 
     let mode: Mode
+    /// 一日の始まり（前の日の区切り）
     let dayStart: Date
     let now: Date
+    /// その日の区切り（一日の終わり）。nil なら24時間後
+    var dayEnd: Date? = nil
+    /// 日の名前の日の 0:00（見出しの日付・曜日・テンプレートの当てはめ）。nil なら一日の始まりの日
+    var dayDate: Date? = nil
+    /// 格子の始まり（朝の計画は起きた時刻。前の夜の分は格子に出さない、PLN-11）。nil なら一日の始まり
+    var gridStart: Date? = nil
+    /// 区切りの時刻の表示（「22:00」）。区切りをまたぐときの理由に出す
+    var boundaryLabel: String? = nil
     @State var plan: PlanDraft
     let categories: [CategoryOption]
     let projects: [ProjectOption]
@@ -134,7 +143,8 @@ struct DailyPlanView: View {
             .background {
                 // シートは1つの View に1つまで。ブロックの編集とは別の階層から出す
                 Color.clear.sheet(item: $previewing) { template in
-                    TemplatePreviewSheet(template: template, plan: template.draft(dayStart: dayStart, calendar: calendar),
+                    TemplatePreviewSheet(template: template, plan: template.draft(dayStart: dayStart, dayEnd: end, dayDate: date,
+                                                                                  calendar: calendar),
                                          now: now, editor: templateEditor) {
                         applyFuture(template)
                         previewing = nil
@@ -167,11 +177,12 @@ struct DailyPlanView: View {
                 .animation(.easeOut(duration: 0.25), value: gridProblem)
             }
             .sheet(item: $editing) { target in
-                BlockEditorSheet(block: target.block, isNew: target.isNew, plan: plan, dayStart: dayStart,
+                BlockEditorSheet(block: target.block, isNew: target.isNew, plan: plan, dayStart: dayStart, dayEnd: end,
+                                 boundaryLabel: boundaryLabel, calendar: calendar,
                                  categories: categories, projects: projects, onCreateProject: onCreateProject,
                                  onCreateCategory: onCreateCategory,
                                  showsUnblock: plan.remainingUnblocks > 0 || target.block.isUnblock,
-                                 isConfirmedDay: mode == .tab, now: now,
+                                 isConfirmedDay: startedDay, now: now,
                                  onEndNow: {
                                      plan.endUnblock(id: target.block.id, now: now)
                                      editing = nil
@@ -200,11 +211,26 @@ struct DailyPlanView: View {
 
     // MARK: 時間の格子（PLN-10）
 
-    private var gridLayout: PlanGridLayout { PlanGridLayout(dayStart: dayStart, hourHeight: PlanGridLayout.hourHeight) }
+    private var gridLayout: PlanGridLayout {
+        PlanGridLayout(dayStart: gridStart ?? dayStart, hourHeight: PlanGridLayout.hourHeight, rangeEnd: end)
+    }
 
-    /// 開いたときに見せる時刻（4:00 からの時間）。朝・明日は起きた時刻、計画のタブは今の1時間前
+    private var end: Date { dayEnd ?? dayStart.addingTimeInterval(24 * 3600) }
+    private var date: Date { dayDate ?? calendar.startOfDay(for: dayStart) }
+
+    /// 始まった日（計画のタブ、区切りの後に開いた朝・明日の計画）は、始まった・終わったブロックを格子で動かさない（Q47）
+    private var startedDay: Bool { mode == .tab || dayStart <= now }
+
+    /// 格子に出すブロック（朝の計画は起きた時刻から。前の夜の分は出さないが計画には残る、PLN-11）
+    private var gridBlocks: [PlanBlockDraft] {
+        plan.sortedBlocks.filter { $0.start >= gridLayout.dayStart }
+    }
+
+    /// 開いたときに見せる時刻（格子の始まりからの時間）。朝は起きた時刻、明日は一日の始まり、計画のタブは今の1時間前
     private var initialHour: Int {
-        PlanGridLayout.initialHour(confirmedDay: mode == .tab, now: now, wake: awake?.lowerBound ?? dayStart, dayStart: dayStart)
+        let wake = mode == .tomorrow ? gridLayout.dayStart : awake?.lowerBound ?? gridLayout.dayStart
+        return PlanGridLayout.initialHour(confirmedDay: mode == .tab, now: now, wake: wake, dayStart: gridLayout.dayStart,
+                                          dayEnd: gridLayout.dayEnd)
     }
 
     private var planCard: some View {
@@ -220,9 +246,9 @@ struct DailyPlanView: View {
             }
             .padding(.vertical, 10)
             .accessibilityIdentifier("addBlockButton")
-            PlanGridView(blocks: plan.sortedBlocks, layout: gridLayout, now: now,
-                         showsNow: mode != .tomorrow, awake: awake ?? dayStart...gridLayout.dayEnd,
-                         confirmedDay: mode == .tab, isLocked: isLockedUnblock,
+            PlanGridView(blocks: gridBlocks, layout: gridLayout, now: now,
+                         showsNow: mode != .tomorrow, awake: awake ?? gridLayout.dayStart...gridLayout.dayEnd,
+                         confirmedDay: startedDay, isLocked: isLockedUnblock,
                          onTap: { editing = EditorTarget(block: $0, isNew: false) },
                          onTapEmpty: { start in
                              editing = EditorTarget(block: PlanBlockDraft(start: start, minutes: PlanDraft.defaultMinutes,
@@ -258,9 +284,9 @@ struct DailyPlanView: View {
         }
     }
 
-    /// 格子で動かした・長さを変えたブロック。重なる・4:00 をまたぐときは元のまま理由を出す
+    /// 格子で動かした・長さを変えたブロック。重なる・その日の区切りをまたぐときは元のまま理由を出す
     private func commitFromGrid(_ block: PlanBlockDraft) {
-        if let reason = plan.problem(with: block, dayStart: dayStart) {
+        if let reason = plan.problem(with: block, dayStart: dayStart, dayEnd: end, boundaryLabel: boundaryLabel) {
             gridProblem = reason
         } else {
             plan.upsert(block)
@@ -386,7 +412,7 @@ struct DailyPlanView: View {
     private func load(_ template: PlanTemplate) {
         let previous = plan
         // 習慣のブロックは残す（PLN-08、2026-10-05 オーナー決定）
-        var loaded = plan.loading(template.draft(dayStart: dayStart, calendar: calendar), keeping: habitDraft)
+        var loaded = plan.loading(template.draft(dayStart: dayStart, dayEnd: end, dayDate: date, calendar: calendar), keeping: habitDraft)
         loaded.goalSeconds = nil
         plan = loaded
         // 確認は出さず、「元に戻す」を6秒出す（Q17、2026-10-01 決定）
@@ -398,7 +424,8 @@ struct DailyPlanView: View {
     /// 日中にテンプレートで進める：今から先だけを置き換える（2026-10-01 オーナー要望）
     private func applyFuture(_ template: PlanTemplate) {
         let previous = plan
-        plan = plan.replacingFuture(with: template.draft(dayStart: dayStart, calendar: calendar), now: now, keeping: habitDraft)
+        plan = plan.replacingFuture(with: template.draft(dayStart: dayStart, dayEnd: end, dayDate: date, calendar: calendar), now: now,
+                                    keeping: habitDraft)
         undo = TemplateUndo(message: "「\(template.name)」で進めます", previous: previous)
     }
 
@@ -430,17 +457,17 @@ struct DailyPlanView: View {
     }
 
     private var weekdayName: String {
-        ["日", "月", "火", "水", "木", "金", "土"][(calendar.component(.weekday, from: dayStart) - 1) % 7]
+        ["日", "月", "火", "水", "木", "金", "土"][(calendar.component(.weekday, from: date) - 1) % 7]
     }
 
     // MARK: ゲーム・SNS の時間（BLK-10）
 
     private func isLockedUnblock(_ block: PlanBlockDraft) -> Bool {
-        PlanDraft.isLocked(block, confirmedDay: mode == .tab, now: now)
+        PlanDraft.isLocked(block, confirmedDay: startedDay, now: now)
     }
 
     private func delete(_ block: PlanBlockDraft) {
-        plan.delete(id: block.id, confirmedDay: mode == .tab, now: now)
+        plan.delete(id: block.id, confirmedDay: startedDay, now: now)
     }
 
     /// 「元に戻す」の帯。背景と同じ色だと気づかれないので、反対の色で目立たせる（2026-10-01 実機での指摘）
@@ -524,16 +551,17 @@ struct DailyPlanView: View {
     }
 
     private var newBlockTarget: EditorTarget {
-        EditorTarget(
-            block: PlanBlockDraft(start: plan.blocks.isEmpty ? (firstStart ?? plan.nextStart(now: now)) : plan.nextStart(now: now),
-                                  minutes: PlanDraft.defaultMinutes,
-                                  category: categories.first ?? .unknown),
-            isNew: true)
+        let shown = PlanDraft(blocks: gridBlocks)
+        var start = shown.blocks.isEmpty ? (firstStart ?? shown.nextStart(now: now)) : shown.nextStart(now: now)
+        // 格子の外（格子の始まりより前・区切り以降）にならないように
+        if start < gridLayout.dayStart || start >= gridLayout.dayEnd { start = gridLayout.dayStart }
+        return EditorTarget(block: PlanBlockDraft(start: start, minutes: PlanDraft.defaultMinutes, category: categories.first ?? .unknown),
+                            isNew: true)
     }
 
     private var summary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(dayStart.formatted(.dateTime.month().day().weekday(.wide).locale(Locale(identifier: "ja_JP"))))
+            Text(date.formatted(.dateTime.month().day().weekday(.wide).locale(Locale(identifier: "ja_JP"))))
                 .font(.headline)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 20) { totals }

@@ -15,6 +15,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                boundarySection
                 notificationSection
                 BlockingSettingsSection(model: model, notificationsOff: model.notificationStatus != .authorized) {
                     // 外せるものがないときは長押しを挟まない
@@ -67,6 +68,36 @@ struct SettingsView: View {
         .task { await model.refreshNotificationStatus() }
     }
 
+    // MARK: 一日の区切り（GHO-17）
+
+    private var boundarySection: some View {
+        Section {
+            Picker(selection: Binding(get: { model.boundaryEndMinutes }, set: { model.setBoundary(endMinutes: $0) })) {
+                ForEach(DayBoundary.choices, id: \.self) { minutes in
+                    Text(BoundaryText.time(minutes)).tag(minutes)
+                }
+            } label: {
+                Label("一日の区切り", systemImage: "moon.stars")
+            }
+            .accessibilityIdentifier("dayBoundaryPicker")
+            // 変えたら次の日から効く。行の下に知らせる（Q46）
+            if let pending = model.pendingBoundaryChange {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(BoundaryText.pending(pending))
+                    if let length = BoundaryText.tomorrowLength(pending) { Text(length) }
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("dayBoundaryPending")
+            }
+        } header: {
+            Text("一日の区切り")
+        } footer: {
+            Text("この時刻で、その日の点数・集中した時間・開けた時間・先週の自分との勝ち負けが確定し、次の日が始まります。振り返りの通知もこの時刻に出て、ホームの「今日を振り返る」もこの時刻から出ます。変えると、次の日から効きます。")
+        }
+    }
+
     // MARK: 通知
 
     private var notificationSection: some View {
@@ -74,10 +105,6 @@ struct SettingsView: View {
             if model.notificationStatus != .authorized {
                 permissionRow
             }
-            DatePicker(selection: reviewTime, displayedComponents: .hourAndMinute) {
-                Label("振り返りの通知", systemImage: "moon.stars")
-            }
-            .accessibilityIdentifier("reviewTimePicker")
             Toggle(isOn: Binding(get: { model.plannedEndNotifications }, set: { model.setPlannedEndNotifications($0) })) {
                 Label("予定の時間の通知", systemImage: "bell")
             }
@@ -92,7 +119,7 @@ struct SettingsView: View {
         } header: {
             Text("通知")
         } footer: {
-            Text("夜の振り返りは、この時刻からホームにも出ます。予定の時間の通知は、カウントダウンが0になったときに知らせます。計画の前の通知は、計画ブロックが始まる前に「まもなく〜」と知らせます。")
+            Text("予定の時間の通知は、カウントダウンが0になったときに知らせます。計画の前の通知は、計画ブロックが始まる前に「まもなく〜」と知らせます。")
         }
     }
 
@@ -136,18 +163,6 @@ struct SettingsView: View {
             .accessibilityIdentifier("enableNotificationsButton")
     }
 
-    /// 振り返りの時刻（0:00 からの分）を時刻の選択に合わせる
-    private var reviewTime: Binding<Date> {
-        let calendar = model.calendar
-        let midnight = calendar.startOfDay(for: model.snapshot.dayStart)
-        return Binding {
-            calendar.date(byAdding: .minute, value: model.reviewMinutes, to: midnight) ?? midnight
-        } set: { date in
-            let parts = calendar.dateComponents([.hour, .minute], from: date)
-            model.setReviewMinutes((parts.hour ?? 22) * 60 + (parts.minute ?? 0))
-        }
-    }
-
     // MARK: 睡眠（DTX-02）
 
     private var sleepSection: some View {
@@ -182,7 +197,7 @@ struct SettingsView: View {
 
     private func minutesBinding(start: Bool) -> Binding<Date> {
         let calendar = model.calendar
-        let midnight = calendar.startOfDay(for: model.snapshot.dayStart)
+        let midnight = model.snapshot.dayDate
         return Binding {
             midnight.addingTimeInterval(Double((start ? model.sleepStartMinutes : model.sleepEndMinutes) * 60))
         } set: { date in

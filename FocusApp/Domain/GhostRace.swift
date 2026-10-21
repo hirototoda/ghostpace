@@ -17,7 +17,7 @@ struct TimeSegment: Hashable {
         max(0, Int(min(end, date).timeIntervalSince(start)))
     }
 
-    /// `dayStart`（4:00）より前を切り落とす。前の日に始めて4:00をまたいだタイマーの、新しい日の分（2026-10-03）
+    /// `dayStart`（一日の始まり）より前を切り落とす。前の日に始めて区切りをまたいだタイマーの、新しい日の分（2026-10-03）
     func starting(at dayStart: Date) -> TimeSegment? {
         guard end > dayStart else { return nil }
         var segment = self
@@ -37,7 +37,7 @@ extension [TimeSegment] {
     }
 }
 
-/// 先週の同じ曜日の自分。区間は日付境界からの経過時間で今日に揃えてある（GHO-02）。
+/// 先週の同じ曜日の自分。区間は同じ時刻でそろえて（7日ずらして）今日に重ねてある（GHO-02）。
 struct GhostSummary: Hashable {
     var segments: [TimeSegment]
 
@@ -47,21 +47,28 @@ struct GhostSummary: Hashable {
 }
 
 extension GhostSummary {
-    /// 先週の記録を、日付境界からの経過時間で今日に揃える（GHO-02）。24時間を超える部分は切る。記録がなければ nil。
-    init?(lastWeek sessions: [FocusSession], lastWeekStart: Date, todayStart: Date) {
+    /// 先週の記録を、同じ時刻でそろえて今日に重ねる（GHO-02、glossary.md「同じ時刻でそろえる」）。
+    /// 先週の日の始まりより前・終わりより後は切る（始まりより前は0、終わりより後は先週のその日の合計になる）。記録がなければ nil。
+    /// - lastWeekDay: 先週の日の始まり〜終わり（先週の区切りで数えたまま）
+    /// - shift: 先週の日を今日に重ねるずれ（日の名前の日の 0:00 どうしの差。ふつうは7日）
+    init?(lastWeek sessions: [FocusSession], lastWeekDay: DateInterval, shift: TimeInterval) {
         guard !sessions.isEmpty else { return nil }
-        let offset = todayStart.timeIntervalSince(lastWeekStart)
-        let limit = lastWeekStart.addingTimeInterval(24 * 3600)
-        // 前の日に始めて4:00をまたいだ分も入れる（4:00より前は切る、2026-10-03）
+        // 前の日に始めて区切りをまたいだ分も入れる（区切りより前は切る、2026-10-03）
         segments = sessions
             .flatMap { $0.activeSegments(now: $0.endAt ?? $0.startAt) }
-            .compactMap { $0.starting(at: lastWeekStart) }
+            .compactMap { $0.starting(at: lastWeekDay.start) }
             .compactMap { segment in
-                let end = min(segment.end, limit)
+                let end = min(segment.end, lastWeekDay.end)
                 guard end > segment.start else { return nil }
-                return TimeSegment(start: segment.start.addingTimeInterval(offset), end: end.addingTimeInterval(offset),
+                return TimeSegment(start: segment.start.addingTimeInterval(shift), end: end.addingTimeInterval(shift),
                                    countsAsFocus: segment.countsAsFocus, detoxGroup: segment.detoxGroup,
                                    isDeclared: segment.isDeclared)
             }
+    }
+
+    /// 区切りが同じ週（履歴がない日を含む）：日の始まりからの経過で揃え、24時間を超える部分は切る（今までと同じ）
+    init?(lastWeek sessions: [FocusSession], lastWeekStart: Date, todayStart: Date) {
+        self.init(lastWeek: sessions, lastWeekDay: DateInterval(start: lastWeekStart, duration: 24 * 3600),
+                  shift: todayStart.timeIntervalSince(lastWeekStart))
     }
 }

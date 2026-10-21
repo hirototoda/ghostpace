@@ -233,18 +233,21 @@ struct SleepModelTests {
         #expect(try t.store.sleep(dayKey: "2026-10-17") == saved)
     }
 
-    /// 3:59 はまだ前の日（置き換えられる）、4:00 からは新しい日
-    @Test func fourAmBoundary() async throws {
-        let t = try TestStore(now: jst("2026-10-20T03:59"))
+    /// 21:59 はまだその日（置き換えられる）、区切り 22:00 からは新しい日。新しい日の睡眠は朝4:00から保存する（DTX-02、2026-10-21）
+    @Test func dayBoundaryForSleep() async throws {
+        let t = try TestStore(now: jst("2026-10-19T21:59"))
         try t.seeded()
         let source = NoSleepSource(isAvailable: true, intervals: [lastNight])
         let m = model(t, source: source)
         #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00")) != nil)
         await m.refreshSleep()
         #expect(try t.store.sleep(dayKey: "2026-10-19")?.source == .health)
-        t.clock.set(jst("2026-10-20T04:00"))
+        t.clock.set(jst("2026-10-19T22:00"))
         m.reload()
         #expect(m.sleepLine(dayStart: jst("2026-10-19T04:00")) == nil)
+        #expect(m.sleep == nil)
+        t.clock.set(jst("2026-10-20T04:00"))
+        m.reload()
         #expect(m.sleepLine(dayStart: jst("2026-10-20T04:00"))?.source == .setting)
     }
 
@@ -351,7 +354,7 @@ struct SleepModelTests {
         let source = NoSleepSource(isAvailable: true, intervals: [lastNight])
         let m = model(t, source: source)
         await confirm(m)
-        t.clock.set(jst("2026-10-20T03:59"))
+        t.clock.set(jst("2026-10-19T21:59"))
         m.reload()
         #expect(m.isPlanConfirmed)
         t.clock.set(jst("2026-10-20T04:00"))
@@ -476,15 +479,15 @@ extension SleepModelTests {
         #expect(model(t, source: NoSleepSource(isAvailable: true)).canRereadHealth)
     }
 
-    /// 0:00〜3:59 は前の日の睡眠を読み直す（4:00 の区切り）
-    @Test func rereadBeforeFourIsThePreviousDay() async throws {
+    /// 区切り（22:00）〜3:59 は新しい日の睡眠はまだなく、前の日の睡眠は区切りで確定しているので、どれも読み直さない（2026-10-21）
+    @Test func rereadAfterTheBoundaryBeforeFourReplacesNothing() async throws {
         let t = try TestStore(now: jst("2026-10-20T02:00"))
         try t.seeded()
         let source = NoSleepSource(isAvailable: true)
         let m = model(t, source: source)
         source.intervals = [lastNight, DateInterval(start: jst("2026-10-20T00:30"), end: jst("2026-10-20T01:50"))]
-        #expect(await m.rereadSleepFromHealth() == .replaced)
-        #expect(try t.store.sleep(dayKey: "2026-10-19")?.end == lastNight.end)
+        #expect(await m.rereadSleepFromHealth() == .notReplaced)
+        #expect(try t.store.sleep(dayKey: "2026-10-19")?.source == .setting)
         #expect(try t.store.sleep(dayKey: "2026-10-20") == nil)
     }
 
@@ -537,9 +540,9 @@ extension SleepModelTests {
         #expect(try t.store.sleep(dayKey: "2026-10-19")?.source == .setting)
     }
 
-    /// 3:59 は前の日、4:00 はその日の睡眠を読み直す
-    @Test func rereadAtThreeFiftyNineAndFour() async throws {
-        let t = try TestStore(now: jst("2026-10-20T03:59"))
+    /// 21:59 はその日、次の朝4:00 は次の日の睡眠を読み直す
+    @Test func rereadBeforeTheBoundaryAndAtFour() async throws {
+        let t = try TestStore(now: jst("2026-10-19T21:59"))
         try t.seeded()
         let tonight = DateInterval(start: jst("2026-10-19T23:30"), end: jst("2026-10-20T03:50"))
         let source = NoSleepSource(isAvailable: true, intervals: [lastNight, tonight])
@@ -553,18 +556,18 @@ extension SleepModelTests {
         #expect(try t.store.sleep(dayKey: "2026-10-19")?.end == lastNight.end)
     }
 
-    /// シートを開いたまま4:00を過ぎてから押したら、前の日も新しい日も置き換えず、新しい日の睡眠を出す
-    @Test func rereadAfterFourWithTheSheetOpenReplacesNothing() async throws {
-        let t = try TestStore(now: jst("2026-10-20T03:50"))
+    /// シートを開いたまま区切り（22:00）を過ぎてから押したら、どの日も置き換えずに閉じる（新しい日の睡眠は朝4:00以降に出る）
+    @Test func rereadAfterTheBoundaryWithTheSheetOpenReplacesNothing() async throws {
+        let t = try TestStore(now: jst("2026-10-19T21:50"))
         try t.seeded()
         let source = NoSleepSource(isAvailable: true)
         let m = model(t, source: source)
         #expect(m.sleep?.dayKey == "2026-10-19")
-        t.clock.set(jst("2026-10-20T04:10"))
+        t.clock.set(jst("2026-10-19T22:10"))
         source.intervals = [lastNight, DateInterval(start: jst("2026-10-19T23:30"), end: jst("2026-10-20T03:50"))]
         #expect(await m.rereadSleepFromHealth() == .notReplaced)
         #expect(try t.store.sleep(dayKey: "2026-10-19")?.source == .setting)
-        #expect(try t.store.sleep(dayKey: "2026-10-20")?.source == .setting)
-        #expect(m.sleep?.dayKey == "2026-10-20")
+        #expect(try t.store.sleep(dayKey: "2026-10-20") == nil)
+        #expect(m.sleep == nil)
     }
 }

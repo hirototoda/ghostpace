@@ -901,28 +901,254 @@ enum SchemaV5: VersionedSchema {
     }
 }
 
-typealias CategoryRecord = SchemaV5.CategoryRecord
-typealias ProjectRecord = SchemaV5.ProjectRecord
-typealias DailyPlanRecord = SchemaV5.DailyPlanRecord
-typealias PlanBlockRecord = SchemaV5.PlanBlockRecord
-typealias FocusSessionRecord = SchemaV5.FocusSessionRecord
-typealias PlanTemplateRecord = SchemaV5.PlanTemplateRecord
-typealias SleepRecord = SchemaV5.SleepRecord
+/// 第6版（2026-10-21）：一日の区切りの履歴（DayBoundaryChangeRecord、GHO-17）を足した。新しい種類を足すだけなので軽量の移行で読める。
+/// ほかの種類は第5版と同じ
+enum SchemaV6: VersionedSchema {
+    static let versionIdentifier = Schema.Version(6, 0, 0)
+
+    static var models: [any PersistentModel.Type] {
+        [CategoryRecord.self, ProjectRecord.self, DailyPlanRecord.self, PlanBlockRecord.self, FocusSessionRecord.self,
+         PlanTemplateRecord.self, SleepRecord.self, DayBoundaryChangeRecord.self]
+    }
+
+    @Model
+    final class CategoryRecord {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        var name: String
+        var countsAsFocus: Bool
+        var sortOrder: Int
+        var isArchived: Bool
+        /// デトックスのグループ（housework／exercise／rest）。nil は上乗せなし（第4版、DTX-03）
+        var detoxGroupRaw: String? = nil
+
+        init(id: UUID = UUID(), name: String, countsAsFocus: Bool, sortOrder: Int, isArchived: Bool = false, at date: Date) {
+            self.id = id
+            self.createdAt = date
+            self.updatedAt = date
+            self.name = name
+            self.countsAsFocus = countsAsFocus
+            self.sortOrder = sortOrder
+            self.isArchived = isArchived
+        }
+    }
+
+    @Model
+    final class ProjectRecord {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        var name: String
+        var categoryId: UUID
+        var isArchived: Bool
+
+        init(id: UUID = UUID(), name: String, categoryId: UUID, isArchived: Bool = false, at date: Date) {
+            self.id = id
+            self.createdAt = date
+            self.updatedAt = date
+            self.name = name
+            self.categoryId = categoryId
+            self.isArchived = isArchived
+        }
+    }
+
+    @Model
+    final class DailyPlanRecord {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        var dayKey: String
+        var timeZoneId: String
+        /// draft / confirmed / skipped（PlanStatus）
+        var statusRaw: String
+        var confirmedAt: Date?
+        /// 確定時の [PlanSnapshotBlock] の JSON（PLN-03）。以後変更しない
+        var snapshotJSON: Data?
+        /// 手で決めた今日の目標（GHO-10）。nil なら計画の集中の合計
+        var goalFocusSec: Int? = nil
+        /// 目標を手で変えたか
+        var goalEdited: Bool = false
+
+        init(id: UUID = UUID(), dayKey: String, timeZoneId: String, statusRaw: String, at date: Date) {
+            self.id = id
+            self.createdAt = date
+            self.updatedAt = date
+            self.dayKey = dayKey
+            self.timeZoneId = timeZoneId
+            self.statusRaw = statusRaw
+        }
+    }
+
+    @Model
+    final class PlanBlockRecord {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        var planId: UUID
+        var startAt: Date
+        var endAt: Date
+        var categoryId: UUID
+        var projectId: UUID?
+        /// 日中の変更で消したブロック（予実分析用に残す）。PersistentModel.isDeleted と名前が衝突するため isRemoved
+        var isRemoved: Bool
+
+        init(id: UUID, planId: UUID, startAt: Date, endAt: Date, categoryId: UUID, projectId: UUID?, at date: Date) {
+            self.id = id
+            self.createdAt = date
+            self.updatedAt = date
+            self.planId = planId
+            self.startAt = startAt
+            self.endAt = endAt
+            self.categoryId = categoryId
+            self.projectId = projectId
+            self.isRemoved = false
+        }
+    }
+
+    @Model
+    final class FocusSessionRecord {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        var dayKey: String
+        var timeZoneId: String
+        var planBlockId: UUID?
+        var categoryId: UUID
+        /// 開始したときにカテゴリが「集中に数える」だったか。後からカテゴリの設定を変えても過去の記録は変わらない（2026-09-30 決定）
+        var countsAsFocus: Bool
+        var projectId: UUID?
+        var startAt: Date
+        /// nil なら実行中
+        var endAt: Date?
+        /// 計画ブロックから開始したときの終了予定（一時停止しても動かない）
+        var plannedEndAt: Date?
+        /// 計画外で長さを決めたときの長さ（一時停止した分だけ終わりがずれる）
+        var plannedDurationSec: Int?
+        /// [PauseInterval] の JSON（TMR-03）
+        var pausesJSON: Data
+        /// 終了時刻を早めたときの元の終了時刻（TMR-08）
+        var originalEndAt: Date?
+        var note: String?
+        /// 押し忘れの申告（TMR-13、第5版）。true なら申告した記録。nil・false はタイマーで計った記録
+        var isDeclared: Bool?
+
+        init(id: UUID = UUID(), dayKey: String, timeZoneId: String, planBlockId: UUID?, categoryId: UUID, countsAsFocus: Bool,
+             projectId: UUID?, startAt: Date, plannedEndAt: Date?, plannedDurationSec: Int?, at date: Date) {
+            self.id = id
+            self.createdAt = date
+            self.updatedAt = date
+            self.dayKey = dayKey
+            self.timeZoneId = timeZoneId
+            self.planBlockId = planBlockId
+            self.categoryId = categoryId
+            self.countsAsFocus = countsAsFocus
+            self.projectId = projectId
+            self.startAt = startAt
+            self.plannedEndAt = plannedEndAt
+            self.plannedDurationSec = plannedDurationSec
+            self.pausesJSON = Data("[]".utf8)
+        }
+    }
+
+    /// 計画のテンプレート（PLN-07）。最大7つ。時刻は「時:分」だけ持つ
+    @Model
+    final class PlanTemplateRecord {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        var name: String
+        var sortOrder: Int
+        /// [TemplateBlockValue] の JSON
+        var blocksJSON: Data
+
+        init(id: UUID = UUID(), name: String, sortOrder: Int, blocksJSON: Data, at date: Date) {
+            self.id = id
+            self.createdAt = date
+            self.updatedAt = date
+            self.name = name
+            self.sortOrder = sortOrder
+            self.blocksJSON = blocksJSON
+        }
+    }
+
+    /// 睡眠の記録（DTX-02、第3版・第4版）。その日の朝に終わった睡眠。1日に1つ
+    @Model
+    final class SleepRecord {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        var dayKey: String
+        var timeZoneId: String
+        var startAt: Date
+        var endAt: Date
+        /// health（ヘルスケア）／setting（設定の時刻）／manual（手で直した）
+        var sourceRaw: String
+        /// 手で直す前の時刻（第4版、DTX-02・03）。最初に手で直したときの直前の値。手で直していなければ nil
+        var originalStartAt: Date? = nil
+        var originalEndAt: Date? = nil
+
+        init(id: UUID = UUID(), dayKey: String, timeZoneId: String, startAt: Date, endAt: Date, sourceRaw: String, at date: Date) {
+            self.id = id
+            self.createdAt = date
+            self.updatedAt = date
+            self.dayKey = dayKey
+            self.timeZoneId = timeZoneId
+            self.startAt = startAt
+            self.endAt = endAt
+            self.sourceRaw = sourceRaw
+        }
+    }
+
+    /// 一日の区切りの履歴（GHO-17、第6版）。設定で区切りを変えるたびに1行（同じ fromDayKey は書き換える）。
+    /// 使い始めた行は書き換えない・消さない（過去の日の点を変えないため、data-model.md「DayBoundaryChange」）
+    @Model
+    final class DayBoundaryChangeRecord {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        /// この区切りを使い始める日の名前（例 2026-10-23）
+        var fromDayKey: String
+        /// その日の区切りを、日の名前の日の 0:00 からの分で（22:00 → 1320、翌4:00 → 1680）
+        var endMinutes: Int
+        /// 変えたときの端末のタイムゾーン（参考）
+        var timeZoneId: String
+
+        init(id: UUID = UUID(), fromDayKey: String, endMinutes: Int, timeZoneId: String, at date: Date) {
+            self.id = id
+            self.createdAt = date
+            self.updatedAt = date
+            self.fromDayKey = fromDayKey
+            self.endMinutes = endMinutes
+            self.timeZoneId = timeZoneId
+        }
+    }
+}
+
+typealias CategoryRecord = SchemaV6.CategoryRecord
+typealias ProjectRecord = SchemaV6.ProjectRecord
+typealias DailyPlanRecord = SchemaV6.DailyPlanRecord
+typealias PlanBlockRecord = SchemaV6.PlanBlockRecord
+typealias FocusSessionRecord = SchemaV6.FocusSessionRecord
+typealias PlanTemplateRecord = SchemaV6.PlanTemplateRecord
+typealias SleepRecord = SchemaV6.SleepRecord
+typealias DayBoundaryChangeRecord = SchemaV6.DayBoundaryChangeRecord
 
 enum AppMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self] }
+    static var schemas: [any VersionedSchema.Type] { [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self] }
     static var stages: [MigrationStage] {
         [.lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self),
          .lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self),
          .lightweight(fromVersion: SchemaV3.self, toVersion: SchemaV4.self),
-         .lightweight(fromVersion: SchemaV4.self, toVersion: SchemaV5.self)]
+         .lightweight(fromVersion: SchemaV4.self, toVersion: SchemaV5.self),
+         .lightweight(fromVersion: SchemaV5.self, toVersion: SchemaV6.self)]
     }
 }
 
 enum AppStore {
     /// 保存先を開く。`url` が nil ならメモリ内。
     static func makeContainer(url: URL?) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: SchemaV5.self)
+        let schema = Schema(versionedSchema: SchemaV6.self)
         let configuration = if let url {
             ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
         } else {

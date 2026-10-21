@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// 時間の格子（PLN-10、docs/product/features/daily-plan.md「時間の格子」）の位置と吸い付き。
-/// 縦の位置は朝4:00からの経過分で決める（1時間 = `hourHeight`）。開始・終わりは :00 と :30 に吸い付く
+/// 縦の位置は格子の始まり（一日の始まり。朝の計画は起きた時刻）からの経過分で決める（1時間 = `hourHeight`）。開始・終わりは :00 と :30 に吸い付く
 struct PlanGridLayout {
     /// 1時間の高さ（2026-10-06 オーナー決定：44pt と比べて、名前が読めて指で動かしやすい 60pt）
     static let hourHeight: CGFloat = 60
@@ -12,11 +12,18 @@ struct PlanGridLayout {
     static let minMinutes = PlanDraft.minuteStep
     static let maxMinutes = 180  // LengthSlider.minuteRange の上限と同じ（View の定数は MainActor なので写す）
 
+    /// 格子の始まり（一日の始まり。朝の計画は起きた時刻、PLN-11）
     let dayStart: Date
     var hourHeight: CGFloat
+    /// 格子の終わり（その日の区切り）。nil なら24時間後
+    var rangeEnd: Date? = nil
 
-    var totalHeight: CGFloat { height(minutes: Self.dayMinutes) }
-    var dayEnd: Date { dayStart.addingTimeInterval(Double(Self.dayMinutes * 60)) }
+    /// 格子の長さ（分）
+    var dayMinutes: Int {
+        rangeEnd.map { max(Self.snapMinutes, Int(($0.timeIntervalSince(dayStart) / 60).rounded())) } ?? Self.dayMinutes
+    }
+    var totalHeight: CGFloat { height(minutes: dayMinutes) }
+    var dayEnd: Date { dayStart.addingTimeInterval(Double(dayMinutes * 60)) }
 
     func height(minutes: Int) -> CGFloat { CGFloat(minutes) * hourHeight / 60 }
 
@@ -26,9 +33,9 @@ struct PlanGridLayout {
     private func date(_ minutes: Int) -> Date { dayStart.addingTimeInterval(Double(minutes * 60)) }
     private func minutes(dy: CGFloat) -> Int { Int((dy * 60 / hourHeight).rounded()) }
 
-    /// ドラッグで動かした先。開始を近い :00/:30 に合わせ、1日（4:00〜翌4:00）の中に収める。長さは変えない
+    /// ドラッグで動かした先。開始を近い :00/:30 に合わせ、格子（一日の始まり〜区切り）の中に収める。長さは変えない
     func moved(_ block: PlanBlockDraft, by dy: CGFloat) -> PlanBlockDraft {
-        let latest = Self.dayMinutes - block.minutes
+        let latest = dayMinutes - block.minutes
         var start = Int((Double(minutes(block.start) + minutes(dy: dy)) / Double(Self.snapMinutes)).rounded()) * Self.snapMinutes
         if start > latest { start = latest / Self.snapMinutes * Self.snapMinutes }
         var moved = block
@@ -37,7 +44,7 @@ struct PlanGridLayout {
     }
 
     /// 下の端をドラッグした先。終わりを近い :00/:30 に合わせる。開始より前・同じになるときは、開始より後の最初の :00/:30。
-    /// 長さは5分〜3時間、終わりは翌4:00 まで。ゲーム・SNS の時間は変えない
+    /// 長さは5分〜3時間、終わりは区切りまで。ゲーム・SNS の時間は変えない
     func resized(_ block: PlanBlockDraft, by dy: CGFloat) -> PlanBlockDraft {
         guard Self.canResize(block) else { return block }
         let start = minutes(block.start)
@@ -46,7 +53,7 @@ struct PlanGridLayout {
         if end < start + Self.minMinutes {
             end = Int((Double(start + Self.minMinutes) / step).rounded(.up)) * Self.snapMinutes
         }
-        end = min(end, start + Self.maxMinutes, Self.dayMinutes)
+        end = min(end, start + Self.maxMinutes, dayMinutes)
         var resized = block
         resized.minutes = max(Self.minMinutes, end - start)
         return resized
@@ -55,22 +62,24 @@ struct PlanGridLayout {
     /// VoiceOver の「30分早く」「30分遅く」。今の時刻から動かす（吸い付かない）
     func shifted(_ block: PlanBlockDraft, minutes delta: Int) -> PlanBlockDraft {
         var shifted = block
-        shifted.start = date(min(max(0, minutes(block.start) + delta), Self.dayMinutes - block.minutes))
+        shifted.start = date(min(max(0, minutes(block.start) + delta), dayMinutes - block.minutes))
         return shifted
     }
 
     /// 空いた所を押したときの開始。押した位置の :00/:30 に切り下げる
     func tapStart(y: CGFloat) -> Date {
         let raw = Int((y * 60 / hourHeight).rounded(.down))
-        return date(min(max(0, raw / Self.snapMinutes * Self.snapMinutes), Self.dayMinutes - Self.snapMinutes))
+        return date(min(max(0, raw / Self.snapMinutes * Self.snapMinutes), dayMinutes - Self.snapMinutes))
     }
 
     static func canResize(_ block: PlanBlockDraft) -> Bool { !block.isUnblock }
 
-    /// 開いたときに見せる時刻（4:00 からの時間、0〜23）。確定した日（計画のタブ）は今の1時間前、下書き（朝・明日）は起きた時刻
-    static func initialHour(confirmedDay: Bool, now: Date, wake: Date, dayStart: Date) -> Int {
+    /// 開いたときに見せる時刻（格子の始まりからの時間）。確定した日（計画のタブ）は今の1時間前、下書き（朝・明日）は起きた時刻
+    /// （明日の計画は一日の始まりを `wake` に渡す。Q47）
+    static func initialHour(confirmedDay: Bool, now: Date, wake: Date, dayStart: Date, dayEnd: Date? = nil) -> Int {
         let target = confirmedDay ? now.addingTimeInterval(-3600) : wake
-        return min(max(0, Int(target.timeIntervalSince(dayStart) / 3600)), 23)
+        let hours = dayEnd.map { max(1, Int(($0.timeIntervalSince(dayStart) / 3600).rounded(.up))) } ?? 24
+        return min(max(0, Int(target.timeIntervalSince(dayStart) / 3600)), hours - 1)
     }
 
     /// 確定した日（計画のタブ）は、もう始まった・終わったブロックを格子で動かさない（2026-10-06 オーナー決定）
@@ -79,8 +88,8 @@ struct PlanGridLayout {
     }
 
     /// 起きている時間。寝る時刻が起きた時刻より前なら1日全部
-    static func awake(wake: Date, bed: Date, dayStart: Date) -> ClosedRange<Date> {
-        let dayEnd = dayStart.addingTimeInterval(Double(dayMinutes * 60))
+    static func awake(wake: Date, bed: Date, dayStart: Date, dayEnd: Date? = nil) -> ClosedRange<Date> {
+        let dayEnd = dayEnd ?? dayStart.addingTimeInterval(Double(dayMinutes * 60))
         let lower = min(max(wake, dayStart), dayEnd), upper = min(max(bed, dayStart), dayEnd)
         return lower < upper ? lower...upper : dayStart...dayEnd
     }

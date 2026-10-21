@@ -105,7 +105,8 @@ struct FocusSession: Identifiable, Hashable {
         plannedEnd(at: now).map { Int($0.timeIntervalSince(now).rounded(.up)) }
     }
 
-    /// 止め忘れの疑い。予定を30分以上超過／ストップウォッチで3時間超／開始した日の翌日4:00を過ぎた。
+    /// 止め忘れの疑い。予定を30分以上超過／ストップウォッチで3時間超／始めた後の最初の朝4:00を過ぎた
+    /// （一日の区切りを夜にしても、ここは朝4:00のまま。区切りをまたぐのはふつうの夜の集中でも起きるため。2026-10-21、Q47）
     func needsEndTimeCheck(at now: Date, calendar: Calendar) -> Bool {
         if let plannedEnd = plannedEnd(at: now), now.timeIntervalSince(plannedEnd) >= Self.forgotOvertime {
             return true
@@ -113,9 +114,16 @@ struct FocusSession: Identifiable, Hashable {
         if !isCountdown, activeDuration(at: now) > Self.forgotStopwatch {
             return true
         }
-        let dayStart = DayBoundary.dayStart(containing: startAt, calendar: calendar)
-        let nextDayStart = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
-        return now >= nextDayStart
+        return now >= Self.firstMorning(after: startAt, calendar: calendar)
+    }
+
+    /// `date` の後の最初の朝4:00（`date` が 4:00 ちょうどなら次の日の 4:00）
+    static func firstMorning(after date: Date, calendar: Calendar) -> Date {
+        let day = calendar.startOfDay(for: date)
+        let morning = calendar.date(bySettingHour: DayBoundary.morningHour, minute: 0, second: 0, of: day) ?? day
+        if date < morning { return morning }
+        let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86400)
+        return calendar.date(bySettingHour: DayBoundary.morningHour, minute: 0, second: 0, of: next) ?? next
     }
 
     /// 終了した値を作る（TMR-08）。`reportedEnd` が now より前なら元の終了時刻（now）を残す。
@@ -168,6 +176,8 @@ struct RunningTimer: Identifiable, Hashable {
     var goal: GoalGhost? = nil
     /// その日の計画ブロック（計画の時刻での切り替え、TMR-11）。計画なし日は空
     var planBlocks: [PlanBlockSummary] = []
+    /// その日の区切りをまたいで動いているとき、新しい日の始まり（差はここから0で比べ直す、focus-timer.md）。またいでいなければ nil
+    var countsFrom: Date? = nil
 
     var id: UUID { session.id }
     var title: String { session.title }
@@ -185,7 +195,8 @@ struct RunningTimer: Identifiable, Hashable {
 
     /// 選んだ相手との差。相手がいなければ nil
     func opponentDiffSeconds(_ opponent: Opponent, at date: Date) -> Int? {
-        let mine = focusSecondsBefore + (countsAsFocus ? elapsedSeconds(at: date) : 0)
+        let elapsed = elapsedSeconds(at: date) - (countsFrom.map { elapsedSeconds(at: $0) } ?? 0)
+        let mine = focusSecondsBefore + (countsAsFocus ? max(0, elapsed) : 0)
         switch opponent {
         case .lastWeek: return ghost.map { mine - $0.focusSeconds(at: date) }
         case .goal: return goal.map { mine - $0.focusSeconds(at: date) }

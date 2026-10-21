@@ -281,19 +281,20 @@ struct DeclarationModelTests {
         #expect(m.declarationProblem(for: morning, end: jst("2026-10-19T09:30")) == nil)
     }
 
-    /// 日をまたぐブロック（23:30〜翌1:00）は 3:59 までその日のうちとして申告でき、記録は始めた日の分
-    @Test func blockAcrossMidnightCanBeDeclaredUntilFourAm() throws {
+    /// 夜のブロック（20:30〜21:50）は区切り（22:00）の前までその日のうちとして申告でき、記録はその日の分
+    /// （2026-10-21 に申告できるのは朝4:00までから区切りまでに）
+    @Test func lateBlockCanBeDeclaredUntilTheBoundary() throws {
         let t = try TestStore(now: jst("2026-10-19T07:00"))
         let c = try t.seeded()
         let m = model(t)
-        m.confirmPlan(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T23:30"), minutes: 90, category: c[0])]))
-        t.clock.set(jst("2026-10-20T03:59"))
+        m.confirmPlan(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T20:30"), minutes: 80, category: c[0])]))
+        t.clock.set(jst("2026-10-19T21:59"))
         m.reload()
         let late = try #require(m.plan?.sortedBlocks.first)
         #expect(m.declare(late, end: late.end))
         #expect(try t.store.sessions(dayKey: "2026-10-19").first?.isDeclared == true)
-        // 4:00 を過ぎると新しい日の計画なので、前の日のブロックは申告できない
-        t.clock.set(jst("2026-10-20T04:00"))
+        // 区切りを過ぎると新しい日の計画なので、前の日のブロックは申告できない
+        t.clock.set(jst("2026-10-19T22:00"))
         m.reload()
         #expect(m.declarationProblem(for: late, end: late.end) != nil)
     }

@@ -22,7 +22,8 @@ struct AppModelTests {
         let t = try TestStore(now: jst("2026-10-19T09:10"))
         let m = model(t)
         #expect(m.morningPlan?.dayKey == "2026-10-19")
-        #expect(m.morningPlan?.dayStart == jst("2026-10-19T04:00"))
+        // 一日は前の夜 22:00 から（2026-10-21 から。それまでは 4:00）
+        #expect(m.morningPlan?.dayStart == jst("2026-10-18T22:00"))
 
         m.saveDraft(PlanDraft(blocks: [block("2026-10-19T09:10", 60, m.categories[0])]))
         let reopened = model(t)
@@ -44,10 +45,13 @@ struct AppModelTests {
         #expect(model(t).morningPlan == nil)
     }
 
+    /// 区切り 22:00・前の日が確定済み（計画しない）：22:00〜3:59 は出ない、4:00 から出る（PLN-01、2026-10-21）
     @Test func morningPlanDayBoundary() throws {
         let t = try TestStore(now: jst("2026-10-18T09:00"))
         model(t).skipPlan()
 
+        t.clock.set(jst("2026-10-18T22:00"))
+        #expect(model(t).morningPlan == nil)
         t.clock.set(jst("2026-10-19T03:59"))
         #expect(model(t).morningPlan == nil)
         t.clock.set(jst("2026-10-19T04:00"))
@@ -56,9 +60,10 @@ struct AppModelTests {
     }
 
     @Test func morningPlanWaitsForRunning() throws {
+        // 3:30 はまだ朝の計画を出さない（区切り〜3:59）
         let t = try TestStore(now: jst("2026-10-19T03:30"))
         let m = model(t)
-        m.skipPlan()
+        #expect(m.morningPlan == nil)
         m.startUnplanned(category: m.categories[0], minutes: nil)
         t.clock.set(jst("2026-10-19T04:10"))
         m.reload()
@@ -70,19 +75,23 @@ struct AppModelTests {
         #expect(m.morningPlan?.dayKey == "2026-10-19")
     }
 
+    /// 区切り 22:00：21:55 に開き 22:05 に確定 → 開いた日の dayKey に保存。新しい日の朝の計画は 4:00 まで出ない（recording-spec.md）
     @Test func morningPlanKeepsOpeningDayKey() throws {
-        let t = try TestStore(now: jst("2026-10-19T03:55"))
+        let t = try TestStore(now: jst("2026-10-19T21:55"))
         let m = model(t)
-        #expect(m.morningPlan?.dayKey == "2026-10-18")
-
-        t.clock.set(jst("2026-10-19T04:05"))
-        m.reload()
-        #expect(m.morningPlan?.dayKey == "2026-10-18")
-        m.confirmPlan(PlanDraft(blocks: [block("2026-10-19T03:00", 30, m.categories[0])]))
-
-        #expect(try t.store.plan(dayKey: "2026-10-18")?.status == .confirmed)
-        #expect(try t.store.plan(dayKey: "2026-10-19") == nil)
         #expect(m.morningPlan?.dayKey == "2026-10-19")
+
+        t.clock.set(jst("2026-10-19T22:05"))
+        m.reload()
+        #expect(m.morningPlan?.dayKey == "2026-10-19")
+        m.confirmPlan(PlanDraft(blocks: [block("2026-10-19T21:00", 30, m.categories[0])]))
+
+        #expect(try t.store.plan(dayKey: "2026-10-19")?.status == .confirmed)
+        #expect(try t.store.plan(dayKey: "2026-10-20") == nil)
+        #expect(m.morningPlan == nil)
+        t.clock.set(jst("2026-10-20T04:00"))
+        m.reload()
+        #expect(m.morningPlan?.dayKey == "2026-10-20")
     }
 
     @Test func reloadUsesProvidedTimeZone() throws {
@@ -99,8 +108,8 @@ struct AppModelTests {
     }
 
     @Test func runningTimerGoalUsesTheSameSleepAsHome() throws {
-        // 今日は 8:00 に起きた（手で直した）、今夜は設定の 0:00。9:00–12:00 勉強・17:00–18:00 休み、目標6時間
-        // → 空き 8:00–9:00・12:00–17:00・18:00–0:00（12時間）に3時間 → 18:00 に 3時間＋6時間×1/4 ＝ 4時間30分（GHO-10）
+        // 今日は 8:00 に起きた（手で直した）、今夜は設定の 0:00 で区切り 22:00 より後なので区切りまで。9:00–12:00 勉強・17:00–18:00 休み、目標6時間
+        // → 空き 8:00–9:00・12:00–17:00・18:00–22:00（10時間）に3時間 → 18:00 に 3時間＋6時間×0.3 ＝ 4時間48分（GHO-10、2026-10-21）
         let t = try TestStore(now: jst("2026-10-19T09:00"))
         try t.store.saveSleep(SleepLine(start: jst("2026-10-19T00:00"), end: jst("2026-10-19T08:00"), source: .manual),
                               dayKey: "2026-10-19", timeZone: tokyo)
@@ -110,8 +119,8 @@ struct AppModelTests {
         m.startUnplanned(category: m.categories[0], minutes: nil)
         let running = try #require(m.running?.goal)
         let home = try #require(m.snapshot.goal)
-        #expect(running.focusSeconds(at: jst("2026-10-19T18:00")) == 270 * 60)
-        #expect(home.focusSeconds(at: jst("2026-10-19T18:00")) == 270 * 60)
+        #expect(running.focusSeconds(at: jst("2026-10-19T18:00")) == 288 * 60)
+        #expect(home.focusSeconds(at: jst("2026-10-19T18:00")) == 288 * 60)
     }
 
     /// 遅れて始めると終わりは計画の長さぶん後ろ（TMR-15、2026-10-06。それまではブロックの終わり）
@@ -263,12 +272,16 @@ struct AppModelTests {
         #expect(m.timelineDay(daysAgo: 1)?.isToday == false)
     }
 
-    @Test func timelineAt0359ShowsPreviousDayAsToday() throws {
-        let t = try TestStore(now: jst("2026-10-20T03:59"))
+    /// 区切り 22:00 より後に開くと次の日が「今日」（10/19 22:30 は「10/20」。2026-10-21 までは 0:00〜3:59 が前の日だった）
+    @Test func timelineAfterTheBoundaryShowsTheNextDayAsToday() throws {
+        let t = try TestStore(now: jst("2026-10-19T22:30"))
         let m = model(t)
         let day = try #require(m.timelineDay(daysAgo: 0))
-        #expect(day.dayKey == "2026-10-19")
-        #expect(day.editableDayKeys == ["2026-10-19", "2026-10-18"])
+        #expect(day.dayKey == "2026-10-20")
+        #expect(day.displayDate == jst("2026-10-20T00:00"))
+        #expect(day.editableDayKeys == ["2026-10-20", "2026-10-19"])
+        t.clock.set(jst("2026-10-20T03:59"))
+        #expect(m.timelineDay(daysAgo: 0)?.dayKey == "2026-10-20")
     }
 
     @Test func shortenEndOnlyForTodayAndYesterday() throws {
@@ -291,37 +304,38 @@ struct AppModelTests {
         #expect(try t.store.sessions(dayKey: "2026-10-17").first?.endAt == jst("2026-10-17T09:30"))
     }
 
-    @Test func sessionCrossing4amBelongsToStartDay() throws {
-        let t = try TestStore(now: jst("2026-10-19T03:30"))
+    /// 区切り（22:00）をまたいだ記録は始めた日（タイムライン）。円の集中時間は区切りで区切る（2026-10-03、2026-10-21 に 4:00 から区切りに）
+    @Test func sessionCrossingTheBoundaryBelongsToStartDay() throws {
+        let t = try TestStore(now: jst("2026-10-19T21:30"))
         let m = model(t)
         m.skipPlan()
         m.startUnplanned(category: m.categories[0], minutes: nil)
-        t.clock.set(jst("2026-10-19T04:30"))
+        t.clock.set(jst("2026-10-19T22:30"))
         m.end(reportedEnd: nil)
-        // 4:30 に見ると、今日（10/19）ではなく昨日（10/18）の記録。合計も開始した日で1時間
+        // 22:30 に見ると、今日（10/20）ではなく昨日（10/19）の記録。合計も開始した日で1時間
         let today = try #require(m.timelineDay(daysAgo: 0))
         let yesterday = try #require(m.timelineDay(daysAgo: 1))
         #expect(today.sessions.isEmpty)
         #expect(yesterday.sessions.count == 1)
         #expect(yesterday.focusSeconds == 60 * 60)
         #expect(yesterday.unplannedSessions.count == 1)
-        // 円の集中時間は 4:00 で区切る：今日（10/19 の日）は 4:00〜4:30 の30分（2026-10-03）
+        // 今日（10/20 の日）は 22:00〜22:30 の30分
         #expect(m.snapshot.focusSeconds == 30 * 60)
     }
 
-    @Test func shortenEndRechecksAtSaveAfter4am() throws {
-        // 10/18 の記録を 10/19 3:59 に開く（昨日なので直せる）→ 4:00 を過ぎてから保存すると一昨日になるので直せない
+    @Test func shortenEndRechecksAtSaveAfterTheBoundary() throws {
+        // 10/18 の記録を 10/19 21:59 に開く（昨日なので直せる）→ 区切り 22:00 を過ぎてから保存すると一昨日になるので直せない
         let t = try TestStore(now: jst("2026-10-18T09:00"))
         let m = model(t)
         m.skipPlan()
         m.startUnplanned(category: m.categories[0], minutes: nil)
         t.clock.set(jst("2026-10-18T10:00"))
         m.requestEnd()
-        t.clock.set(jst("2026-10-20T03:59"))
+        t.clock.set(jst("2026-10-19T21:59"))
         let opened = try #require(m.timelineDay(daysAgo: 1)?.sessions.first)
         #expect(m.timelineDay(daysAgo: 1)?.canEdit(opened) == true)
 
-        t.clock.set(jst("2026-10-20T04:00"))
+        t.clock.set(jst("2026-10-19T22:00"))
         #expect(!m.shortenEnd(opened, to: jst("2026-10-18T09:30")))
         #expect(m.errorMessage == AppModel.cannotEditMessage)
         #expect(try t.store.sessions(dayKey: "2026-10-18").first?.endAt == jst("2026-10-18T10:00"))
