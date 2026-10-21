@@ -13,7 +13,7 @@ SwiftUI / SwiftData / XcodeGen。オーナーはコードを読まず、docs/ �
 - 未決事項は勝手に決めず、非公開側の docs/owner/open-questions.md に追記する。公開側の docs では「Q33（非公開の判断表）」のように番号だけ書く。
 
 ## 設計ルール
-- IDはUUID、時刻はUTCで保存しタイムゾーンを別に持つ。日付境界は4:00（docs/decisions/0005）。
+- IDはUUID、時刻はUTCで保存しタイムゾーンを別に持つ。一日の区切りは設定の時刻（初期 22:00、日ごとに履歴を持つ。docs/decisions/0023、glossary.md「その日の区切り」）。朝の計画を出すのは朝4:00以降。
 - 現在時刻は注入可能なClock（`AppClock`）経由で取得する（Date()の直接呼び出し禁止。例外は`SystemClock`のみ）。テストとデモデータのため。
 - データアクセスはRepository層経由。ViewからSwiftDataを直接触らない。
 - 画面の文言は String Catalog に集め、英語に訳せる形にする（ADR-0016、NFR-06）。今ある画面も触るついでに移す
