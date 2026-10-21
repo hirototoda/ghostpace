@@ -25,6 +25,7 @@
 | [0019](0019-points-diminishing-returns.md) | ポイントは、やりすぎると1分の価値が下がり、開けるほど1回が重くなる形で数える（続けたボーナスをなくす。0014 の睡眠・1.5倍と 0018 のご褒美の部分を置き換え） | draft |
 | [0020](0020-test-queue.md) | テストは Mac 全体の順番待ちで回し、UI テストの全件は TestFlight に送る前に回す（PR と TestFlight の前のテストは 0021 で CI に。順番待ちはこの Mac で回すときだけ） | draft |
 | [0021](0021-github-actions.md) | コードと仕様は公開リポジトリに置き、テストと TestFlight は GitHub Actions で回す | draft |
+| [0022](0022-public-records-and-cheers.md) | ベストと今日を誰でも見られるようにし、応援でメタ報酬を返す（フォロー・インプレッション・応援。通知はしない） | draft |
 
 ## テンプレート
 ```
