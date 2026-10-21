@@ -1135,7 +1135,7 @@ final class AppModel {
         guard start >= block.start else { return refuse(.outOfRange) }
         let length = TimeInterval(session.plannedDurationSec ?? Int(block.end.timeIntervalSince(block.start)))
         let newEnd = start.addingTimeInterval(length)
-        // 戻した終わりが今以下になるときは、タイマーの終わりを動かさず記録だけ足す（すぐ超過にしない。Claude 補足、Q45）
+        // 戻した終わりが今以下になるときは、タイマーの終わりを動かさず記録だけ足す（すぐ超過にしない。Claude 補足、Q47）
         return saveManual(ManualRecordRequest(category: session.category, project: session.project, planBlockId: blockId,
                                               start: start, end: session.startAt, plannedEndAt: block.end, timeZone: timeZone()),
                           adjusting: newEnd > clock.now() ? (session.id, newEnd) : nil)
