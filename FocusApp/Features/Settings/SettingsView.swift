@@ -80,7 +80,7 @@ struct SettingsView: View {
                 Label("一日の区切り", systemImage: "moon.stars")
             }
             .accessibilityIdentifier("dayBoundaryPicker")
-            // 変えたら次の日から効く。行の下に知らせる（Q46）
+            // 変えたら次の日から効く。行の下に知らせる（Q48）
             if let pending = model.pendingBoundaryChange {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(BoundaryText.pending(pending))

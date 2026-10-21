@@ -16,7 +16,7 @@ enum BoundaryText {
             : String(localized: "\(minutes / 60)時間\(minutes % 60)分")
     }
 
-    /// 区切りを変えたときの行の下の知らせ（Q46）。例「明日から 23:00 で区切ります（今日は 22:00 で確定します）」
+    /// 区切りを変えたときの行の下の知らせ（Q48）。例「明日から 23:00 で区切ります（今日は 22:00 で確定します）」
     static func pending(_ change: PendingBoundaryChange) -> String {
         String(localized: "明日から \(time(change.tomorrowEndMinutes)) で区切ります（今日は \(time(change.todayEndMinutes)) で確定します）")
     }

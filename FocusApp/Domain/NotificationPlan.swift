@@ -54,7 +54,7 @@ enum ReviewSchedule: Hashable {
         let latest = boundary.latestEndMinutes
         if days.allSatisfy({ !$0.isLegacy && $0.endMinutes == latest }) { return .daily(minutes: latest % 1440) }
         return .shots(days.compactMap { day in
-            // 移した日は今までの初期値の 22:00 に（Q46）
+            // 移した日は今までの初期値の 22:00 に（Q48）
             let at = day.isLegacy ? boundary.wallClock(day.date, minutes: DayBoundary.defaultEndMinutes) : day.end
             return at > now ? Shot(dayKey: day.key, at: at, isLegacy: day.isLegacy) : nil
         })
@@ -117,8 +117,8 @@ enum NotificationPlan {
         return result
     }
 
-    /// 振り返りの通知の文面。区切りの後は「今日の結果が確定しました」（2026-10-21 オーナー決定、本文は Claude 補足 Q47）。
-    /// 移した日（確定は朝4:00のまま）は今までの文面（Q46）
+    /// 振り返りの通知の文面。区切りの後は「今日の結果が確定しました」（2026-10-21 オーナー決定、本文は Claude 補足 Q49）。
+    /// 移した日（確定は朝4:00のまま）は今までの文面（Q48）
     private static func reviewNotification(id: String, isLegacy: Bool, trigger: AppNotification.Trigger) -> AppNotification {
         isLegacy
             ? AppNotification(id: id, title: String(localized: "今日を振り返りましょう"),

@@ -75,7 +75,7 @@ struct PlanGridLayout {
     static func canResize(_ block: PlanBlockDraft) -> Bool { !block.isUnblock }
 
     /// 開いたときに見せる時刻（格子の始まりからの時間）。確定した日（計画のタブ）は今の1時間前、下書き（朝・明日）は起きた時刻
-    /// （明日の計画は一日の始まりを `wake` に渡す。Q47）
+    /// （明日の計画は一日の始まりを `wake` に渡す。Q49）
     static func initialHour(confirmedDay: Bool, now: Date, wake: Date, dayStart: Date, dayEnd: Date? = nil) -> Int {
         let target = confirmedDay ? now.addingTimeInterval(-3600) : wake
         let hours = dayEnd.map { max(1, Int(($0.timeIntervalSince(dayStart) / 3600).rounded(.up))) } ?? 24

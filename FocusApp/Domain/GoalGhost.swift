@@ -92,7 +92,7 @@ struct GoalGhost: Hashable {
         if Double(goal) <= window {
             return [PaceSegment(start: start, end: end, rate: Double(goal) / window)]
         }
-        // 前後に同じだけ広げる。日の端にかかったら、はみ出した分を反対側に足す（区切りより後には広げず前へ。2026-10-21、Q46）
+        // 前後に同じだけ広げる。日の端にかかったら、はみ出した分を反対側に足す（区切りより後には広げず前へ。2026-10-21、Q48）
         let length = min(Double(goal), dayEnd.timeIntervalSince(dayStart))
         var from = start.addingTimeInterval(-(Double(goal) - window) / 2)
         if from < dayStart { from = dayStart }

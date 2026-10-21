@@ -106,7 +106,7 @@ struct FocusSession: Identifiable, Hashable {
     }
 
     /// 止め忘れの疑い。予定を30分以上超過／ストップウォッチで3時間超／始めた後の最初の朝4:00を過ぎた
-    /// （一日の区切りを夜にしても、ここは朝4:00のまま。区切りをまたぐのはふつうの夜の集中でも起きるため。2026-10-21、Q47）
+    /// （一日の区切りを夜にしても、ここは朝4:00のまま。区切りをまたぐのはふつうの夜の集中でも起きるため。2026-10-21、Q49）
     func needsEndTimeCheck(at now: Date, calendar: Calendar) -> Bool {
         if let plannedEnd = plannedEnd(at: now), now.timeIntervalSince(plannedEnd) >= Self.forgotOvertime {
             return true

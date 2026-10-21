@@ -18,7 +18,7 @@ enum OnPlanPoints {
     /// - morningBlockIds: 朝の計画の写しのブロック（いつも対象）
     /// - addedAt: ブロックを計画に足した時刻（朝の計画にないブロックは、始める1時間以上前に足したものだけ対象）
     /// - morningSince: 朝の計画を確定した時刻。これより前に始めた記録（前の夜の予定、PLN-11）は、写しにあっても足した時刻で決める
-    ///   （朝に確定したときに、前の夜の点が後から増えないように。「1時間以上前から」は明日の計画で保存した時刻から数える、Q47）
+    ///   （朝に確定したときに、前の夜の点が後から増えないように。「1時間以上前から」は明日の計画で保存した時刻から数える、Q49）
     static func awards(blocks: [PlanBlockDraft], sessions: [FocusSession], morningBlockIds: Set<UUID>,
                        addedAt: [UUID: Date], morningSince: Date? = nil, now: Date) -> [Award] {
         let found = blocks.compactMap { block -> Award? in

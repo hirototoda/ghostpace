@@ -14,7 +14,7 @@ enum ManualSaveResult: Equatable {
 struct MorningPlan: Identifiable, Hashable {
     var day: BoundaryDay
     var draft: PlanDraft
-    /// 格子の始まり（朝の計画は起きた時刻、明日の計画は一日の始まり。PLN-11、Q47）
+    /// 格子の始まり（朝の計画は起きた時刻、明日の計画は一日の始まり。PLN-11、Q49）
     var gridStart: Date
 
     init(day: BoundaryDay, draft: PlanDraft, gridStart: Date? = nil) {
@@ -29,7 +29,7 @@ struct MorningPlan: Identifiable, Hashable {
     var id: String { dayKey }
 }
 
-/// 区切りを変えたときの、設定の行の下の知らせ（settings.md、Q46）
+/// 区切りを変えたときの、設定の行の下の知らせ（settings.md、Q48）
 struct PendingBoundaryChange: Hashable {
     /// 今日の区切り（日の名前の日の 0:00 からの分）
     var todayEndMinutes: Int
@@ -77,7 +77,7 @@ final class AppModel {
     /// 確定したときの睡眠の読み直し（テストで待つ）
     private(set) var confirmSleepTask: Task<Void, Never>?
     /// いつものブロックを外すゲーム・SNS の時間（BLK-10）：今日の計画（確定、または区切りから朝に確定するまでの下書き）のものと、
-    /// 次の日の前の夜の分（区切り〜設定の睡眠の起きる時刻。次の日の下書き、なければ習慣。PLN-11、Q47）。計画なし日は空
+    /// 次の日の前の夜の分（区切り〜設定の睡眠の起きる時刻。次の日の下書き、なければ習慣。PLN-11、Q49）。計画なし日は空
     private(set) var confirmedUnblocks: [PlanBlockDraft] = []
     /// この起動でゲーム・SNS の時間のスケジュールを iPhone に登録したか（登録に失敗した・消えたときに備え、起動のたびに登録し直す）
     var registeredUnblockSchedules = false
@@ -231,7 +231,7 @@ final class AppModel {
     /// 一日の区切り（GHO-17）。区切りの履歴と、そのときの端末のタイムゾーンで決める
     var boundary: DayBoundary { DayBoundary(calendar: calendar, changes: boundaryChanges) }
 
-    /// 区切りの履歴が1行もなければ足す（data-model.md「第5版から移すとき」、Q46）。
+    /// 区切りの履歴が1行もなければ足す（data-model.md「第5版から移すとき」、Q48）。
     /// タイマーの記録か1日の計画がある端末は、今の日（朝4:00区切り）までそのままで、次の日から 22:00。
     /// 新しく入れた端末は、その時点の日（22:00 区切り）から 22:00（その日が前の夜 22:00 から始まるよう、前の日を fromDayKey にする）。
     /// 読めない・書けないときは足さず（すべての日を朝4:00区切りで数える）、次の起動でやり直す
@@ -305,7 +305,7 @@ final class AppModel {
             habits = storedHabits()
 
             var stored = try store.plan(dayKey: dayKey)
-            // 下書きがなければ、区切りより後に最初に読み直したときに習慣で作る（前の夜のゲーム・SNS の時間などに使う。PLN-11、Q47）
+            // 下書きがなければ、区切りより後に最初に読み直したときに習慣で作る（前の夜のゲーム・SNS の時間などに使う。PLN-11、Q49）
             if stored == nil, !today.isLegacy, !showsHabitIntro {
                 let draft = newDraft(day: today)
                 if !draft.blocks.isEmpty {
@@ -371,7 +371,7 @@ final class AppModel {
     }
 
     /// 次の日の前の夜の分（その日の始まり〜設定の睡眠の起きる時刻）のブロック。下書きがあればそのブロック、
-    /// なければ `includingHabits` のとき習慣（ゲーム・SNS の時間でいつものブロックを外す予定を先に登録するため、Q47）。
+    /// なければ `includingHabits` のとき習慣（ゲーム・SNS の時間でいつものブロックを外す予定を先に登録するため、Q49）。
     /// 確定した・計画しない日は空（次の日はまだ来ていないので、ふつうは下書きか、まだない）
     private func nightBlocks(of day: BoundaryDay, includingHabits: Bool) throws -> PlanDraft {
         guard !day.isLegacy else { return PlanDraft() }
@@ -382,14 +382,14 @@ final class AppModel {
         return includingHabits ? nightPart(newDraft(day: day), of: day) : PlanDraft()
     }
 
-    /// 前の夜の分：その日の始まり〜設定の睡眠の起きる時刻に始まるブロック（起きた時刻はまだ分からないので設定の時刻。Q47）
+    /// 前の夜の分：その日の始まり〜設定の睡眠の起きる時刻に始まるブロック（起きた時刻はまだ分からないので設定の時刻。Q49）
     private func nightPart(_ plan: PlanDraft?, of day: BoundaryDay) -> PlanDraft {
         let wake = SleepLine.fromSetting(startMinutes: sleepSettings.start, endMinutes: sleepSettings.end, dayStart: day.date,
                                          calendar: calendar).end
         return PlanDraft(blocks: (plan?.blocks ?? []).filter { $0.start >= day.start && $0.start < wake })
     }
 
-    /// 朝の計画の格子の始まり：起きた時刻（:00・:30 に切り下げ）。分からなければ朝4:00（PLN-11、Q47）
+    /// 朝の計画の格子の始まり：起きた時刻（:00・:30 に切り下げ）。分からなければ朝4:00（PLN-11、Q49）
     func morningGridStart(day: BoundaryDay) -> Date {
         let morning = boundary.morningStart(of: day)
         guard let wake = sleepLine(day: day)?.end, wake > day.start, wake < day.end else { return morning }
@@ -399,7 +399,7 @@ final class AppModel {
     }
 
     /// ホームに「今日を振り返る」を出すか（REV-02）。その日の区切りから、次の朝の計画を確定する（「今日は計画しない」を含む）まで。
-    /// 遅くとも次の区切りまで（その日のうちだけ見る）。区切りの履歴より前の日（移した日）は今までどおり 22:00 から朝4:00まで（Q46・Q47）
+    /// 遅くとも次の区切りまで（その日のうちだけ見る）。区切りの履歴より前の日（移した日）は今までどおり 22:00 から朝4:00まで（Q48・Q49）
     private func showsReviewEntry(today: BoundaryDay, stored: StoredPlan?, now: Date) -> Bool {
         if today.isLegacy { return now >= boundary.wallClock(today.date, minutes: DayBoundary.defaultEndMinutes) }
         return isReviewingFinishedDay(today: today, stored: stored)
@@ -431,7 +431,7 @@ final class AppModel {
         }
     }
 
-    /// 動いているタイマー。差は今の日（区切りを過ぎたら新しい日の0から）で比べる（focus-timer.md、Q47）
+    /// 動いているタイマー。差は今の日（区切りを過ぎたら新しい日の0から）で比べる（focus-timer.md、Q49）
     private func runningTimer(_ session: FocusSession, today: BoundaryDay, now: Date) throws -> RunningTimer {
         let others = (try store.sessions(dayKey: today.key) + carriedOver(into: today)).filter { $0.id != session.id }
         let countsFrom = max(session.startAt, today.start)
@@ -590,7 +590,7 @@ final class AppModel {
     /// 今日の区切り（日の名前の日の 0:00 からの分）
     var todayEndMinutes: Int { boundary.day(containing: clock.now()).endMinutes }
 
-    /// 区切りを変えたときの、行の下の知らせ（settings.md、Q46）。次の日の区切りが今日と同じなら nil
+    /// 区切りを変えたときの、行の下の知らせ（settings.md、Q48）。次の日の区切りが今日と同じなら nil
     var pendingBoundaryChange: PendingBoundaryChange? {
         let today = boundary.day(containing: clock.now())
         let next = boundary.day(1, from: today)
@@ -754,7 +754,7 @@ final class AppModel {
                 DetoxTimer(interval: DateInterval(start: $0.start, end: max($0.start, $0.end)), group: $0.detoxGroup,
                            isDeclared: $0.isDeclared)
             },
-            // その日の朝に終わった睡眠（一晩分まとめて起きた日に。区切りより前に寝始めた分は寝た日に残る、Q48）。
+            // その日の朝に終わった睡眠（一晩分まとめて起きた日に。区切りより前に寝始めた分は寝た日に残る、Q50）。
             // 区切りの履歴より前の日は、今までどおりその夜の睡眠も（翌朝決まるまでは設定の時刻で仮に数える）
             sleep: sleep.map(\.interval),
             gameWindows: gameWindows(plan, of: day),
@@ -1137,7 +1137,7 @@ final class AppModel {
             guard let day = pastCache?.recordDays[points.dayStart] ?? daySnapshot(of: points.dayStart)?.recordDay else { return nil }
             return (points, day)
         }
-        // 区間は今日と同じ時刻の区間（今日の一日の始まりから2時間ごと。同じ時刻でそろえる、Q46）
+        // 区間は今日と同じ時刻の区間（今日の一日の始まりから2時間ごと。同じ時刻でそろえる、Q48）
         let records = PeriodRecords(days: days, sleepSections: LapTargets.sleepSections(
             startMinutes: sleepSettings.start, endMinutes: sleepSettings.end, day: today, calendar: calendar),
             sections: LapSection.of(dayStart: today.start, dayEnd: today.end, origin: today.date))
@@ -1500,7 +1500,7 @@ final class AppModel {
 
     /// 日中の計画の変更（PLN-04）。朝のスナップショットは変わらない。
     @discardableResult
-    /// 区切りから朝の計画を確定するまでは下書きを直す（すぐ保存、PLN-11・Q47）。まだ下書きもなければ下書きを作る
+    /// 区切りから朝の計画を確定するまでは下書きを直す（すぐ保存、PLN-11・Q49）。まだ下書きもなければ下書きを作る
     func savePlanChanges(_ draft: PlanDraft) -> Bool {
         let dayKey = boundary.dayKey(containing: clock.now())
         let saved = perform {

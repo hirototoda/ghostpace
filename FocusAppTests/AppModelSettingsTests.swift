@@ -151,7 +151,7 @@ struct AppModelSettingsTests {
         #expect(!m.snapshot.showsReviewEntry)
     }
 
-    /// 朝の計画を開かずに一日が過ぎても、2つ前の日の振り返りは出さない（遅くとも次の区切りまで、Q47）
+    /// 朝の計画を開かずに一日が過ぎても、2つ前の日の振り返りは出さない（遅くとも次の区切りまで、Q49）
     @Test func reviewEntryLastsUntilTheNextBoundaryAtMost() throws {
         let t = try TestStore(now: jst("2026-10-19T09:00"))
         let m = model(t)

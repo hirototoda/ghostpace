@@ -79,7 +79,7 @@ enum LapTargets {
     }
 
     /// 区間それぞれの区間ベスト。区間全体の値で比べ、同じ（誤差の幅の中）なら新しい日。日がなければ空。
-    /// 区間は今日と同じ時刻の区間（区切りが今日と違う日は、その時刻の分の値で比べる。2026-10-21、Claude 補足、Q46）
+    /// 区間は今日と同じ時刻の区間（区切りが今日と違う日は、その時刻の分の値で比べる。2026-10-21、Claude 補足、Q48）
     static func sectionRecords(_ days: [RecordDay], sections: [LapSection] = LapSection.legacy) -> [SectionRecord] {
         guard !days.isEmpty else { return [] }
         let days = days.sorted { $0.dayStart < $1.dayStart }

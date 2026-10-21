@@ -214,7 +214,7 @@ struct TimeMap: Hashable {
 
     /// 直近4週（`today` の前の日まで）。記録のある日（何か集中した日）だけで平均する。
     /// 区間は今日の一日の始まりの時刻から2時間ごとの12区間（`originMinutes`、0:00 からの分）。曜日は日の名前で決め、
-    /// 区切りが違う日の集中も時刻で区間に入れる（2026-10-21、Claude 補足、Q46）
+    /// 区切りが違う日の集中も時刻で区間に入れる（2026-10-21、Claude 補足、Q48）
     static func make(_ segments: [TimeSegment], today: BoundaryDay, boundary: DayBoundary) -> TimeMap {
         let calendar = boundary.calendar
         let from = boundary.day(-weeks * 7, from: today).start

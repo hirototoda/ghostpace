@@ -232,7 +232,7 @@ struct DailyPlanView: View {
     private var end: Date { dayEnd ?? dayStart.addingTimeInterval(24 * 3600) }
     private var date: Date { dayDate ?? calendar.startOfDay(for: dayStart) }
 
-    /// 始まった日（計画のタブ、区切りの後に開いた朝・明日の計画）は、始まった・終わったブロックを格子で動かさない（Q47）
+    /// 始まった日（計画のタブ、区切りの後に開いた朝・明日の計画）は、始まった・終わったブロックを格子で動かさない（Q49）
     private var startedDay: Bool { mode == .tab || dayStart <= now }
 
     /// 格子に出すブロック（朝の計画は起きた時刻から。前の夜の分は出さないが計画には残る、PLN-11）

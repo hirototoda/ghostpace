@@ -31,7 +31,7 @@ extension AppModel {
     func awakeRange(dayStart: Date) -> ClosedRange<Date> { awakeRange(day: boundary.day(containing: dayStart)) }
 
     /// その日と、その前の6日のうち、まだ睡眠を保存していない日に設定の時刻で保存する（開かなかった日も、次に開いたとき）。
-    /// 今の日の分は朝4:00以降だけ（区切り〜3:59 はまだ寝ていないため、Q48）。そのあとで設定を変えても、保存した日は変わらない
+    /// 今の日の分は朝4:00以降だけ（区切り〜3:59 はまだ寝ていないため、Q50）。そのあとで設定を変えても、保存した日は変わらない
     func ensureSleep(today: BoundaryDay, now: Date) throws {
         let calendar = self.calendar
         let settings = sleepSettings
