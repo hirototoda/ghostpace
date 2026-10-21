@@ -18,7 +18,7 @@ review-3（review-correctness / review-design / review-coverage）でこのリ�
 
 ### 仕様（docs）
 - features/*.md・requirements.md・data-model.md・非公開側の open-questions.md の決定済み表のあいだで矛盾がないか
-- 公開側（このリポジトリ）に、個人の情報・値段・自分の数字・秘密の情報を書いていないか
+- 公開側（このリポジトリ）に、個人の情報・値段・自分の数字・秘密の情報・参考にした他のアプリの名前を書いていないか
 - 状態の抜け：一時停止中、4:00をまたぐ、計画なし日、先週のデータがない日、アプリを消して入れ直した場合
 
 ## 設計・整合性（review-design）
