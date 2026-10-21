@@ -42,7 +42,7 @@ struct NotificationPlanTests {
         #expect(plannedEnd(plan(nil, now: "2026-10-19T09:10")) == nil)
     }
 
-    /// 1b-70：区切りが変わらない間は、毎日その日の区切りの時刻に「今日の結果が確定しました」
+    /// 1b-76：区切りが変わらない間は、毎日その日の区切りの時刻に「今日の結果が確定しました」
     @Test func reviewIsDailyAtTheBoundary() {
         let schedule = ReviewSchedule.make(boundary: boundary([("2026-10-01", 1320)]), now: jst("2026-10-21T09:10"))
         #expect(schedule == .daily(minutes: 1320))
@@ -55,7 +55,7 @@ struct NotificationPlanTests {
                 == .daily(minutes: 60))
     }
 
-    /// 1b-70：区切りを変えたら、通知は次の日から新しい時刻（今日の分は今の区切りの時刻）
+    /// 1b-76：区切りを変えたら、通知は次の日から新しい時刻（今日の分は今の区切りの時刻）
     @Test func changedBoundaryNotifiesTodayAtTheOldTimeThenTheNewTime() {
         let b = boundary([("2026-10-01", 1320), ("2026-10-22", 1380)])
         let schedule = ReviewSchedule.make(boundary: b, now: jst("2026-10-21T15:00"))
@@ -71,7 +71,7 @@ struct NotificationPlanTests {
         #expect(late == .daily(minutes: 23 * 60))
     }
 
-    /// 1b-73：移した日（まだ朝4:00区切り）は 22:00 に今までの文面「今日を振り返りましょう」、次の日から区切りの時刻に新しい文面
+    /// 1b-79：移した日（まだ朝4:00区切り）は 22:00 に今までの文面「今日を振り返りましょう」、次の日から区切りの時刻に新しい文面
     @Test func migrationDayReviewNoticeIsRescheduled() {
         let b = boundary([("2026-10-23", 1320)])
         let schedule = ReviewSchedule.make(boundary: b, now: jst("2026-10-22T15:00"))

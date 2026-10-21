@@ -229,7 +229,7 @@ final class RecordingFlowUITests: XCTestCase {
     }
 
     /// 設定で一日の区切りを 23:00 に変えると、次の日（25時間）から効く。次の日の 22:30 にはホームに「今日を振り返る」が出ず、
-    /// 23:00 から出る（GHO-17・REV-02、1b-69）
+    /// 23:00 から出る（GHO-17・REV-02、1b-75）
     func testChangeBoundaryMovesReviewNextDay() {
         var app = launch(store("ui-boundary", at: "15:00:00", reset: true))
         let skip = app.buttons["skipPlanButton"]
@@ -815,33 +815,79 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertNotEqual(planBlock(app, "読書").frame.minY, before)
     }
 
-    /// 押し忘れの申告（TMR-13）：計画のタブで記録のない終わったブロックを押すと「やった（申告）」で記録になり、二度は出ない
-    func testDeclareForgottenBlock() {
+    /// 手動の記録（TMR-13）：計画のタブで終わったブロックを押すと「やった（手動で記録）」→「手動で記録」の画面で記録になり、
+    /// 記録のない部分がなくなれば二度は出ない
+    func testPlanTabManualRecord() {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00", "-openPlan"])
         let zemi = planBlock(app, "ゼミ準備")
         XCTAssertTrue(zemi.waitForExistence(timeout: timeout))
         zemi.tap()
-        let declare = app.buttons["declareButton"]
-        XCTAssertTrue(declare.waitForExistence(timeout: timeout))
-        XCTAssertTrue(declare.isEnabled)
-        declare.tap()
-        XCTAssertFalse(declare.waitForExistence(timeout: 2))
+        let manual = app.buttons["manualRecordButton"]
+        XCTAssertTrue(manual.waitForExistence(timeout: timeout))
+        manual.tap()
+        let save = app.buttons["manualSaveButton"]
+        XCTAssertTrue(save.waitForExistence(timeout: timeout))
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        // 「手動で記録」と編集の画面がどちらも閉じる
+        XCTAssertFalse(save.waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["blockSaveButton"].exists)
         zemi.tap()
         XCTAssertTrue(app.buttons["blockSaveButton"].waitForExistence(timeout: timeout))
-        XCTAssertFalse(app.buttons["declareButton"].exists)
+        XCTAssertFalse(app.buttons["manualRecordButton"].exists)
     }
 
-    /// ブロックの最中に始めるとき（TMR-13、案A）：「11:00 から始めていた（申告）」を選ぶとタイマーが始まる
-    func testStartLateFromBlockStart() {
+    /// ホームの「〜を開始」は聞かずに今から始まる。ブロックの開始から5分以上たっていれば、タイマーの画面の
+    /// 「11:00 から始めていた？［前の分を足す］」→［記録する］で、終わりがブロックの終わり（13:00）に戻る（TMR-13・TMR-15）
+    func testStartThenAddPreviousPart() {
         let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T11:20:00+09:00"])
         let start = app.buttons["startButton"]
         XCTAssertTrue(start.waitForExistence(timeout: timeout))
         start.tap()
-        let fromStart = app.buttons["11:00 から始めていた（申告）"]
-        XCTAssertTrue(fromStart.waitForExistence(timeout: timeout))
-        XCTAssertTrue(app.buttons["今から始める"].exists)
-        fromStart.tap()
         XCTAssertTrue(app.buttons["endButton"].waitForExistence(timeout: timeout))
+        // 「いつから始めましたか？」は聞かない（2026-10-21）
+        XCTAssertFalse(app.staticTexts["いつから始めましたか？"].exists)
+        let endsLate = NSPredicate(format: "label CONTAINS '13:20 終了予定'")
+        XCTAssertTrue(app.staticTexts.matching(endsLate).firstMatch.exists)
+        XCTAssertEqual(app.staticTexts["previousPartLabel"].label, "11:00 から始めていた？")
+        let add = app.buttons["addPreviousButton"]
+        add.tap()
+        let title = app.staticTexts["previousPartTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: timeout))
+        XCTAssertTrue(title.label.hasPrefix("11:00〜11:20"), title.label)
+        app.buttons["manualSaveButton"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '13:00 終了予定'")).firstMatch
+            .waitForExistence(timeout: timeout))
+        XCTAssertFalse(add.exists)
+        XCTAssertTrue(app.buttons["endButton"].exists)
+    }
+
+    /// タイムラインの昨日の画面から「＋ 手動で記録」で計画外の記録を足すと「手動」の行が出て、押すと直す・確かめてから消せる（TML-06）
+    func testRecordManuallyFromTimeline() {
+        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T15:20:00+09:00", "-openTimeline"])
+        let previous = app.buttons["previousDayButton"]
+        XCTAssertTrue(previous.waitForExistence(timeout: timeout))
+        previous.tap()
+        let add = app.buttons["addManualButton"]
+        for _ in 0..<15 where !(add.exists && add.isHittable) { app.swipeUp() }
+        add.tap()
+        let save = app.buttons["manualSaveButton"]
+        XCTAssertTrue(save.waitForExistence(timeout: timeout))
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        let row = app.buttons["manualSessionRow"]
+        for _ in 0..<15 where !(row.exists && row.isHittable) { app.swipeUp() }
+        XCTAssertTrue(row.waitForExistence(timeout: timeout))
+        XCTAssertTrue(row.label.contains("手動"), row.label)
+        row.tap()
+        let delete = app.buttons["manualDeleteButton"]
+        XCTAssertTrue(delete.waitForExistence(timeout: timeout))
+        delete.tap()
+        let confirm = app.buttons["消す"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: timeout))
+        confirm.tap()
+        XCTAssertFalse(delete.waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["manualSessionRow"].exists)
     }
 
     /// 見せ方と環境音（ANA-06・07、GHO-15、TMR-14）：ホームに予想ゴール、分析に自己ベストと時間帯の地図、タイマーの ♪ で音を選べる

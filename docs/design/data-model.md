@@ -117,11 +117,12 @@ status: draft
 | pausesJSON | Data | 一時停止の区間（開始・終了）の一覧の JSON。個数＝中断回数（TMR-03）。読めなければ空として扱う |
 | originalEndAt | Date? | 終了時刻を早めたときの元の終了時刻（TMR-08）。nilなら未修正 |
 | note | String? | |
-| isDeclared | Bool? | 押し忘れの申告（TMR-13、第5版）。true なら申告した記録（点は0.8倍）。nil・false はタイマーで計った記録 |
+| isDeclared | Bool? | 手動の記録（TMR-13、第5版。2026-10-20 までは「押し忘れの申告」）。true なら手で入れた記録（点は0.8倍）。nil・false はタイマーで計った記録。手動の記録は計画外（planBlockId が nil）でもよい（2026-10-21 から） |
 
 - 数え方は保存しない：`plannedEndAt` か `plannedDurationSec` があればカウントダウン、どちらもなければストップウォッチ（TMR-07）
 - 一時停止を除いて1分未満のセッションは保存しない
 - セッションは一時停止の途中では終わらない（終わりが一時停止の中なら、その一時停止の開始を終了にする）
+- 手動の記録（isDeclared が true）は、オーナーが消すと実際に削除する（手で入れた記録なので。タイマーの記録は消さない。2026-10-21、Q47（非公開の判断表））。保存データの形は変えない
 
 ## ブロックの共有データ（App Group、2026-10-01）
 本体と拡張機能（別のプロセス）の両方が読み書きするので、SwiftData ではなく App Group（`group.com.hirototoda.focusapp`）に置く。SwiftData の版（SchemaV1/V2）とは別。アプリを消すと消える（記録と同じ）。

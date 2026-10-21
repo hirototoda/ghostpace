@@ -55,7 +55,7 @@ struct ShieldRaceSnapshotTests {
         #expect(s.diffSeconds(at: jst("2026-10-20T04:00"), calendar: tokyoCalendar) == nil)
     }
 
-    /// 1b-73：区切り 22:00 の日。区切りを過ぎたら前の日の材料の差は出さない（拡張は区切りの履歴を読めないので dayEnd で決める）
+    /// 1b-79：区切り 22:00 の日。区切りを過ぎたら前の日の材料の差は出さない（拡張は区切りの履歴を読めないので dayEnd で決める）
     @Test func noDiffAfterTheBoundary() {
         var s = ShieldRaceSnapshot(writtenAt: jst("2026-10-21T21:00"), dayKey: "2026-10-21", dayStart: jst("2026-10-20T22:00"),
                                    dayEnd: jst("2026-10-21T22:00"), focusSecAtWrite: 4800, isFocusRunning: false,

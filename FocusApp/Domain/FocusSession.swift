@@ -44,7 +44,7 @@ struct FocusSession: Identifiable, Hashable {
     var plannedDurationSec: Int?
     var pauses: [PauseInterval] = []
     var originalEndAt: Date?
-    /// 押し忘れの申告（TMR-13）。点は0.8倍
+    /// 手動の記録（TMR-13。2026-10-20 までは「押し忘れの申告」）。点は0.8倍。保存の名前は今までのまま
     var isDeclared = false
 
     var title: String { project?.name ?? category.name }

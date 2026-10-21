@@ -137,7 +137,7 @@ extension HomeSnapshot {
 
     /// `from`〜`to` の自分の線の色（2026-10-11 オーナー決定）：集中のカテゴリのタイマー中は集中、
     /// デトックスのカテゴリ（集中でもゲーム・SNS でもないもの）のタイマー中はデトックス、
-    /// それ以外（一時停止・タイマーなし・ゲーム・SNS）はほか。申告した時間もタイマーと同じ。
+    /// それ以外（一時停止・タイマーなし・ゲーム・SNS）はほか。手動の記録の時間もタイマーと同じ。
     /// 線の点はタイマーの始まりと終わりにも置くので、点と点のあいだはどれか1つになる（真ん中の時刻で決める）
     func lineActivity(from start: Date, to end: Date) -> LineActivity {
         let middle = start.addingTimeInterval(end.timeIntervalSince(start) / 2)

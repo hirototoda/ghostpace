@@ -22,7 +22,7 @@ struct DayBoundaryTests {
         #expect(DayBoundary(calendar: tokyoCalendar).dayKey(containing: jst("2026-10-19T23:59")) == "2026-10-19")
     }
 
-    /// 1b-73：行が0件のまま読んだときは、すべての日を朝4:00区切りで数える
+    /// 1b-79：行が0件のまま読んだときは、すべての日を朝4:00区切りで数える
     @Test func emptyHistoryCountsFromFourAm() {
         let legacy = DayBoundary(calendar: tokyoCalendar)
         let day = legacy.day(containing: jst("2026-10-21T21:00"))
@@ -33,7 +33,7 @@ struct DayBoundaryTests {
 
     // MARK: 区切り 22:00
 
-    /// 1b-65：区切り 22:00 で 21:59:59 はその日、22:00:00 は次の日（日の名前は次の暦の日）
+    /// 1b-71：区切り 22:00 で 21:59:59 はその日、22:00:00 は次の日（日の名前は次の暦の日）
     @Test func startDayKeyBoundary() {
         let b = boundary([("2026-10-01", 1320)])
         #expect(b.dayKey(containing: jst("2026-10-20T21:59:59")) == "2026-10-20")
@@ -47,7 +47,7 @@ struct DayBoundaryTests {
         #expect(b.dayKey(containing: jst("2026-10-21T03:00")) == "2026-10-21")
     }
 
-    /// 1b-74：日の名前は一日の中の 12:00 の日（区切り 20:00・0:00・1:00・翌4:00）
+    /// 1b-80：日の名前は一日の中の 12:00 の日（区切り 20:00・0:00・1:00・翌4:00）
     @Test func dayKeyIsTheDayContainingNoon() {
         for minutes in [1200, 1440, 1500, 1680] {
             let b = boundary([("2026-10-01", minutes)])
@@ -71,7 +71,7 @@ struct DayBoundaryTests {
 
     // MARK: 設定を変えた次の日（24時間でない日）
 
-    /// 1b-69・1b-75：22:00 → 23:00 にした次の日は25時間、その先は 23:00 区切り
+    /// 1b-75・1b-81：22:00 → 23:00 にした次の日は25時間、その先は 23:00 区切り
     @Test func changingTheBoundaryMakesTheNextDayLonger() {
         let b = boundary([("2026-10-01", 1320), ("2026-10-22", 1380)])
         let today = b.day(containing: jst("2026-10-21T15:00"))
@@ -84,14 +84,14 @@ struct DayBoundaryTests {
         #expect(b.day(2, from: today).duration == 24 * 3600)
     }
 
-    /// 1b-75：22時間（22:00→20:00）・32時間（20:00→翌4:00）・16時間（翌4:00→20:00）
+    /// 1b-81：22時間（22:00→20:00）・32時間（20:00→翌4:00）・16時間（翌4:00→20:00）
     @Test func shortAndLongDays() {
         #expect(boundary([("2026-10-01", 1320), ("2026-10-22", 1200)]).day(key: "2026-10-22")?.duration == TimeInterval(22 * 3600))
         #expect(boundary([("2026-10-01", 1200), ("2026-10-22", 1680)]).day(key: "2026-10-22")?.duration == TimeInterval(32 * 3600))
         #expect(boundary([("2026-10-01", 1680), ("2026-10-22", 1200)]).day(key: "2026-10-22")?.duration == TimeInterval(16 * 3600))
     }
 
-    /// 1b-71：移した日は 4:00 区切りのまま、次の日が 4:00〜22:00 の18時間、その次から 22:00 区切り
+    /// 1b-77：移した日は 4:00 区切りのまま、次の日が 4:00〜22:00 の18時間、その次から 22:00 区切り
     @Test func migrationDayThenEighteenHourDay() {
         let b = boundary([("2026-10-23", 1320)])
         let migrated = b.day(containing: jst("2026-10-22T15:00"))
@@ -117,7 +117,7 @@ struct DayBoundaryTests {
         #expect(b.sameDayLastWeek(today.start) == jst("2026-10-21T04:00"))
     }
 
-    // MARK: 読み方（1b-76）
+    // MARK: 読み方（1b-82）
 
     @Test func boundaryHistoryRoundsOutOfRangeValues() {
         #expect(DayBoundary.normalized(1320) == 1320)
@@ -140,7 +140,7 @@ struct DayBoundaryTests {
         #expect(b.endMinutes(key: "2026-10-22") == 1260)
     }
 
-    // MARK: 朝の計画を出す時刻（1b-67・1b-74）
+    // MARK: 朝の計画を出す時刻（1b-73・1b-80）
 
     @Test func morningPlanHiddenBetweenBoundaryAndFour() {
         let b = boundary([("2026-10-01", 1320)])

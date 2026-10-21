@@ -74,7 +74,7 @@ struct MigrationTests {
     }
 
     /// 第5版で書いた実際のストアを第6版で開くと、記録がそのまま読め、区切りの履歴に「次の日から 22:00」の1行が足される。
-    /// 2回目の起動では足さない（1b-73、GHO-17、NFR-02）
+    /// 2回目の起動では足さない（1b-79、GHO-17、NFR-02）
     @Test func migrateV5StoreAddsOneBoundaryRow() throws {
         let url = temporaryStoreURL()
         defer { removeStoreFiles(url) }

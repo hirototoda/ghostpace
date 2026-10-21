@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// 計画のタブの手動の記録（TMR-13）の操作
+struct PlanManualActions {
+    /// 初めの時刻（ブロックの時刻のうち記録のない一番長い部分）。出さないときは nil
+    var start: (PlanBlockDraft) -> DateInterval?
+    /// 選べる時刻（昨日の 4:00〜今）
+    var range: () -> ClosedRange<Date>
+    /// 記録できない理由（開始, 終わり）
+    var problem: (Date, Date) -> ManualRecord.Problem?
+    /// ブロックの記録として足す。できたら true
+    var record: (PlanBlockDraft, Date, Date) -> Bool
+}
+
 /// 1日の計画（docs/product/features/daily-plan.md）。
 /// 朝は全画面で出て、「確定」か「今日は計画しない」を押すまで閉じない。日中は下の「計画」のタブで直す（NAV-01）。
 struct DailyPlanView: View {
@@ -62,9 +74,8 @@ struct DailyPlanView: View {
     var habitsEditor: (() -> AnyView)?
     /// 起きている時間（格子で寝ている時間を灰色にする、PLN-10）。nil なら1日全部
     var awake: ClosedRange<Date>?
-    /// 押し忘れの申告（TMR-13、計画のタブだけ）：申告できない理由と、申告する操作
-    var declarationProblem: ((PlanBlockDraft, Date) -> Declaration.Problem?)?
-    var onDeclare: ((PlanBlockDraft, Date) -> Bool)?
+    /// 手動の記録（TMR-13、計画のタブだけ）。終わったブロックに「やった（手動で記録）」を出す
+    var manual: PlanManualActions?
     /// 終わったブロックを遅れて始める（TMR-15、計画のタブだけ）：始められるか、始める操作
     var canStartLate: ((PlanBlockDraft) -> Bool)?
     var onStartLate: ((PlanBlockDraft) -> Void)?
@@ -73,6 +84,8 @@ struct DailyPlanView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var editing: EditorTarget?
+    /// 編集の画面から「手動で記録」の画面を出しているか
+    @State private var showsManual = false
     @State private var undo: TemplateUndo?
     /// 計画のタブで押したテンプレート（中身と「今日はこれで進む」を出す）
     @State private var previewing: PlanTemplate?
@@ -187,7 +200,7 @@ struct DailyPlanView: View {
                                      plan.endUnblock(id: target.block.id, now: now)
                                      editing = nil
                                  },
-                                 declaration: target.isNew ? nil : declarationOption(for: target.block),
+                                 manual: target.isNew ? nil : manualOption(for: target.block),
                                  onStartNow: startLateAction(for: target)) { saved in
                     plan.upsert(saved)
                     editing = nil
@@ -195,7 +208,8 @@ struct DailyPlanView: View {
                     delete(target.block)
                     editing = nil
                 }
-                .saveErrorAlert($errorMessage)
+                .saveErrorAlert($errorMessage, when: !showsManual)
+                .onDisappear { showsManual = false }
             }
             .saveErrorAlert($errorMessage, when: editing == nil)
         }
@@ -272,13 +286,14 @@ struct DailyPlanView: View {
         }
     }
 
-    /// 押し忘れの申告を出すか（終わった朝の計画のブロックで記録がないとき。重なりなどで申告できないときも理由を出す）
-    private func declarationOption(for block: PlanBlockDraft) -> DeclarationOption? {
-        guard mode == .tab, let declarationProblem, let onDeclare else { return nil }
-        let shown: Set<Declaration.Problem?> = [nil, .invalidEnd, .overlapsRecord, .opened]
-        guard shown.contains(declarationProblem(block, block.end)) else { return nil }
-        return DeclarationOption(problem: { declarationProblem(block, $0) }) { end in
-            guard onDeclare(block, end) else { return false }
+    /// 「やった（手動で記録）」を出すか（終わったブロックの時刻に記録のない部分があるとき。ゲーム・SNS の時間は出さない）。
+    /// 記録できない時刻（開けていた・重なるなど）なら、「手動で記録」の画面で理由を出す
+    private func manualOption(for block: PlanBlockDraft) -> ManualOption? {
+        guard mode == .tab, let manual, let initial = manual.start(block) else { return nil }
+        return ManualOption(initial: initial, range: manual.range(), calendar: calendar, problem: manual.problem,
+                            isPresented: $showsManual, errorMessage: $errorMessage) { start, end in
+            guard manual.record(block, start, end) else { return false }
+            showsManual = false
             editing = nil
             return true
         }

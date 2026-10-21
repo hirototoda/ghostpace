@@ -1,6 +1,15 @@
 import Foundation
 import Observation
 
+/// 手動の記録（TMR-13）を保存した結果。
+enum ManualSaveResult: Equatable {
+    case saved
+    /// 条件に合わないので保存しなかった（理由は errorMessage にも出す）
+    case refused(ManualRecord.Problem)
+    /// 保存に失敗した（「保存できませんでした」）
+    case failed
+}
+
 /// 朝の計画・明日の計画を出すときの値。開いた時点の日を持ち続ける（編集中にその日の区切りを過ぎても、その日の計画として保存する）。
 struct MorningPlan: Identifiable, Hashable {
     var day: BoundaryDay
@@ -108,6 +117,8 @@ final class AppModel {
         }
     }
     var endTimeCheck: EndTimeCheck?
+    /// 実行中のタイマーの画面に出す「11:00 から始めていた？［前の分を足す］」の区間（TMR-13）。出さないときは nil
+    private(set) var previousPart: DateInterval?
     /// 短い知らせ（ホームの上に2秒出す）
     var notice: String?
     var errorMessage: String?
@@ -331,9 +342,12 @@ final class AppModel {
 
             if let session = try store.runningSession() {
                 running = try runningTimer(session, today: today, now: now)
+                // タイマーの画面の「前の分を足す」（TMR-13）。読めなければ出さない
+                previousPart = (try? addablePreviousPart(of: session)) ?? nil
             } else {
                 running = nil
                 endTimeCheck = nil
+                previousPart = nil
             }
             widgets.publish(widgetSnapshot(now: now, isConfirmed: isConfirmed || usesDraft))
             syncAmbient()
@@ -970,7 +984,7 @@ final class AppModel {
 
     /// 計画ブロックから始める。遅れて始めたら終わりを計画の長さぶんずらす（TMR-15）。
     /// 長さは始めた時点のブロックの長さとして残す（計画どおりの点の基準、GHO-16）。
-    /// `endsAtBlockEnd` は「開始から始めていた（申告）」のとき（開始からの分は申告済みなので、終わりはブロックの終わり）
+    /// `endsAtBlockEnd` は計画外から切り替えたとき（TMR-11。終わりはブロックの終わり）
     func startPlanned(block: PlanBlockSummary, endsAtBlockEnd: Bool = false) {
         // ゲーム・SNS の時間（BLK-10）からはタイマーを始めない
         guard !block.category.isUnblock else { return }
@@ -1205,48 +1219,172 @@ final class AppModel {
         return "\(lap.interval.start.formatted(style))–\(lap.interval.end.formatted(style))"
     }
 
-    // MARK: 押し忘れの申告（TMR-13）
+    // MARK: 手動の記録（TMR-13・TML-06）
 
-    /// 今日の計画のブロックを `end` まで申告できないときの理由。できるなら nil
-    func declarationProblem(for block: PlanBlockDraft, end: Date) -> Declaration.Problem? {
-        guard let context = declarationContext() else { return .notInMorningPlan }
-        return Declaration.problem(block: block, end: end, morningBlockIds: context.morning, sessions: context.sessions,
-                                   opened: context.opened, now: clock.now())
+    /// 手動で記録できないときの理由。できるなら nil。`editing` は直している記録（自分とは比べない）。
+    /// 記録を読めなければ nil（保存のときにもう一度確かめ、読めなければ「保存できませんでした」）
+    func manualProblem(start: Date, end: Date, editing id: UUID? = nil) -> ManualRecord.Problem? {
+        guard let context = try? manualContext() else { return nil }
+        return ManualRecord.problem(start: start, end: end, excluding: id, context: context)
     }
 
-    /// 終わったブロックを「やった」と申告する。できたら true
+    /// 手動で記録できる時刻の範囲：昨日の始まり（区切りの日の始まり）〜今（分に切り捨て）
+    func manualRange() -> ClosedRange<Date> {
+        let yesterday = yesterdayStart(now: clock.now())
+        return yesterday...max(yesterday, ManualRecord.floorToMinute(clock.now()))
+    }
+
+    /// 「手動の記録を直す」で選べる時刻：昨日の始まり〜今（分に切り捨て）。前の分を足した記録の終わりは秒つきなので、
+    /// それより前に切り捨てないよう、記録の終わりまでは選べるようにする
+    func manualEditRange(for session: FocusSession) -> ClosedRange<Date> {
+        let range = manualRange()
+        return range.lowerBound...max(range.upperBound, session.endAt ?? range.upperBound)
+    }
+
+    /// タイムラインの「＋ 手動で記録」の初めの時刻。今日は今の30分前〜今、
+    /// 昨日は昨日の一日の中の最後の記録の終わりから30分（区切りをまたぐ記録は今日の始まりで切る。
+    /// 記録がなければ起きた時刻から30分）
+    func manualInitial(daysAgo: Int) -> DateInterval {
+        let now = ManualRecord.floorToMinute(clock.now())
+        let length: TimeInterval = 30 * 60
+        guard daysAgo == 1 else { return DateInterval(start: now.addingTimeInterval(-length), end: now) }
+        let yesterday = yesterdayStart(now: now)
+        let today = boundary.dayStart(containing: now)
+        let lastEnd = (try? manualContext())?.sessions.filter { $0.startAt < today }.compactMap(\.endAt)
+            .map { min($0, today) }.filter { $0 > yesterday }.max()
+        let wake = (try? sleepLine(storedFor: boundary.day(containing: yesterday)))?.end
+        let start = min(ManualRecord.ceilToMinute(max(lastEnd ?? wake ?? yesterday, yesterday)), now)
+        return DateInterval(start: start, end: min(start.addingTimeInterval(length), now))
+    }
+
+    /// 計画のタブの「やった（手動で記録）」の初めの時刻：ブロックの時刻のうち記録のない一番長い部分。
+    /// 出さないとき（終わっていない・ゲーム・SNS の時間・記録のない部分がない）は nil
+    func manualStart(for block: PlanBlockDraft) -> DateInterval? {
+        let now = clock.now()
+        guard !block.isUnblock, block.end <= now, let context = try? manualContext() else { return nil }
+        return ManualRecord.longestGap(in: DateInterval(start: block.start, end: block.end), sessions: context.sessions, now: now)
+    }
+
+    /// タイムラインから：計画外の手動の記録を足す
     @discardableResult
-    func declare(_ block: PlanBlockDraft, end: Date) -> Bool {
-        guard declarationProblem(for: block, end: end) == nil else { return false }
+    func addManual(category: CategoryOption, project: ProjectOption?, start: Date, end: Date) -> ManualSaveResult {
+        saveManual(ManualRecordRequest(category: category, project: project, planBlockId: nil, start: start, end: end,
+                                       plannedEndAt: nil, timeZone: timeZone()))
+    }
+
+    /// 計画のタブから：ブロックの記録として足す（カテゴリ・ブロック名はブロックのもの）
+    @discardableResult
+    func addManual(for block: PlanBlockDraft, start: Date, end: Date) -> ManualSaveResult {
+        guard !block.isUnblock else { return refuse(.gameTime) }
+        return saveManual(ManualRecordRequest(category: block.category, project: block.project, planBlockId: block.id,
+                                              start: start, end: end, plannedEndAt: block.end, timeZone: timeZone()))
+    }
+
+    /// タイマーの画面の「前の分を足す」：`start`〜タイマーを始めた時刻を手動の記録にし、タイマーの終わりを
+    /// 「足した開始＋始めた時点のブロックの長さ」にする（手動の開始を始めた時刻とみなす、TMR-15 と同じ決まり）
+    @discardableResult
+    func addPreviousPart(from start: Date) -> ManualSaveResult {
+        guard let session = running?.session, let blockId = session.planBlockId else {
+            errorMessage = Self.saveErrorMessage
+            return .failed
+        }
+        var block: PlanBlockDraft?
+        perform(reportsError: false) { block = try store.plan(dayKey: session.dayKey)?.draft.blocks.first { $0.id == blockId } }
+        guard let block, !block.isUnblock else {
+            errorMessage = Self.saveErrorMessage
+            return .failed
+        }
+        guard start >= block.start else { return refuse(.outOfRange) }
+        let length = TimeInterval(session.plannedDurationSec ?? Int(block.end.timeIntervalSince(block.start)))
+        let newEnd = start.addingTimeInterval(length)
+        // 戻した終わりが今以下になるときは、タイマーの終わりを動かさず記録だけ足す（すぐ超過にしない。Claude 補足、Q47）
+        return saveManual(ManualRecordRequest(category: session.category, project: session.project, planBlockId: blockId,
+                                              start: start, end: session.startAt, plannedEndAt: block.end, timeZone: timeZone()),
+                          adjusting: newEnd > clock.now() ? (session.id, newEnd) : nil)
+    }
+
+    /// タイムラインの「手動の記録を直す」：開始・終わりを変える（今日と昨日の記録だけ）
+    @discardableResult
+    func updateManual(_ session: FocusSession, start: Date, end: Date) -> ManualSaveResult {
+        guard session.isDeclared else {
+            errorMessage = Self.saveErrorMessage
+            return .failed
+        }
+        guard TimelineDay.canEdit(session, editableDayKeys: editableDayKeys(now: clock.now())) else {
+            errorMessage = Self.cannotEditMessage
+            return .refused(.outOfRange)
+        }
+        var problem: ManualRecord.Problem?
         let saved = perform {
-            _ = try store.declare(DeclareRequest(category: block.category, project: block.project, planBlockId: block.id,
-                                                 start: block.start, end: end, plannedEndAt: block.end, timeZone: timeZone()))
+            problem = ManualRecord.problem(start: start, end: end, excluding: session.id, context: try manualContext())
+            if problem == nil { try store.updateManual(id: session.id, start: start, end: end) }
         }
+        if let problem { return refuse(problem) }
         reload()
-        return saved
+        return saved ? .saved : .failed
     }
 
-    /// 今のブロックを始めるとき「開始から始めていた」にできる開始（ブロックの開始）。聞かないときは nil
-    func lateStart(for block: PlanBlockSummary) -> Date? {
-        guard running == nil, let draft = plan?.blocks.first(where: { $0.id == block.id }),
-              let context = declarationContext() else { return nil }
-        return Declaration.lateStart(block: draft, morningBlockIds: context.morning, sessions: context.sessions,
-                                     opened: context.opened, now: clock.now())
-    }
-
-    /// 計画ブロックを始める。`fromBlockStart` ならブロックの開始〜今を申告にしてから、今からタイマーを動かす。
-    /// 申告を保存できなかったときはタイマーも始めない（「保存できませんでした」を出す）。聞いている間に申告できなくなったら今から始める
-    func startPlanned(block: PlanBlockSummary, fromBlockStart: Bool) {
-        if fromBlockStart, let start = lateStart(for: block), let draft = plan?.blocks.first(where: { $0.id == block.id }) {
-            let now = clock.now()
-            let declared = perform {
-                _ = try store.declare(DeclareRequest(category: draft.category, project: draft.project, planBlockId: draft.id,
-                                                     start: start, end: now, plannedEndAt: draft.end, timeZone: timeZone()))
-            }
-            guard declared else { return }
-            return startPlanned(block: block, endsAtBlockEnd: true)
+    /// 手動の記録を消す（実際に削除する）。今日と昨日の記録だけ。消せたら true
+    @discardableResult
+    func deleteManual(_ session: FocusSession) -> Bool {
+        guard session.isDeclared else { return false }
+        guard TimelineDay.canEdit(session, editableDayKeys: editableDayKeys(now: clock.now())) else {
+            errorMessage = Self.cannotEditMessage
+            return false
         }
-        startPlanned(block: block)
+        let deleted = perform { try store.deleteManual(id: session.id) }
+        reload()
+        return deleted
+    }
+
+    /// 保存の直前にもう一度確かめてから足す（画面を開いたまま4:00を過ぎた・その間に開けたなど）
+    private func saveManual(_ request: ManualRecordRequest, adjusting: (id: UUID, end: Date)? = nil) -> ManualSaveResult {
+        var problem: ManualRecord.Problem?
+        let saved = perform {
+            problem = ManualRecord.problem(start: request.start, end: request.end, context: try manualContext())
+            if problem == nil { _ = try store.addManual(request, adjustingPlannedEnd: adjusting) }
+        }
+        if let problem { return refuse(problem) }
+        reload()
+        return saved ? .saved : .failed
+    }
+
+    private func refuse(_ problem: ManualRecord.Problem) -> ManualSaveResult {
+        errorMessage = problem.message
+        return .refused(problem)
+    }
+
+    /// 実行中のタイマーの「前の分を足す」で足せる区間（計画ブロックのタイマーで、ブロックの開始から5分以上たって始めたとき）
+    private func addablePreviousPart(of session: FocusSession) throws -> DateInterval? {
+        guard let blockId = session.planBlockId, !session.isDeclared,
+              let stored = try store.plan(dayKey: session.dayKey), stored.status != .skipped,
+              let block = stored.draft.blocks.first(where: { $0.id == blockId }) else { return nil }
+        return ManualRecord.previousPart(blockStart: block.start, blockEnd: block.end, isGameTime: block.isUnblock,
+                                         timerStart: session.startAt, context: try manualContext())
+    }
+
+    /// 手動の記録の判定の材料：一昨日〜今日の記録（区切りをまたいで昨日に入る記録も見る）、ブロックの記録、
+    /// 予定のゲーム・SNS の時間、昨日・今日の朝の睡眠と今夜の睡眠（まだなければ設定の時刻、DTX-02）
+    private func manualContext() throws -> ManualRecord.Context {
+        let now = clock.now()
+        let boundary = self.boundary
+        let today = boundary.day(containing: now)
+        var sessions: [FocusSession] = []
+        var games: [DateInterval] = []
+        for offset in -2...0 {
+            let day = boundary.day(offset, from: today)
+            sessions += try store.sessions(dayKey: day.key)
+            games += gameWindows(try store.plan(dayKey: day.key), of: day)
+        }
+        let sleep = try (-1...1).map { try sleepLine(storedFor: boundary.day($0, from: today)).interval }
+        // ブロックの記録が読めなければ、効いていたか分からないので記録できない（ブロックが効いていない）
+        return ManualRecord.Context(now: now, dayKeys: editableDayKeys(now: now), calendar: calendar,
+                                    events: (try? blockLog.all()) ?? [], gameWindows: games, sessions: sessions, sleep: sleep,
+                                    boundary: boundary)
+    }
+
+    private func yesterdayStart(now: Date) -> Date {
+        boundary.dayStart(-1, from: boundary.dayStart(containing: now))
     }
 
     // MARK: 遅れ開始（TMR-15）
@@ -1262,19 +1400,6 @@ final class AppModel {
     func startLate(_ block: PlanBlockDraft) {
         guard canStartLate(block), let summary = snapshot.planBlocks.first(where: { $0.id == block.id }) else { return }
         startPlanned(block: summary)
-    }
-
-    /// 申告の判定の材料：今日の朝の計画のブロック、今日の記録、開けていた時間
-    private func declarationContext() -> (morning: Set<UUID>, sessions: [FocusSession], opened: [DateInterval])? {
-        let now = clock.now()
-        let today = boundary.day(containing: now)
-        var result: (Set<UUID>, [FocusSession], [DateInterval])?
-        perform(reportsError: false) {
-            guard let snapshot = try store.snapshot(dayKey: today.key) else { return }
-            let opened = (try? detoxDays(now: now, day: today).today.openedIntervals) ?? []
-            result = (Set(snapshot.map(\.blockId)), try store.sessions(dayKey: today.key), opened)
-        }
-        return result
     }
 
     /// 計画外のタイマー中に始まった計画ブロックに切り替える（TMR-11）。計画外の記録を今で終え、そのブロックを始める。

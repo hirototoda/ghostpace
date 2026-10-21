@@ -3,7 +3,7 @@ import SwiftData
 import Testing
 @testable import FocusApp
 
-/// 一日の区切りを夜（初期 22:00）に（GHO-17・PLN-11、ADR-0023、受け入れ 1b-64〜1b-79）。
+/// 一日の区切りを夜（初期 22:00）に（GHO-17・PLN-11、ADR-0023、受け入れ 1b-70〜1b-85）。
 @MainActor
 struct DayBoundaryModelTests {
     private func model(_ t: TestStore, settings: MemorySettings = MemorySettings(),
@@ -32,7 +32,7 @@ struct DayBoundaryModelTests {
         return settings
     }
 
-    // MARK: 区切りより後は次の日（1b-65）
+    // MARK: 区切りより後は次の日（1b-71）
 
     @Test func focusAfterTheBoundaryCountsForTheNextDay() throws {
         let t = try TestStore(now: jst("2026-10-20T09:00"))
@@ -71,7 +71,7 @@ struct DayBoundaryModelTests {
         #expect(m.snapshot.focusSeconds == 30 * 60)
     }
 
-    // MARK: 区切りで確定（1b-64）
+    // MARK: 区切りで確定（1b-70）
 
     @Test func reviewIsFinalAfterTheBoundary() throws {
         let t = try TestStore(now: jst("2026-10-20T07:00"))
@@ -101,7 +101,7 @@ struct DayBoundaryModelTests {
         #expect(m.daySnapshot(daysAgo: 1)?.points == points)
     }
 
-    // MARK: 睡眠は起きた日（1b-66・1b-77）
+    // MARK: 睡眠は起きた日（1b-72・1b-83）
 
     @Test func sleepCountsOnTheWakeDay() throws {
         let t = try TestStore(now: jst("2026-10-20T09:00"))
@@ -166,7 +166,7 @@ struct DayBoundaryModelTests {
         #expect(try t.store.sleep(dayKey: "2026-10-20")?.source == .setting)
     }
 
-    // MARK: 朝の計画は朝4:00から（1b-67）
+    // MARK: 朝の計画は朝4:00から（1b-73）
 
     @Test func morningPlanFromFourAmWithTheGridFromWaking() throws {
         let t = try TestStore(now: jst("2026-10-20T09:00"))
@@ -191,7 +191,7 @@ struct DayBoundaryModelTests {
         #expect(morning.dayEnd == jst("2026-10-21T22:00"))
     }
 
-    // MARK: 前の夜の予定（1b-68、PLN-11）
+    // MARK: 前の夜の予定（1b-74、PLN-11）
 
     @Test func previousNightPlanWorksLikeAPlan() async throws {
         let t = try TestStore(now: jst("2026-10-20T09:00"))
@@ -297,7 +297,7 @@ struct DayBoundaryModelTests {
         #expect(m.daySnapshot(of: opened.dayStart)?.points == before)
     }
 
-    // MARK: 区切りの設定（1b-69・1b-76）
+    // MARK: 区切りの設定（1b-75・1b-82）
 
     @Test func changingTheBoundaryTakesEffectTheNextDay() throws {
         let t = try TestStore(now: jst("2026-10-20T15:00"))
@@ -352,7 +352,7 @@ struct DayBoundaryModelTests {
         #expect(m.boundary.day(key: "2026-10-21")?.end == jst("2026-10-21T23:00"))
     }
 
-    // MARK: 移すとき（1b-71・1b-73・1b-78）
+    // MARK: 移すとき（1b-77・1b-79・1b-84）
 
     private func insertSession(_ t: TestStore, _ start: String, _ end: String, category: CategoryOption) {
         let record = FocusSessionRecord(dayKey: DayBoundary.dayKey(containing: jst(start), calendar: tokyoCalendar), timeZoneId: "Asia/Tokyo",
@@ -478,7 +478,7 @@ struct DayBoundaryModelTests {
         #expect(old.timelineDay(daysAgo: 6)?.sessions.map(\.id).count == new.timelineDay(daysAgo: 6)?.sessions.map(\.id).count)
     }
 
-    // MARK: 区切りを変えた週の比べ方（1b-72）
+    // MARK: 区切りを変えた週の比べ方（1b-78）
 
     @Test func switchWeekComparesAtTheSameTime() throws {
         let t = try TestStore(now: jst("2026-10-22T14:30"))
@@ -498,7 +498,7 @@ struct DayBoundaryModelTests {
         #expect(ghost.focusSeconds(at: jst("2026-10-22T22:00")) == 30 * 60)
     }
 
-    // MARK: 24時間でない日（1b-75）
+    // MARK: 24時間でない日（1b-81）
 
     @Test func lapsEndAtTheBoundaryOnLongAndShortDays() {
         func sections(_ from: [(String, Int)], _ key: String) -> [DateInterval] {
@@ -543,7 +543,7 @@ struct DayBoundaryModelTests {
         #expect(widgets.published.last?.ghostCurve.last == 3600)
     }
 
-    // MARK: 習慣の時刻の当てはめ（1b-74）
+    // MARK: 習慣の時刻の当てはめ（1b-80）
 
     @Test func habitTimesMapAroundTheBoundary() {
         let habits = PlanHabits(blocks: [PlanTemplate.Block(hour: 23, minute: 0, minutes: 30, category: .gameSNS),
@@ -566,7 +566,7 @@ struct DayBoundaryModelTests {
         #expect(crossing.draft(day: evening, calendar: tokyoCalendar).blocks.isEmpty)
     }
 
-    // MARK: 止め忘れの確認は朝4:00（1b-79）
+    // MARK: 止め忘れの確認は朝4:00（1b-85）
 
     @Test func needsEndTimeCheckAcrossBoundaryNotFourAm() {
         // 21:30 に始めて 22:10 に終える（25分の計画外）：区切りをまたいだだけでは聞かない

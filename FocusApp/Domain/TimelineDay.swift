@@ -11,7 +11,7 @@ struct TimelineDay {
     var planBlocks: [PlanBlockSummary]
     var isNoPlanDay: Bool
     var sessions: [FocusSession]
-    /// 終了時刻を早められる日（今日と昨日、TML-04）
+    /// 記録を直せる日（今日と昨日、TML-04・TML-06）
     var editableDayKeys: Set<String>
     /// その日に開けた時間と回数（TML-05。ホームと同じ DTX-05 の数え方）。ブロックが一度も効いていない日は nil
     var opened: OpenedTime? = nil
@@ -25,15 +25,19 @@ struct TimelineDay {
     var focusSeconds: Int { segments.focusSeconds(until: now) }
     var detoxSeconds: Int { segments.detoxSeconds(until: now) }
 
-    /// 終了時刻を早められるか。終わっていて、今日か昨日の記録で、開始から2分以上（選べる時刻がある）
+    /// 直せるか。終わっていて、今日か昨日の記録。タイマーの記録は終了時刻を早めるだけなので開始から2分以上（選べる時刻がある）。
+    /// 手動の記録（TMR-13）は開始・終わりを変える・消すができるので、長さを問わない
     func canEdit(_ session: FocusSession) -> Bool {
         Self.canEdit(session, editableDayKeys: editableDayKeys)
     }
 
     static func canEdit(_ session: FocusSession, editableDayKeys: Set<String>) -> Bool {
-        guard let end = session.endAt else { return false }
-        return editableDayKeys.contains(session.dayKey) && end.timeIntervalSince(session.startAt) >= 120
+        guard let end = session.endAt, editableDayKeys.contains(session.dayKey) else { return false }
+        return session.isDeclared || end.timeIntervalSince(session.startAt) >= 120
     }
+
+    /// 今日・昨日の画面に「＋ 手動で記録」を出すか（TML-06）
+    var canAddManual: Bool { editableDayKeys.contains(dayKey) }
 
     /// 計画ブロックから始めた記録
     func sessions(of block: PlanBlockSummary) -> [FocusSession] {
