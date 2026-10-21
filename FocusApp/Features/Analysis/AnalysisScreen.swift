@@ -58,7 +58,7 @@ struct AnalysisScreen: View {
                 .accessibilityIdentifier("analysisReviewRow")
                 NavigationLink(value: AnalysisRoute.best) {
                     row("自己ベスト", systemImage: "trophy", detail: model.snapshot.personalBest.map {
-                        Text("集中 \(DurationFormat.japanese($0.focusSeconds))（\(TimeMapView.dayText($0.focusDay))）")
+                        Text("集中 \(DurationFormat.japanese($0.focusSeconds))（\(TimeMapView.dayText(model.boundary.day(containing: $0.focusDay).date))）")
                     })
                 }
                 .accessibilityIdentifier("analysisBestRow")
@@ -178,7 +178,7 @@ struct PointsHistoryView: View {
             .accessibilityIdentifier("pointsPreviousPage")
             Spacer()
             if let first = history.first, let last = history.last {
-                Text("\(TimeMapView.shortDayText(first.dayStart))〜\(TimeMapView.shortDayText(last.dayStart))")
+                Text("\(TimeMapView.shortDayText(first.displayDate))〜\(TimeMapView.shortDayText(last.displayDate))")
                     .font(.subheadline.monospacedDigit())
                     .accessibilityIdentifier("pointsPageRange")
             }
@@ -509,7 +509,8 @@ struct PersonalBestView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.subheadline).foregroundStyle(.secondary)
             Text(value).font(.title2.bold().monospacedDigit())
-            Text(TimeMapView.dayText(day)).font(.caption).foregroundStyle(.secondary)
+            // 日付は日の名前の日（区切り 22:00 の日は始まりが前の夜なので、始まりの日付ではない）
+            Text(TimeMapView.dayText(model.boundary.day(containing: day).date)).font(.caption).foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
@@ -526,7 +527,7 @@ struct PersonalBestView: View {
         }
         .font(.body.bold().monospacedDigit())
         .fixedSize()
-        let date = Text(TimeMapView.dayText(day.dayStart)).font(.subheadline).foregroundStyle(.secondary)
+        let date = Text(TimeMapView.dayText(day.displayDate)).font(.subheadline).foregroundStyle(.secondary)
         return HStack(alignment: .firstTextBaseline, spacing: 12) {
             ZStack(alignment: .trailing) {
                 Text(widestRank).hidden()

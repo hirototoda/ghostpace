@@ -565,13 +565,13 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["この日たまったポイントのグラフ"].exists)
         XCTAssertTrue(app.staticTexts["10月18日(日)"].exists)
 
-        // 戻って、一覧から今日の振り返りを開く（通知の 22:00 の前でも開ける）
+        // 戻って、一覧から今日の振り返りを開く（区切りの 22:00 の前でも開ける。区切りの前は「今のところ」、2026-10-21 から確定は区切り）
         app.navigationBars.buttons.firstMatch.tap()
         app.navigationBars.buttons.firstMatch.tap()
         let review = app.buttons["analysisReviewRow"]
         XCTAssertTrue(review.waitForExistence(timeout: timeout))
         review.tap()
-        XCTAssertTrue(app.staticTexts["今のところ・確定は朝4:00"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.staticTexts["今のところ・確定は22:00"].waitForExistence(timeout: timeout))
     }
 
     /// テンプレートの読み込み：確認なしで置き換わり、「元に戻す」で戻る（PLN-07、1a-17）
