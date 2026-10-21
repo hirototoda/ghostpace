@@ -16,7 +16,7 @@ App（SwiftUI） … ターゲット名・フォルダ名は FocusApp、表示�
 ├── App/             起動（AppLauncher：保存先を開く）、AppModel（画面の状態と操作）、ContentView
 ├── Features/        画面ごと（Home, Plan, Timer。今後 Timeline, Review, Settings）
 ├── Domain/          純粋なロジック。UI・永続化に依存しない
-│   ├── DayBoundary      日付境界の計算
+│   ├── DayBoundary      その日の区切りの計算（区切りの履歴から。GHO-17）
 │   ├── FocusSession     一時停止・残り時間・止め忘れの判定・終了時刻の決め方
 │   ├── GhostRace        時間の区間、先週の記録を今日に揃える計算
 │   ├── PlanSnapshot     計画の状態と確定時の写し
@@ -51,7 +51,7 @@ App Group（group.com.hirototoda.focusapp）
 ```
 
 ## 方針
-- **Domainは純粋関数中心**：ゴースト計算・日付境界・予実比較はユニットテストで網羅する。オーナーがコードを読まないため、正しさはテストで担保する
+- **Domainは純粋関数中心**：ゴースト計算・その日の区切り・予実比較はユニットテストで網羅する。オーナーがコードを読まないため、正しさはテストで担保する
 - **Clock注入**：現在時刻は`AppClock`プロトコル経由（Swift標準の`Clock`と名前が衝突するため）。SwiftUIでは`@Environment(\.clock)`で受け取る。テストとシミュレーター検証で任意の時刻を再現できる
 - **データの流れ**：画面 → AppModel → Repository（プロトコル）→ SwiftDataStore。画面から SwiftData を直接触らない（ADR-0002）。保存に失敗したら取り消して「保存できませんでした」を出す（[ADR-0012](../decisions/0012-uuid-references-json-fields.md)）
 - **起動引数（Debug ビルドのみ）**：時間の再現とデモデータのため
