@@ -23,7 +23,8 @@ final class OpenedTimeUITests: XCTestCase {
         XCTAssertTrue(label.waitForExistence(timeout: timeout))
         XCTAssertEqual(label.label, "開けた 25分（2回）")
 
-        let review = launch("2026-10-19T22:30:00", ["-openReview"])
+        // 区切り（22:00）の前に開いた振り返り（今のところ）。見本の日は 22:00 区切り（2026-10-21）
+        let review = launch("2026-10-19T21:50:00", ["-openReview"])
         let reviewLabel = review.descendants(matching: .any).matching(identifier: "openedLabel").firstMatch
         XCTAssertTrue(reviewLabel.waitForExistence(timeout: timeout))
         XCTAssertEqual(reviewLabel.label, "開けた 25分（2回）")

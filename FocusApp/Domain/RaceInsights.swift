@@ -1,6 +1,6 @@
 import Foundation
 
-/// ラップ（GHO-06、docs/product/features/ghost-race.md「ラップ」）。4:00 から2時間ごとの区間で、相手との差を出す。
+/// ラップ（GHO-06、docs/product/features/ghost-race.md「ラップ」）。一日の始まり（前の日の区切り）から2時間ごとの区間で、相手との差を出す。
 /// 2026-10-12 から差は集中した時間ではなくポイント（旗・帯・一覧のすべて）。帯を出すかどうかだけは今までどおり集中で決める
 struct Lap: Identifiable, Hashable {
     var interval: DateInterval
@@ -29,16 +29,25 @@ enum Laps {
     static let length: TimeInterval = 2 * 3600
     static let count = 12
 
-    /// その日の12区間（4:00–6:00 … 翌2:00–翌4:00）
-    static func sections(dayStart: Date) -> [DateInterval] {
-        (0..<count).map { DateInterval(start: dayStart.addingTimeInterval(Double($0) * length), duration: length) }
+    /// その日の区間（一日の始まりから2時間ごと。区切り 22:00 なら 22:00–0:00 … 20:00–22:00 の12区間）。
+    /// 一日が24時間でない日（区切りを変えた次の日）は、最後の区間を区切りまでの残りにする（25時間なら12区間＋最後の1時間）
+    static func sections(dayStart: Date, dayEnd: Date? = nil) -> [DateInterval] {
+        let end = dayEnd ?? dayStart.addingTimeInterval(Double(count) * length)
+        var result: [DateInterval] = []
+        var cursor = dayStart
+        while cursor < end {
+            let next = min(cursor.addingTimeInterval(length), end)
+            result.append(DateInterval(start: cursor, end: next))
+            cursor = next
+        }
+        return result
     }
 
     /// `now` までに始まった区間のラップ。`opponent` は相手のその時刻までの集中（秒）、
     /// `minePoints`・`opponentPoints` はその時刻までにたまった自分・相手のポイント（区間のポイントは終わり−始まり）
     static func make(mine: [TimeSegment], opponent: (Date) -> Int, minePoints: (Date) -> Double,
-                     opponentPoints: (Date) -> Double, dayStart: Date, now: Date) -> [Lap] {
-        sections(dayStart: dayStart).filter { $0.start < now }.map { section in
+                     opponentPoints: (Date) -> Double, dayStart: Date, dayEnd: Date? = nil, now: Date) -> [Lap] {
+        sections(dayStart: dayStart, dayEnd: dayEnd).filter { $0.start < now }.map { section in
             let end = min(section.end, now)
             return Lap(interval: section,
                        mine: mine.focusSeconds(until: end) - mine.focusSeconds(until: section.start),
@@ -71,11 +80,11 @@ enum Laps {
     }
 
 
-    /// 線の先 `head` が通過した最後の2時間の区切り（4:00 から。区切りちょうども通過に数える）。4:00〜翌4:00 の外には出ない。
-    /// ［▶］で流している間、一覧を変えるのは区切りを過ぎたときだけにするため（GHO-06、2026-10-12）
-    static func passedBoundary(dayStart: Date, head: Date) -> Date {
-        let passed = (head.timeIntervalSince(dayStart) / length).rounded(.down)
-        return dayStart.addingTimeInterval(min(max(passed, 0), Double(count)) * length)
+    /// 線の先 `head` が通過した最後の区間の境目（一日の始まりから。境目ちょうども通過に数える）。その日の一日分の外には出ない。
+    /// ［▶］で流している間、一覧を変えるのは境目を過ぎたときだけにするため（GHO-06、2026-10-12）
+    static func passedBoundary(dayStart: Date, dayEnd: Date? = nil, head: Date) -> Date {
+        let ends = sections(dayStart: dayStart, dayEnd: dayEnd).map(\.end)
+        return ends.last { $0 <= head } ?? dayStart
     }
 
     /// ラップの一覧に出す行（GHO-06、2026-10-12）。自分も相手も区間のポイントが 0.0 の区間は省く。
@@ -145,21 +154,21 @@ struct PersonalBest: Hashable {
 }
 
 enum DailyFocus {
-    /// 記録の区間を朝4:00で区切って、日（その日の 4:00）ごとの集中の秒に分ける。4:00 をまたいだ分は次の日に入れる
-    static func byDay(_ segments: [TimeSegment], calendar: Calendar) -> [Date: Int] {
+    /// 記録の区間をその日の区切りで区切って、日（その日の始まり）ごとの集中の秒に分ける。区切りをまたいだ分は次の日に入れる
+    static func byDay(_ segments: [TimeSegment], boundary: DayBoundary) -> [Date: Int] {
         var result: [Date: Int] = [:]
         for segment in segments where segment.countsAsFocus && segment.end > segment.start {
             var cursor = segment.start
             while cursor < segment.end {
-                let dayStart = DayBoundary.dayStart(containing: cursor, calendar: calendar)
-                let next = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
-                let end = min(segment.end, next)
-                result[dayStart, default: 0] += Int(end.timeIntervalSince(cursor))
+                let day = boundary.day(containing: cursor)
+                let end = min(segment.end, day.end)
+                result[day.start, default: 0] += Int(end.timeIntervalSince(cursor))
                 cursor = end
             }
         }
         return result
     }
+
 
     /// 自己ベスト（今日より前の日だけ）。記録がなければ nil
     static func best(_ byDay: [Date: Int], before today: Date) -> PersonalBest? {
@@ -172,8 +181,19 @@ enum DailyFocus {
 
 /// 時間帯の地図（ANA-07）：曜日（月〜日）×2時間の区間ごとの、集中の平均（秒）
 struct TimeMap: Hashable {
-    /// [曜日 0=月 … 6=日][区間 0=4:00–6:00 … 11=翌2:00–翌4:00]
+    /// [曜日 0=月 … 6=日][区間 0=今日の一日の始まりの時刻から2時間 … 11]
     var averages: [[Int]]
+    /// 区間0の始まりの時刻（0:00 からの分。区切り 22:00 なら 1320）
+    var originMinutes = DayBoundary.morningHour * 60
+
+    /// 区間 `section` の始まりの時（0〜23）
+    func sectionHour(_ section: Int) -> Int { (originMinutes / 60 + section * 2) % 24 }
+
+    /// 区間 `section` の始まりの時刻（「22:00」「22:30」）
+    func sectionLabel(_ section: Int) -> String {
+        let minutes = (originMinutes + section * 120) % 1440
+        return String(format: "%d:%02d", minutes / 60, minutes % 60)
+    }
 
     static let weeks = 4
 
@@ -188,27 +208,40 @@ struct TimeMap: Hashable {
 
     var maxValue: Int { averages.flatMap { $0 }.max() ?? 0 }
 
-    /// 直近4週（`today` の前の日まで）。記録のある日（何か集中した日）だけで平均する
-    static func make(_ segments: [TimeSegment], today: Date, calendar: Calendar) -> TimeMap {
-        let from = calendar.date(byAdding: .day, value: -weeks * 7, to: today) ?? today
+    /// 直近4週（`today` の前の日まで）。記録のある日（何か集中した日）だけで平均する。
+    /// 区間は今日の一日の始まりの時刻から2時間ごとの12区間（`originMinutes`、0:00 からの分）。曜日は日の名前で決め、
+    /// 区切りが違う日の集中も時刻で区間に入れる（2026-10-21、Claude 補足、Q48）
+    static func make(_ segments: [TimeSegment], today: BoundaryDay, boundary: DayBoundary) -> TimeMap {
+        let calendar = boundary.calendar
+        let from = boundary.day(-weeks * 7, from: today).start
+        let origin = originMinutes(of: today, calendar: calendar)
         var totals = Array(repeating: Array(repeating: 0, count: Laps.count), count: 7)
-        var days: [Int: Set<Date>] = [:]
+        var days: [Int: Set<String>] = [:]
         for segment in segments where segment.countsAsFocus {
             var cursor = max(segment.start, from)
-            let end = min(segment.end, today)
+            let end = min(segment.end, today.start)
             while cursor < end {
-                let dayStart = DayBoundary.dayStart(containing: cursor, calendar: calendar)
-                let section = min(Int(cursor.timeIntervalSince(dayStart) / Laps.length), Laps.count - 1)
-                let sectionEnd = min(end, dayStart.addingTimeInterval(Double(section + 1) * Laps.length))
-                let weekday = (calendar.component(.weekday, from: dayStart) + 5) % 7
+                let day = boundary.day(containing: cursor)
+                let parts = calendar.dateComponents([.hour, .minute, .second], from: cursor)
+                let seconds = (parts.hour ?? 0) * 3600 + (parts.minute ?? 0) * 60 + (parts.second ?? 0)
+                let fromOrigin = ((seconds - origin * 60) % 86400 + 86400) % 86400
+                let section = min(fromOrigin / Int(Laps.length), Laps.count - 1)
+                let sectionEnd = min(end, day.end, cursor.addingTimeInterval(Double((section + 1) * Int(Laps.length) - fromOrigin)))
+                let weekday = (calendar.component(.weekday, from: day.date) + 5) % 7
                 totals[weekday][section] += Int(sectionEnd.timeIntervalSince(cursor))
-                days[weekday, default: []].insert(dayStart)
+                days[weekday, default: []].insert(day.key)
                 cursor = sectionEnd
             }
         }
         return TimeMap(averages: totals.enumerated().map { weekday, row in
             let count = days[weekday]?.count ?? 0
             return row.map { count > 0 ? $0 / count : 0 }
-        })
+        }, originMinutes: origin)
+    }
+
+    /// 区間の始まりの時刻（0:00 からの分）：今日の一日の始まりの時刻
+    static func originMinutes(of day: BoundaryDay, calendar: Calendar) -> Int {
+        let parts = calendar.dateComponents([.hour, .minute], from: day.start)
+        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
     }
 }

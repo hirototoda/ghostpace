@@ -18,7 +18,8 @@ struct HabitsView: View {
     init(model: AppModel, isIntro: Bool = false) {
         self.model = model
         self.isIntro = isIntro
-        _draft = State(initialValue: model.habits.draft(dayStart: model.snapshot.dayStart, calendar: model.calendar))
+        _draft = State(initialValue: model.habits.draft(dayStart: model.snapshot.dayStart, dayEnd: model.snapshot.dayEnd,
+                                                        dayDate: model.snapshot.dayDate, calendar: model.calendar))
     }
 
     private var dayStart: Date { model.snapshot.dayStart }
@@ -71,13 +72,15 @@ struct HabitsView: View {
             if isIntro { introButtons }
         }
         .sheet(item: $editing) { target in
-            BlockEditorSheet(block: target.block, isNew: target.isNew, plan: draft, dayStart: dayStart,
+            BlockEditorSheet(block: target.block, isNew: target.isNew, plan: draft, dayStart: dayStart, dayEnd: model.snapshot.dayEnd,
+                             boundaryLabel: BoundaryText.time(model.todayEndMinutes), calendar: model.calendar,
                              categories: otherCount < PlanHabits.blockLimit || !target.block.isUnblock ? model.categories : [],
                              projects: model.projects,
                              onCreateProject: { model.createProject(name: $0, category: $1) },
                              onCreateCategory: { model.createCategory(name: $0, countsAsFocus: $1, detoxGroup: $2) },
                              showsUnblock: draft.remainingUnblocks > 0 || target.block.isUnblock,
-                             problem: { PlanHabits.problem(with: $0, in: draft, dayStart: dayStart) }) { saved in
+                             problem: { PlanHabits.problem(with: $0, in: draft, dayStart: dayStart, dayEnd: model.snapshot.dayEnd,
+                                                          boundaryLabel: BoundaryText.time(model.todayEndMinutes)) }) { saved in
                 var updated = draft
                 updated.upsert(saved)
                 change(updated)
@@ -94,7 +97,7 @@ struct HabitsView: View {
     /// 新しいブロック。ほかのブロックが3つあればゲーム・SNS の時間から。初めは 8:00、あれば最後のブロックの終わりから
     private var newBlock: PlanBlockDraft {
         let start = draft.blocks.isEmpty
-            ? (model.calendar.date(byAdding: .hour, value: 8 - DayBoundary.hour, to: dayStart) ?? dayStart)
+            ? model.boundary.wallClock(model.snapshot.dayDate, minutes: 8 * 60)
             : draft.nextStart(now: dayStart)
         if otherCount >= PlanHabits.blockLimit { return .unblock(start: start) }
         return PlanBlockDraft(start: start, minutes: PlanDraft.defaultMinutes, category: model.categories.first ?? .unknown)

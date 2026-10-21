@@ -159,29 +159,29 @@ struct PlanGridAwakeTests {
         let m = model(t, source: NoSleepSource(isAvailable: true,
                                                 intervals: [DateInterval(start: jst("2026-10-19T00:10"), end: jst("2026-10-19T07:05"))]))
         await m.refreshSleep()
-        m.setSleepSetting(startMinutes: 23 * 60 + 30, endMinutes: 7 * 60)
+        m.setSleepSetting(startMinutes: 21 * 60 + 30, endMinutes: 7 * 60)
         let range = m.awakeRange(dayStart: jst("2026-10-19T04:00"))
         #expect(range.lowerBound == jst("2026-10-19T07:05"))
-        #expect(range.upperBound == jst("2026-10-19T23:30"))
+        #expect(range.upperBound == jst("2026-10-19T21:30"))
     }
 
     @Test func settingTimesWhenThereIsNoSleepForTheDay() throws {
         let t = try TestStore(now: jst("2026-10-19T07:30"))
         try t.seeded()
         let m = model(t)
-        // 明日の計画（まだ睡眠を保存していない日）は設定の時刻（初期 0:00〜7:00）
+        // 明日の計画（まだ睡眠を保存していない日）は設定の時刻（初期 0:00〜7:00）。寝る 0:00 は区切り 22:00 より後なので区切りまで
         let range = m.awakeRange(dayStart: jst("2026-10-20T04:00"))
         #expect(range.lowerBound == jst("2026-10-20T07:00"))
-        #expect(range.upperBound == jst("2026-10-21T00:00"))
+        #expect(range.upperBound == jst("2026-10-20T22:00"))
     }
 
-    @Test func bedAfterTheDayEndStopsAtFourAm() throws {
+    @Test func bedAfterTheDayEndStopsAtTheBoundary() throws {
         let t = try TestStore(now: jst("2026-10-19T07:30"))
         try t.seeded()
         let m = model(t)
-        // 寝る 6:00・起きる 7:00（朝に寝る人）→ 寝る時刻は翌4:00 より後なので、格子の終わり（翌4:00）まで起きている
+        // 寝る 6:00・起きる 7:00（朝に寝る人）→ 寝る時刻はその日の区切り（22:00）より後なので、格子の終わり（区切り）まで起きている
         m.setSleepSetting(startMinutes: 6 * 60, endMinutes: 7 * 60)
         let range = m.awakeRange(dayStart: jst("2026-10-20T04:00"))
-        #expect(range == jst("2026-10-20T07:00")...jst("2026-10-21T04:00"))
+        #expect(range == jst("2026-10-20T07:00")...jst("2026-10-20T22:00"))
     }
 }

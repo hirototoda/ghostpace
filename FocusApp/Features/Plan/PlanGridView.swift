@@ -55,10 +55,11 @@ struct PlanGridView: View {
 
     // MARK: 目盛り
 
-    /// 1時間ごとの線と時刻。各時刻は `hour-<4:00 からの時間>` の ID を持つ（開いたときにそこへ送る）
+    /// 1時間ごとの線と時刻。各時刻は `hour-<格子の始まりからの時間>` の ID を持つ（開いたときにそこへ送る）。
+    /// 格子の長さはその日の長さ（区切りを変えた次の日は24時間でない。朝の計画は起きた時刻から）
     private var ruler: some View {
         VStack(spacing: 0) {
-            ForEach(0..<24, id: \.self) { index in
+            ForEach(0..<max(1, (layout.dayMinutes + 59) / 60), id: \.self) { index in
                 HStack(alignment: .top, spacing: 6) {
                     Text(hourLabel(index))
                         .font(.caption2.monospacedDigit())
@@ -78,10 +79,10 @@ struct PlanGridView: View {
         .accessibilityHidden(true)
     }
 
-    /// 4:00 から index 時間後の時刻（夏時間の切り替えの日も実際の時刻）
+    /// 格子の始まりから index 時間後の時刻（夏時間の切り替えの日も実際の時刻）
     private func hourLabel(_ index: Int) -> String {
         let date = layout.dayStart.addingTimeInterval(Double(index * 3600))
-        return "\(calendar.component(.hour, from: date)):00"
+        return String(format: "%d:%02d", calendar.component(.hour, from: date), calendar.component(.minute, from: date))
     }
 
     private func sleepShade(from start: Date, to end: Date) -> some View {

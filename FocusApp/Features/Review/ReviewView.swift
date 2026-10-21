@@ -44,7 +44,8 @@ struct ReviewView: View {
 
     private var resultCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(content.dayStart.formatted(.dateTime.month().day().weekday(.wide).locale(Locale(identifier: "ja_JP"))))
+            Text((content.dayDate ?? content.dayStart).formatted(.dateTime.month().day().weekday(.wide)
+                .locale(Locale(identifier: "ja_JP"))))
                 .font(.headline)
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 24) { totals }
@@ -83,10 +84,17 @@ struct ReviewView: View {
 
     private var verdictCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("先週の自分と").font(.headline)
-                Spacer()
-                Text("今のところ・確定は朝4:00").font(.caption2).foregroundStyle(.tertiary)
+            // 区切りの後に開いたときは確定した結果なので何も付けない。区切りより前は「今のところ・確定は22:00」（GHO-04・17）
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("先週の自分と").font(.headline)
+                    Spacer()
+                    provisionalLabel
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("先週の自分と").font(.headline)
+                    provisionalLabel
+                }
             }
             if content.verdicts.isEmpty {
                 Text(content.hasOlderHistory ? "おかえりなさい。先週はお休みでした。来週から勝ち負けが出ます"
@@ -103,6 +111,13 @@ struct ReviewView: View {
         .accessibilityIdentifier("verdictCard")
     }
 
+    @ViewBuilder
+    private var provisionalLabel: some View {
+        if let note = content.provisionalNote {
+            Text(note).font(.caption2).foregroundStyle(.tertiary).accessibilityIdentifier("provisionalNote")
+        }
+    }
+
     // MARK: 目標との差
 
     private var opponentCard: some View {
@@ -114,7 +129,7 @@ struct ReviewView: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            Text("確定は朝4:00です").font(.caption2).foregroundStyle(.tertiary)
+            provisionalLabel
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,7 +246,8 @@ private struct GapRow: View {
 
 /// 初めて朝の計画を確定した直後に1回だけ出す、通知の説明（TMR-05、2026-10-01 決定）。
 struct NotificationIntroSheet: View {
-    let reviewMinutes: Int
+    /// 一日の区切りの時刻の表示（「22:00」。振り返りの通知はこの時刻に出す、REV-02）
+    let boundaryLabel: String
     let onEnable: () -> Void
     let onLater: () -> Void
 
@@ -247,7 +263,7 @@ struct NotificationIntroSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("計画ブロックが始まる前と終わりの時刻、計画外のタイマー中に次の計画の時刻が来たときに知らせます（アプリを閉じていても）",
                           systemImage: "timer")
-                    Label("夜 \(String(format: "%d:%02d", reviewMinutes / 60, reviewMinutes % 60)) に「今日を振り返る」を知らせます",
+                    Label("一日の区切り（\(boundaryLabel)）に「今日の結果が確定しました」と知らせます",
                           systemImage: "moon.stars")
                     Label("ブロック中のアプリで「開く」を押したときに、長押しの画面へ案内します", systemImage: "lock.open")
                     Label("それ以外の通知は送りません", systemImage: "hand.raised")

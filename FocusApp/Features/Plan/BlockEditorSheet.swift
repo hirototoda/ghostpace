@@ -9,6 +9,11 @@ struct BlockEditorSheet: View {
     let isNew: Bool
     let plan: PlanDraft
     let dayStart: Date
+    /// その日の区切り（一日の終わり）。nil なら24時間後
+    var dayEnd: Date? = nil
+    /// 区切りの時刻の表示（区切りをまたぐときの理由）
+    var boundaryLabel: String? = nil
+    var calendar: Calendar = .app(timeZone: .current)
     let categories: [CategoryOption]
     let projects: [ProjectOption]
     let onCreateProject: (String, CategoryOption) -> ProjectOption?
@@ -211,7 +216,8 @@ struct BlockEditorSheet: View {
                     Text(block.start.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))
                         .monospacedDigit()
                 } else {
-                    StepTimePicker(date: $block.start, minuteInterval: PlanDraft.minuteStep)
+                    StepTimePicker(date: Binding(get: { block.start }, set: { block.start = fitted($0) }),
+                                   minuteInterval: PlanDraft.minuteStep)
                         .accessibilityLabel("開始")
                 }
             }
@@ -227,11 +233,19 @@ struct BlockEditorSheet: View {
         .onAppear { block.start = PlanDraft.roundedToStep(block.start) }
     }
 
+    /// 選んだ時刻を、その日の中の同じ時刻にする（時刻だけを選ぶので、前の夜の 22:30 なども選べるように。PLN-11）
+    private func fitted(_ start: Date) -> Date {
+        let end = dayEnd ?? dayStart.addingTimeInterval(24 * 3600)
+        guard start < dayStart || start >= end else { return start }
+        return [-1, 1].compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+            .first { $0 >= dayStart && $0 < end } ?? start
+    }
+
     // MARK: 保存
 
     private var saveButton: some View {
         let reason = isOngoingUnblock ? "今のゲーム・SNS の時間は動かせません。終えるときは「今で終える」" as String?
-            : self.problem.map { $0(block) } ?? plan.problem(with: block, dayStart: dayStart)
+            : self.problem.map { $0(block) } ?? plan.problem(with: block, dayStart: dayStart, dayEnd: dayEnd, boundaryLabel: boundaryLabel)
         return VStack(spacing: 8) {
             if let reason {
                 Label(reason, systemImage: "exclamationmark.circle")

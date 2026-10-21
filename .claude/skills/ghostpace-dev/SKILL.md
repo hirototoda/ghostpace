@@ -58,7 +58,7 @@ description: GhostPace（focus-app）の機能開発・仕様変更の標準フ�
 
 ## 4. テストを先に書いて実装する
 - Swift Testing でテストを先に書き、失敗を確かめてから実装する。テストを弱めて通すのは禁止
-- 守ること：現在時刻は `AppClock`（テストは `FixedClock`・`OffsetClock`）、日付の区切りは `DayBoundary`（朝4:00）、データは Repository 経由、`project.yml` を直して `xcodegen generate`
+- 守ること：現在時刻は `AppClock`（テストは `FixedClock`・`OffsetClock`）、日付の区切りは `DayBoundary`（その日の区切り。初期 22:00、ADR-0023）、データは Repository 経由、`project.yml` を直して `xcodegen generate`
 - ビルドは XcodeBuildMCP を使う（最初に `session_show_defaults` を呼ぶ）。テストは push して GitHub Actions で回す（ユニット全件＋UI 全件。使い方は verify-ios の手順3）。早く確かめたいテストだけ、この Mac の `scripts/test.sh` で回してよい
 - 主な操作の流れが変わるなら、UI テスト（FocusAppUITests）を1本足す
 

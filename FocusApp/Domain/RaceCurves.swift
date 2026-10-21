@@ -55,7 +55,7 @@ extension HomeSnapshot {
         }
     }
 
-    /// 裏のグラフの線（ポイント）。自分は 4:00〜今、相手は 4:00〜翌4:00（今の時刻にも点を置く）。
+    /// 裏のグラフの線（ポイント）。自分は一日の始まり〜今、相手は一日分（今の時刻にも点を置く）。
     /// 相手のポイントがない日（先週のデトックスがない日など）は自分の線だけ
     func raceCurves(opponent: Opponent?) -> [RaceCurve] {
         raceCurves(rival: opponent.map(RaceRival.opponent))
@@ -77,7 +77,7 @@ extension HomeSnapshot {
                 }))
             }
         case .today:
-            // 今日がまだ 4:00 ちょうど（線がない）なら出さない
+            // 今日がまだ一日の始まりちょうど（線がない）なら出さない
             if let todayRival, todayRival.now > dayStart {
                 curves.append(RaceCurve(kind: .opponentPoints, values: sampleDates(until: min(todayRival.now, dayEnd)).map {
                     .init(date: $0, value: todayRival.points($0))
@@ -89,7 +89,7 @@ extension HomeSnapshot {
         return curves
     }
 
-    /// 相手の `date` までのポイント。相手が今日なら、今日の 4:00 からの同じ経過までの値（今より先は今の値）
+    /// 相手の `date` までのポイント。相手が今日なら、今日の同じ時刻までの値（今より先は今の値）
     func rivalPoints(_ rival: RaceRival, at date: Date) -> Double? {
         switch rival {
         case .opponent(let opponent): opponentPoints(opponent, at: date)
@@ -123,7 +123,7 @@ extension HomeSnapshot {
         case .today:
             guard let todayRival else { return [] }
             return Laps.make(mine: sessions, opponent: todayRival.focusSeconds, minePoints: myPoints(until:),
-                             opponentPoints: todayRival.points, dayStart: dayStart, now: min(now, todayRival.now))
+                             opponentPoints: todayRival.points, dayStart: dayStart, dayEnd: dayEnd, now: min(now, todayRival.now))
         }
     }
 
@@ -146,7 +146,7 @@ extension HomeSnapshot {
         return segment.isUnblock ? .other : .detox
     }
 
-    /// 4:00 から5分おきの時刻と、今・終わりの時刻と、`extra` の時刻。
+    /// 一日の始まりから5分おきの時刻と、今・終わりの時刻と、`extra` の時刻。
     private func sampleDates(until end: Date, extra: [Date] = []) -> [Date] {
         var dates: Set<Date> = []
         var cursor = dayStart
@@ -197,7 +197,7 @@ struct RaceHeader: Equatable {
     var gap: Double?
 }
 
-/// 今日を相手にしたその日のグラフ（ANA-05、2026-10-11）の今日。時刻はその日の時刻に揃えて（4:00 からの経過が同じ）持つ
+/// 今日を相手にしたその日のグラフ（ANA-05、2026-10-11）の今日。時刻はその日の時刻に揃えて（同じ時刻でそろえる、GHO-02）持つ
 struct TodayRival {
     /// 今日の今を、その日の時刻に揃えたもの
     var now: Date
@@ -205,8 +205,9 @@ struct TodayRival {
     var points: (Date) -> Double
     var focusSeconds: (Date) -> Int
 
-    init(today: HomeSnapshot, alignedTo dayStart: Date) {
-        let offset = today.dayStart.timeIntervalSince(dayStart)
+    /// - dayDate: その日の日の名前の日の 0:00（今日の日の名前の日の 0:00 との差だけずらす）
+    init(today: HomeSnapshot, alignedTo dayDate: Date) {
+        let offset = today.dayDate.timeIntervalSince(dayDate)
         let todayNow = today.now
         now = todayNow.addingTimeInterval(-offset)
         points = { today.myPoints(until: min($0.addingTimeInterval(offset), todayNow)) }

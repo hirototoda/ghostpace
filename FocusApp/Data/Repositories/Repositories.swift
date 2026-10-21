@@ -84,15 +84,17 @@ protocol PlanRepository {
     func saveDraft(_ draft: PlanDraft, dayKey: String, timeZone: TimeZone) throws
     func confirm(_ draft: PlanDraft, dayKey: String, timeZone: TimeZone) throws
     /// 計画なし日にする。goalSeconds は計画なし日の目標（nil なら目標なし）。すでに計画なし日なら何もしない
-    func skip(dayKey: String, timeZone: TimeZone, goalSeconds: Int?) throws
+    /// 計画なし日にする。下書きのブロックは `keeping` のものだけ残し、ほかは消す（前の夜の予定、PLN-11）
+    func skip(dayKey: String, timeZone: TimeZone, goalSeconds: Int?, keeping: Set<UUID>) throws
     func saveChanges(_ draft: PlanDraft, dayKey: String) throws
     /// 目標だけを変える（計画なし日の目標、GHO-10）。その日の計画（計画なしを含む）がなければ notFound
     func setGoal(_ seconds: Int?, dayKey: String) throws
 }
 
 extension PlanRepository {
+    /// 下書きのブロックを全部消して計画なし日にする
     func skip(dayKey: String, timeZone: TimeZone) throws {
-        try skip(dayKey: dayKey, timeZone: timeZone, goalSeconds: nil)
+        try skip(dayKey: dayKey, timeZone: timeZone, goalSeconds: nil, keeping: [])
     }
 }
 
@@ -145,4 +147,18 @@ protocol SleepRepository {
     func saveSleep(_ sleep: SleepLine, dayKey: String, timeZone: TimeZone) throws
 }
 
+/// 一日の区切りの履歴（GHO-17、保存データ第6版、data-model.md「DayBoundaryChange」）。
+@MainActor
+protocol BoundaryRepository {
+    /// 区切りの履歴（すべての行）
+    func boundaryChanges() throws -> [DayBoundaryChange]
+    /// `fromDayKey` から `endMinutes` で区切る行を足す。同じ fromDayKey の行があれば書き換える
+    func setBoundary(endMinutes: Int, fromDayKey: String, timeZone: TimeZone) throws
+    /// 区切りの履歴（呼んだ時点の行。タイマーの記録の dayKey を決めるのに使う）
+    func dayBoundary(timeZone: TimeZone) throws -> DayBoundary
+    /// タイマーの記録か1日の計画が1つでもあるか（区切りの履歴を足すとき、移す端末か新しく入れた端末かを決める）
+    func hasAnyRecord() throws -> Bool
+}
+
 typealias RecordStore = CategoryRepository & PlanRepository & SessionRepository & TemplateRepository & SleepRepository
+    & BoundaryRepository

@@ -70,6 +70,17 @@ struct ReviewContent {
     var isNoPlanDay: Bool
     /// 先週より前に記録がある（休み明けの文言、GHO-15）
     var hasOlderHistory = false
+    /// 日の名前の日の 0:00（見出しの日付）
+    var dayDate: Date? = nil
+    /// その日の区切りを過ぎて確定した結果か（GHO-04・17）。false なら「今のところ」
+    var isFinal = false
+    /// 確定する時刻の表示（その日の区切り「22:00」）。区切りの履歴より前の日（確定は朝4:00）は nil
+    var finalLabel: String? = nil
+
+    /// 「今のところ」の見出し。確定した結果なら nil（区切りの後に開いた振り返り、GHO-04・17）
+    var provisionalNote: String? {
+        isFinal ? nil : String(localized: "今のところ・確定は\(finalLabel ?? String(localized: "朝4:00"))")
+    }
 
     /// - snapshot: 朝の計画（確定時の写し）。計画なし日は nil
     static func make(home: HomeSnapshot, sessions: [FocusSession], snapshot: [PlanSnapshotBlock]?) -> ReviewContent {
@@ -110,6 +121,6 @@ struct ReviewContent {
             dayStart: home.dayStart, focusSeconds: home.focusSeconds, opened: opened,
             categories: categories, opponents: opponents, verdicts: verdicts,
             gaps: snapshot.map { ReviewGaps.largest(snapshot: $0, sessions: sessions, now: now) } ?? [],
-            isNoPlanDay: snapshot == nil, hasOlderHistory: home.hasOlderHistory)
+            isNoPlanDay: snapshot == nil, hasOlderHistory: home.hasOlderHistory, dayDate: home.dayDate)
     }
 }

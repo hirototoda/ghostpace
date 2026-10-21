@@ -255,7 +255,8 @@ final class SwiftDataStore: RecordStore {
         }
         return StoredPlan(status: PlanStatus(raw: record.statusRaw),
                           draft: PlanDraft(blocks: blocks, goalSeconds: record.goalEdited ? record.goalFocusSec : nil),
-                          addedAt: Dictionary(records.map { ($0.id, $0.createdAt) }, uniquingKeysWith: { first, _ in first }))
+                          addedAt: Dictionary(records.map { ($0.id, $0.createdAt) }, uniquingKeysWith: { first, _ in first }),
+                          confirmedAt: record.confirmedAt)
     }
 
     func snapshot(dayKey: String) throws -> [PlanSnapshotBlock]? {
@@ -297,7 +298,7 @@ final class SwiftDataStore: RecordStore {
         }
     }
 
-    func skip(dayKey: String, timeZone: TimeZone, goalSeconds: Int?) throws {
+    func skip(dayKey: String, timeZone: TimeZone, goalSeconds: Int?, keeping: Set<UUID>) throws {
         try write {
             var goal = PlanDraft()
             goal.goalSeconds = goalSeconds.flatMap { $0 > 0 ? $0 : nil }
@@ -307,7 +308,8 @@ final class SwiftDataStore: RecordStore {
             case let existing?:
                 switch PlanStatus(raw: existing.statusRaw) {
                 case .draft:
-                    try blockRecords(planId: existing.id).forEach(context.delete)
+                    // 前の夜の予定（呼ぶ側が決めた `keeping`）は残し、ほかは外す（PLN-11、2026-10-21）
+                    try blockRecords(planId: existing.id).filter { !keeping.contains($0.id) }.forEach(context.delete)
                     existing.statusRaw = "skipped"
                     existing.updatedAt = clock.now()
                     // 下書きの目標は残さず、渡された目標にする
@@ -427,7 +429,7 @@ final class SwiftDataStore: RecordStore {
             guard try runningRecord() == nil else { throw RecordError.alreadyRunning }
             let now = clock.now()
             let record = FocusSessionRecord(
-                dayKey: DayBoundary.dayKey(containing: now, calendar: .app(timeZone: request.timeZone)),
+                dayKey: try dayBoundary(timeZone: request.timeZone).dayKey(containing: now),
                 timeZoneId: request.timeZone.identifier, planBlockId: request.planBlockId,
                 categoryId: request.category.id, countsAsFocus: request.category.countsAsFocus,
                 projectId: request.project?.id, startAt: now,
@@ -442,7 +444,7 @@ final class SwiftDataStore: RecordStore {
         try write {
             guard request.end > request.start else { throw SessionError.invalidEnd }
             let record = FocusSessionRecord(
-                dayKey: DayBoundary.dayKey(containing: request.start, calendar: .app(timeZone: request.timeZone)),
+                dayKey: try dayBoundary(timeZone: request.timeZone).dayKey(containing: request.start),
                 timeZoneId: request.timeZone.identifier, planBlockId: request.planBlockId,
                 categoryId: request.category.id, countsAsFocus: request.category.countsAsFocus,
                 projectId: request.project?.id, startAt: request.start,
@@ -466,7 +468,7 @@ final class SwiftDataStore: RecordStore {
             guard record.isDeclared == true else { throw RecordError.notManual }
             guard end > start else { throw SessionError.invalidEnd }
             let timeZone = TimeZone(identifier: record.timeZoneId) ?? .current
-            record.dayKey = DayBoundary.dayKey(containing: start, calendar: .app(timeZone: timeZone))
+            record.dayKey = try dayBoundary(timeZone: timeZone).dayKey(containing: start)
             record.startAt = start
             record.endAt = end
             record.updatedAt = clock.now()
@@ -668,5 +670,44 @@ extension SwiftDataStore {
                                            endAt: sleep.end, sourceRaw: sleep.source.rawValue, at: clock.now()))
             }
         }
+    }
+}
+
+// MARK: 一日の区切りの履歴（GHO-17、第6版）
+
+extension SwiftDataStore {
+    func boundaryChanges() throws -> [DayBoundaryChange] {
+        try context.fetch(FetchDescriptor<DayBoundaryChangeRecord>(sortBy: [SortDescriptor(\.fromDayKey)])).map {
+            DayBoundaryChange(fromDayKey: $0.fromDayKey, endMinutes: $0.endMinutes, timeZoneId: $0.timeZoneId, updatedAt: $0.updatedAt)
+        }
+    }
+
+    func setBoundary(endMinutes: Int, fromDayKey: String, timeZone: TimeZone) throws {
+        try write {
+            let minutes = DayBoundary.normalized(endMinutes)
+            let records = try context.fetch(FetchDescriptor<DayBoundaryChangeRecord>(
+                predicate: #Predicate { $0.fromDayKey == fromDayKey }, sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]))
+            if let record = records.first {
+                guard record.endMinutes != minutes || record.timeZoneId != timeZone.identifier else { return }
+                record.endMinutes = minutes
+                record.timeZoneId = timeZone.identifier
+                record.updatedAt = clock.now()
+            } else {
+                context.insert(DayBoundaryChangeRecord(fromDayKey: fromDayKey, endMinutes: minutes,
+                                                       timeZoneId: timeZone.identifier, at: clock.now()))
+            }
+        }
+    }
+
+    func dayBoundary(timeZone: TimeZone) throws -> DayBoundary {
+        DayBoundary(calendar: .app(timeZone: timeZone), changes: try boundaryChanges())
+    }
+
+    func hasAnyRecord() throws -> Bool {
+        var sessions = FetchDescriptor<FocusSessionRecord>()
+        sessions.fetchLimit = 1
+        var plans = FetchDescriptor<DailyPlanRecord>()
+        plans.fetchLimit = 1
+        return try !context.fetch(sessions).isEmpty || !context.fetch(plans).isEmpty
     }
 }

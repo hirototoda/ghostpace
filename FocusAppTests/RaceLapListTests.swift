@@ -104,9 +104,9 @@ struct RaceLapListTests {
     /// 相手が目標（計画なし日・目標6時間＝8:00–20:00 に半分の速さ）：区間を最後まで数えた目標の値で足す
     @Test func goalRowsUseTheWholeSection() throws {
         let goal = GoalGhost(plan: nil, goalSeconds: 6 * 3600, sleep: [], dayStart: dayStart, calendar: tokyoCalendar)
-        let s = HomeSnapshot(now: jst("2026-10-19T13:00"), dayStart: dayStart, dayEnd: jst("2026-10-20T04:00"),
-                             sessions: [seg("08:30", "09:30")], planBlocks: [], isNoPlanDay: true, ghost: nil, goal: goal,
-                             reviewTime: jst("2026-10-19T22:00"))
+        let s = HomeSnapshot(now: jst("2026-10-19T13:00"), dayStart: dayStart, dayEnd: jst("2026-10-20T04:00"), dayKey: "2026-10-19",
+                             dayDate: jst("2026-10-19T00:00"),
+                             sessions: [seg("08:30", "09:30")], planBlocks: [], isNoPlanDay: true, ghost: nil, goal: goal)
         let laps = s.rivalLaps(.opponent(.goal))
         // 9:00 では 8:00–10:00 はまだ足さない
         #expect(starts(Laps.listed(laps, replayHead: jst("2026-10-19T09:00"))).isEmpty)
@@ -242,9 +242,9 @@ struct RaceLapListTests {
     @Test func halfwayIsWhenMyPointsReachHalfOfTheirDay() {
         let goal = GoalGhost(plan: nil, goalSeconds: 6 * 3600, sleep: [], dayStart: dayStart, calendar: tokyoCalendar)
         func snapshot(_ now: String) -> HomeSnapshot {
-            HomeSnapshot(now: jst(now), dayStart: dayStart, dayEnd: jst("2026-10-20T04:00"),
-                         sessions: [seg("08:00", "12:00")], planBlocks: [], isNoPlanDay: true, ghost: nil, goal: goal,
-                         reviewTime: jst("2026-10-19T22:00"))
+            HomeSnapshot(now: jst(now), dayStart: dayStart, dayEnd: jst("2026-10-20T04:00"), dayKey: "2026-10-19",
+                         dayDate: jst("2026-10-19T00:00"),
+                         sessions: [seg("08:00", "12:00")], planBlocks: [], isNoPlanDay: true, ghost: nil, goal: goal)
         }
         #expect(snapshot("2026-10-19T13:00").halfwayTime(.goal) == jst("2026-10-19T11:45"))
         #expect(snapshot("2026-10-19T11:44").halfwayTime(.goal) == nil)
@@ -256,9 +256,9 @@ struct RaceLapListTests {
     /// 相手のポイントがない日（先週のデトックスがない日など、グラフに相手の線を出さない日）は、ラップも出さない
     @Test func noRivalPointsMeansNoLaps() {
         let ghost = GhostSummary(segments: [seg("09:00", "10:00")])
-        let s = HomeSnapshot(now: jst("2026-10-19T13:00"), dayStart: dayStart, dayEnd: jst("2026-10-20T04:00"),
-                             sessions: [seg("08:30", "09:30")], planBlocks: [], isNoPlanDay: true, ghost: ghost,
-                             reviewTime: jst("2026-10-19T22:00"))
+        let s = HomeSnapshot(now: jst("2026-10-19T13:00"), dayStart: dayStart, dayEnd: jst("2026-10-20T04:00"), dayKey: "2026-10-19",
+                             dayDate: jst("2026-10-19T00:00"),
+                             sessions: [seg("08:30", "09:30")], planBlocks: [], isNoPlanDay: true, ghost: ghost)
         #expect(s.opponentPoints(.lastWeek, at: s.now) == nil)
         #expect(s.laps(.lastWeek).isEmpty)
         #expect(s.halfwayTime(.lastWeek) == nil)

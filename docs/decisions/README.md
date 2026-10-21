@@ -8,7 +8,7 @@
 | [0002](0002-local-first-swiftdata.md) | ローカルファースト、SwiftData＋Repository層 | draft |
 | [0003](0003-xcodegen.md) | Xcodeプロジェクトは XcodeGen で生成する | draft |
 | [0004](0004-unlock-always-allowed.md) | ブロック解除は常に許可し、記録のみ | superseded（0013） |
-| [0005](0005-day-boundary-4am.md) | 日付境界は4:00 | draft |
+| [0005](0005-day-boundary-4am.md) | 日付境界は4:00 | superseded（0023） |
 | [0006](0006-docs-as-source-of-truth.md) | ドキュメントを唯一の仕様とする | draft |
 | [0007](0007-verification.md) | 検証はClaudeがシミュレーターで行い、実機専用項目のみオーナー | draft |
 | [0008](0008-personal-first-publish-later.md) | まず自分用に作り、手応えがあれば公開を検討する | draft |
@@ -26,6 +26,7 @@
 | [0020](0020-test-queue.md) | テストは Mac 全体の順番待ちで回し、UI テストの全件は TestFlight に送る前に回す（PR と TestFlight の前のテストは 0021 で CI に。順番待ちはこの Mac で回すときだけ） | draft |
 | [0021](0021-github-actions.md) | コードと仕様は公開リポジトリに置き、テストと TestFlight は GitHub Actions で回す | draft |
 | [0022](0022-public-records-and-cheers.md) | ベストと今日を誰でも見られるようにし、応援でメタ報酬を返す（フォロー・インプレッション・応援。通知はしない） | draft |
+| [0023](0023-day-boundary-evening.md) | 一日の区切りを夜（初期 22:00）にし、設定で変えられるようにする（0005 を置き換え） | draft |
 
 ## テンプレート
 ```

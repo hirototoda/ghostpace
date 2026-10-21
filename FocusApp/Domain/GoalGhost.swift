@@ -32,15 +32,19 @@ struct GoalGhost: Hashable {
     /// - goalSeconds: 手で決めた目標。nil なら計画の集中の合計
     /// - sleep: [その朝に終わった睡眠, その夜の睡眠]。目標の多い分を足す範囲（起きている時間）に使う。
     ///   1つだけならその朝の睡眠（寝る時刻は分からない）。アプリでは設定の時刻で補うので、いつも2つ
-    init(plan: PlanDraft?, goalSeconds: Int?, sleep: [DateInterval], dayStart: Date, calendar: Calendar) {
-        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
+    /// - dayStart・dayEnd: その日の始まりと終わり（前の日の区切り・その日の区切り）。dayEnd が nil なら24時間後
+    /// - dayDate: 日の名前の日の 0:00（計画なし日の 8:00〜20:00 などの時刻を当てはめる日）。nil なら dayStart の暦の日
+    init(plan: PlanDraft?, goalSeconds: Int?, sleep: [DateInterval], dayStart: Date, dayEnd: Date? = nil, dayDate: Date? = nil,
+         calendar: Calendar) {
+        let dayEnd = dayEnd ?? calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
+        let dayDate = dayDate ?? calendar.startOfDay(for: dayStart)
         let allBlocks = plan?.sortedBlocks ?? []
         // ゲーム・SNS の時間（BLK-10）は目標の範囲を決めるのに使わない。ただし空き時間にはしない（そこに目標を足さない）
         let blocks = allBlocks.filter { !$0.isUnblock }
         if blocks.isEmpty {
             let goal = max(goalSeconds ?? 0, 0)
             self.goalSeconds = goal
-            segments = Self.noPlanSegments(goal: goal, dayStart: dayStart, dayEnd: dayEnd, calendar: calendar)
+            segments = Self.noPlanSegments(goal: goal, dayStart: dayStart, dayEnd: dayEnd, dayDate: dayDate, calendar: calendar)
             return
         }
 
@@ -54,7 +58,7 @@ struct GoalGhost: Hashable {
             let awake = Self.awake(sleep: sleep, dayStart: dayStart, dayEnd: dayEnd)
             let rangeStart = awake.wake ?? blocks[0].start
             let lastPlanned = blocks.map(\.end).max() ?? rangeStart
-            let rangeEnd = max(awake.bed ?? Self.time(hour: Self.noPlanEndHour, dayStart: dayStart, calendar: calendar), lastPlanned)
+            let rangeEnd = max(awake.bed ?? Self.time(hour: Self.noPlanEndHour, dayDate: dayDate, calendar: calendar), lastPlanned)
             // ブロック（ゲーム・SNS の時間も）と、寝ている間には足さない
             let busy = (allBlocks.map { DateInterval(start: $0.start, end: $0.end) } + (awake.bed == nil ? [] : sleep))
                 .sorted { $0.start < $1.start }
@@ -80,15 +84,15 @@ struct GoalGhost: Hashable {
         self.segments = segments
     }
 
-    private static func noPlanSegments(goal: Int, dayStart: Date, dayEnd: Date, calendar: Calendar) -> [PaceSegment] {
+    private static func noPlanSegments(goal: Int, dayStart: Date, dayEnd: Date, dayDate: Date, calendar: Calendar) -> [PaceSegment] {
         guard goal > 0 else { return [] }
-        let start = time(hour: noPlanStartHour, dayStart: dayStart, calendar: calendar)
-        let end = time(hour: noPlanEndHour, dayStart: dayStart, calendar: calendar)
+        let start = max(time(hour: noPlanStartHour, dayDate: dayDate, calendar: calendar), dayStart)
+        let end = min(time(hour: noPlanEndHour, dayDate: dayDate, calendar: calendar), dayEnd)
         let window = end.timeIntervalSince(start)
         if Double(goal) <= window {
             return [PaceSegment(start: start, end: end, rate: Double(goal) / window)]
         }
-        // 前後に同じだけ広げる。日の端にかかったら、はみ出した分を反対側に足す
+        // 前後に同じだけ広げる。日の端にかかったら、はみ出した分を反対側に足す（区切りより後には広げず前へ。2026-10-21、Q48）
         let length = min(Double(goal), dayEnd.timeIntervalSince(dayStart))
         var from = start.addingTimeInterval(-(Double(goal) - window) / 2)
         if from < dayStart { from = dayStart }
@@ -96,9 +100,9 @@ struct GoalGhost: Hashable {
         return [PaceSegment(start: from, end: from.addingTimeInterval(length), rate: 1)]
     }
 
-    /// その日の hour 時（4:00〜翌3:59 のどこか）
-    private static func time(hour: Int, dayStart: Date, calendar: Calendar) -> Date {
-        calendar.date(byAdding: .hour, value: hour - DayBoundary.hour, to: dayStart) ?? dayStart
+    /// 日の名前の日の hour 時
+    private static func time(hour: Int, dayDate: Date, calendar: Calendar) -> Date {
+        calendar.date(bySettingHour: hour, minute: 0, second: 0, of: dayDate) ?? dayDate.addingTimeInterval(Double(hour * 3600))
     }
 
     /// その朝に起きた時刻と、その夜に寝る時刻（その日の中に収める）。寝る時刻が起きた時刻より前なら、どちらも分からない扱い
@@ -116,7 +120,7 @@ struct GoalGhost: Hashable {
     var wholeDayFocusSeconds: Int { focusSeconds(at: .distantFuture) }
 
     /// 目標のゴーストが開ける2つの時刻（0分だけ開ける、GHO-10）：起きている時間（その朝に起きた時刻〜その夜に寝る時刻）を3等分したところ。
-    /// `sleep` は [その朝に終わった睡眠, その夜の睡眠] の順。起きている時間が求められなければ 4:00〜翌4:00 を3等分する（Q32）
+    /// `sleep` は [その朝に終わった睡眠, その夜の睡眠] の順。起きている時間が求められなければ一日分を3等分する（Q32）
     static func openTimes(sleep: [DateInterval], dayStart: Date, dayEnd: Date) -> [Date] {
         let awake = awake(sleep: sleep, dayStart: dayStart, dayEnd: dayEnd)
         var wake = awake.wake ?? dayStart, bed = awake.bed ?? dayEnd

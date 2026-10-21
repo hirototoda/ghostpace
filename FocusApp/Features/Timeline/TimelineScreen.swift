@@ -41,7 +41,7 @@ struct TimelineScreen: View {
                 .accessibilityIdentifier("previousDayButton")
             Spacer()
             VStack(spacing: 2) {
-                Text(day.dayStart.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
+                Text(day.displayDate.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP")))
                      + (day.isToday ? "（今日）" : ""))
                     .font(.headline)
                 // その日に開けた時間と回数（TML-05）。日を切り替えるたびに日付と一緒に読めるよう、日付の下に置く（2026-10-03 オーナー決定、案C）

@@ -355,6 +355,27 @@ struct PointsRulesTests {
         #expect(s.myPoints(until: dayEnd).isApprox(97.5, tolerance: 0.01))
     }
 
+    /// 区切り 22:00 の1日の例（ghost-race.md、2026-10-21）：前の夜 22:00〜22:00、睡眠は 0:00〜7:00 の一晩分をまとめてこの日に。合計は同じ 97.5pt（1b-72）
+    @Test func exampleDayWithTheEveningBoundaryIsNinetySevenAndHalf() {
+        let plan = examplePlan
+        var today = [session("2026-10-19T09:00", "2026-10-19T11:00"), session("2026-10-19T14:00", "2026-10-19T16:00"),
+                     session("2026-10-19T18:00", "2026-10-19T19:00", category: c[5])]
+        for index in today.indices { today[index].planBlockId = plan.blocks[index].id }
+        let day = boundary([("2026-10-01", 22 * 60)]).day(key: "2026-10-19")!
+        let segments = today.flatMap { $0.activeSegments(now: day.end) }
+        let night = [DateInterval(start: jst("2026-10-19T00:00"), end: jst("2026-10-19T07:00"))]
+        let mine = DetoxDay.make(.init(
+            dayStart: day.start, dayEnd: day.end, until: day.end, events: [event(.started, "2026-10-01T09:00")],
+            focus: segments.filter(\.countsAsFocus).map { DateInterval(start: $0.start, end: $0.end) },
+            detoxTimers: segments.filter { !$0.countsAsFocus }.map { DetoxTimer(interval: DateInterval(start: $0.start, end: $0.end),
+                                                                                  group: $0.detoxGroup) },
+            sleep: night, gameWindows: []))
+        let s = HomeSnapshot.make(now: day.end, calendar: calendar, todaySessions: today, plan: plan, lastWeekSessions: [],
+                                  detox: mine, sleep: night, day: day, lastWeekDay: boundary([("2026-10-01", 22 * 60)]).day(-7, from: day),
+                                  onPlan: OnPlanContext(morningBlockIds: Set(plan.blocks.map(\.id))))
+        #expect(s.myPoints(until: day.end).isApprox(97.5, tolerance: 0.01))
+    }
+
     @Test func openingDuringFocusCostsMoreThanOutside() {
         // 1日の例で、集中中の 10:00 に15分開けた → 97.5 − 1.5（集中の15分）− 1 ＝ 95.0。円の集中時間は減らない
         let s = followedPlan(now: "2026-10-20T03:59:59", events: opened("2026-10-19T10:00", minutes: 15))

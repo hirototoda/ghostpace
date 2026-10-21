@@ -10,7 +10,7 @@ enum ManualRecord {
         case tooShort
         /// 今より後に終わる
         case notEnded
-        /// 始めた日が今日・昨日（朝4:00区切り）でない
+        /// 始めた日が今日・昨日（その日の区切りで分けた日）でない
         case outOfRange
         /// ブロックが効いていない（DTX-03 の表の一番上の行：始める前・選択が読めない・許可が外れた）
         case notBlocking
@@ -54,6 +54,8 @@ enum ManualRecord {
         var sessions: [FocusSession]
         /// 寝ている時間（昨日・今日の朝の睡眠と、今夜の睡眠）
         var sleep: [DateInterval]
+        /// 一日の区切り（GHO-17、区切りの履歴から作ったもの）
+        var boundary: DayBoundary
     }
 
     /// `start`〜`end` を手動で記録できないときの理由。できるなら nil。
@@ -61,7 +63,7 @@ enum ManualRecord {
     static func problem(start: Date, end: Date, excluding id: UUID? = nil, context: Context) -> Problem? {
         if end.timeIntervalSince(start) < FocusSession.minimumSeconds { return .tooShort }
         if end > context.now { return .notEnded }
-        if !context.dayKeys.contains(DayBoundary.dayKey(containing: start, calendar: context.calendar)) { return .outOfRange }
+        if !context.dayKeys.contains(context.boundary.dayKey(containing: start)) { return .outOfRange }
         if let problem = blockProblem(start: start, end: end, context: context) { return problem }
         let others = context.sessions.filter { $0.id != id }
         if others.contains(where: { overlaps(start, end, $0.startAt, $0.endAt ?? .distantFuture) }) { return .overlapsRecord }

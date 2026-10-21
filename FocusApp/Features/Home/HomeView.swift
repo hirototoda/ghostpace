@@ -69,7 +69,7 @@ struct HomeView: View {
 
     private var header: some View {
         HStack {
-            Text(snapshot.dayStart.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP"))))
+            Text(snapshot.dayDate.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "ja_JP"))))
                 .font(.headline)
             Spacer()
             Button("設定", systemImage: "gearshape", action: onOpenSettings)

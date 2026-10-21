@@ -407,7 +407,9 @@ struct GameTimeModelTests {
         #expect(try log.all().map(\.kind).filter { $0 == .unblockStarted || $0 == .unblockEnded } == [.unblockStarted, .unblockEnded])
     }
 
-    @Test func draftPlanDoesNotOpenAnything() throws {
+    /// 区切りから朝の計画を確定するまでは、下書きをふつうの計画と同じに使う（ゲーム・SNS の時間でいつものブロックを外す。PLN-11、2026-10-21。
+    /// それまでは下書きでは何も外さなかった）
+    @Test func draftPlanOpensItsGameTime() throws {
         let t = try TestStore(now: jst("2026-10-19T07:00"))
         let c = try t.seeded()
         let blockStore = MemoryBlockStore()
@@ -416,7 +418,7 @@ struct GameTimeModelTests {
         let m = model(t, blockStore: blockStore)
         m.saveDraft(plan(c, day: "2026-10-19", games: ["07:00"]))
         m.reload()
-        #expect(blockStore.state.unblockWindows.isEmpty)
+        #expect(blockStore.state.unblockWindows.map(\.start) == [jst("2026-10-19T07:00")])
     }
 
     @Test func focusDuringGameTimeBlocksEverything() throws {
@@ -496,19 +498,20 @@ struct GameTimeModelTests {
         #expect(try log.all().map(\.kind).filter { $0 == .unblockEnded }.isEmpty)
     }
 
-    /// 0:30 のゲーム・SNS の時間は前の日（4:00 区切り）の計画のもの。4:00 を過ぎて新しい日の計画が確定するまで、新しい窓はない
-    @Test func fourAmSwitchesToTheNewDay() throws {
+    /// 21:30 のゲーム・SNS の時間はその日（区切り 22:00）の計画のもの。区切りを過ぎると、新しい日の下書き・習慣がなければ窓はない
+    /// （2026-10-21 に 4:00 から区切りに）
+    @Test func boundarySwitchesToTheNewDay() throws {
         let t = try TestStore(now: jst("2026-10-19T09:00"))
         let c = try t.seeded()
         let (blocking, blockStore, log) = blockFixture(t)
         let m = model(t, blocking: blocking, blockStore: blockStore, log: log)
         var withLate = plan(c, day: "2026-10-19", games: [])
-        withLate.upsert(.unblock(start: jst("2026-10-20T00:30")))
+        withLate.upsert(.unblock(start: jst("2026-10-19T21:30")))
         m.confirmPlan(withLate)
-        t.clock.set(jst("2026-10-20T00:40"))
+        t.clock.set(jst("2026-10-19T21:40"))
         m.reload()
-        #expect(m.unblockedUntil == jst("2026-10-20T01:00"))
-        t.clock.set(jst("2026-10-20T03:59"))
+        #expect(m.unblockedUntil == jst("2026-10-19T22:00"))
+        t.clock.set(jst("2026-10-19T21:59"))
         m.reload()
         #expect(!blockStore.state.unblockWindows.isEmpty)
         t.clock.set(jst("2026-10-20T04:00"))

@@ -23,6 +23,11 @@ enum DemoScene: String, CaseIterable, Hashable {
     case habits
     /// day と同じ＋10:30–11:00 の読書（記録なし）。11:15 ごろなら「さっき」「今」「次」の3行が出る（TMR-15）
     case missed
+    /// 今日は前の夜に入れた下書き（前の夜の 22:30–23:30 読書・23:30 ゲーム・SNS、9:00 英語）だけ。区切り（22:00）の直後に開いて、
+    /// 前の夜の予定と「今日を振り返る」を見る撮影用（PLN-11。`-fixedNow` は区切りの少し後にする）
+    case night
+    /// day と同じで、区切りを朝4:00から 22:00 に変えた週（6日前までは朝4:00区切り、5日前が 4:00〜22:00 の18時間、その次から 22:00。GHO-17、Q48）
+    case switchweek
 
     var label: String {
         switch self {
@@ -36,6 +41,8 @@ enum DemoScene: String, CaseIterable, Hashable {
         case .offPlanAtBlock: "計画外のまま計画の時刻"
         case .habits: "習慣と候補"
         case .missed: "さっきのブロック"
+        case .night: "前の夜の予定"
+        case .switchweek: "区切りを変えた週"
         }
     }
 }
@@ -84,25 +91,42 @@ enum DemoData {
         Item(hour: 20, minute: 0, minutes: 90, category: 0, project: "ゼミ準備"),
     ]
 
+    /// 見本の区切りの履歴（GHO-17、recording-spec.md）：見本の日はすべて 22:00 区切り（一番古い日の前の日から 22:00 にして、
+    /// 一番古い日も前の夜 22:00 から始まるように）。`switchweek` は5日前から 22:00（6日前までは朝4:00区切り、5日前が18時間）
+    static func boundaryChange(_ scene: DemoScene, now: Date, calendar: Calendar) -> DayBoundaryChange {
+        let evening = DayBoundary(calendar: calendar,
+                                  changes: [DayBoundaryChange(fromDayKey: "0000-01-01", endMinutes: DayBoundary.defaultEndMinutes)])
+        let today = scene == .switchweek ? DayBoundary(calendar: calendar).day(containing: now) : evening.day(containing: now)
+        let from = scene == .switchweek ? evening.day(-5, from: today) : evening.day(-(pastDays + 1), from: today)
+        return DayBoundaryChange(fromDayKey: from.key, endMinutes: DayBoundary.defaultEndMinutes, timeZoneId: calendar.timeZone.identifier)
+    }
+
+    /// 見本の区切り
+    static func boundary(_ scene: DemoScene, now: Date, calendar: Calendar) -> DayBoundary {
+        DayBoundary(calendar: calendar, changes: [boundaryChange(scene, now: now, calendar: calendar)])
+    }
+
     /// 見本のブロックの記録：ずっと前から始めていて、今日は 10:40 に15分・13:20 に10分（開けた 25分（2回））、
     /// 過去の日は日によって0〜2回開けた（DTX-05）。今より後の記録は入れない
     static func blockEvents(_ scene: DemoScene, now: Date, calendar: Calendar) -> [BlockEvent] {
         let zone = calendar.timeZone.identifier
         var events = [BlockEvent(occurredAt: Date(timeIntervalSinceReferenceDate: 0), timeZoneId: zone, kind: .started)]
-        let todayStart = DayBoundary.dayStart(containing: now, calendar: calendar)
-        func unlock(_ dayStart: Date, hour: Int, minute: Int, minutes: Int) {
-            guard let start = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: dayStart), start < now else { return }
+        let boundary = boundary(scene, now: now, calendar: calendar)
+        let today = boundary.day(containing: now)
+        func unlock(_ day: BoundaryDay, hour: Int, minute: Int, minutes: Int) {
+            let start = boundary.wallClock(day.date, minutes: hour * 60 + minute)
+            guard start < now else { return }
             events.append(BlockEvent(occurredAt: start, timeZoneId: zone, kind: .unlocked, unlockMinutes: minutes))
             let end = start.addingTimeInterval(Double(minutes * 60))
             if end <= now { events.append(BlockEvent(occurredAt: end, timeZoneId: zone, kind: .reblocked)) }
         }
-        unlock(todayStart, hour: 10, minute: 40, minutes: 15)
-        unlock(todayStart, hour: 13, minute: 20, minutes: 10)
+        unlock(today, hour: 10, minute: 40, minutes: 15)
+        unlock(today, hour: 13, minute: 20, minutes: 10)
         if scene != .firstweek {
             for day in 1...pastDays {
-                guard let dayStart = calendar.date(byAdding: .day, value: -day, to: todayStart) else { continue }
-                if day % 3 != 0 { unlock(dayStart, hour: 12, minute: 30, minutes: 20 + day % 4 * 5) }
-                if day % 2 == 1 { unlock(dayStart, hour: 21, minute: 10, minutes: 15) }
+                let past = boundary.day(-day, from: today)
+                if day % 3 != 0 { unlock(past, hour: 12, minute: 30, minutes: 20 + day % 4 * 5) }
+                if day % 2 == 1 { unlock(past, hour: 21, minute: 10, minutes: 15) }
             }
         }
         return events
@@ -130,10 +154,16 @@ enum DemoData {
         let context = store.context
         let timeZone = calendar.timeZone
         let now = store.clock.now()
-        let todayStart = DayBoundary.dayStart(containing: now, calendar: calendar)
+        // 区切りの履歴を先に入れる（記録の dayKey はこの区切りで決める）
+        let change = boundaryChange(scene, now: now, calendar: calendar)
+        try store.setBoundary(endMinutes: change.endMinutes, fromDayKey: change.fromDayKey, timeZone: timeZone)
+        let boundary = try store.dayBoundary(timeZone: timeZone)
+        let today = boundary.day(containing: now)
+        let todayStart = today.start
 
+        /// その日（`dayStart` の日）の時刻。日の名前の日に時:分を当てはめる
         func time(_ dayStart: Date, _ item: Item, shift: Int = 0) -> Date {
-            dayStart.addingTimeInterval(Double((item.hour - DayBoundary.hour) * 3600 + (item.minute + shift) * 60))
+            boundary.wallClock(boundary.day(containing: dayStart).date, minutes: item.hour * 60 + item.minute + shift)
         }
         func plan(dayStart: Date) -> PlanDraft {
             PlanDraft(blocks: planItems.map {
@@ -148,7 +178,7 @@ enum DemoData {
                 return [PauseInterval(start: from, end: from.addingTimeInterval(Double(pause.minutes * 60)))]
             } ?? []
             let record = FocusSessionRecord(
-                dayKey: DayBoundary.dayKey(containing: start, calendar: calendar), timeZoneId: timeZone.identifier,
+                dayKey: boundary.dayKey(containing: start), timeZoneId: timeZone.identifier,
                 planBlockId: planBlockId, categoryId: categories[item.category].id,
                 countsAsFocus: categories[item.category].countsAsFocus,
                 projectId: item.project.flatMap { projects[$0]?.id }, startAt: start,
@@ -180,8 +210,9 @@ enum DemoData {
         // 過去の日
         if scene != .firstweek {
             for day in 1...pastDays {
-                guard let dayStart = calendar.date(byAdding: .day, value: -day, to: todayStart) else { continue }
-                let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
+                let past = boundary.day(-day, from: today)
+                let dayStart = past.start
+                let key = past.key
                 var pastPlan = plan(dayStart: dayStart)
                 // 習慣と候補の見本：先週の同じ曜日だけ 12:30 の掃除がある（候補に「先週」が出る）
                 if scene == .habits, day == 7, let housework = categories.first(where: { $0.name == "家事" }) {
@@ -205,7 +236,7 @@ enum DemoData {
         }
 
         // 今日
-        let todayKey = DayBoundary.dayKey(containing: now, calendar: calendar)
+        let todayKey = today.key
         var todayPlan = plan(dayStart: todayStart)
         todayPlan.goalSeconds = goalMinutes.map { $0 * 60 }
         switch scene {
@@ -220,9 +251,22 @@ enum DemoData {
         case .noplan:
             try store.skip(dayKey: todayKey, timeZone: timeZone)
             insertToday(todayItems.prefix(2), until: now)
-        case .day, .firstweek:
+        case .day, .firstweek, .switchweek:
             try store.confirm(todayPlan, dayKey: todayKey, timeZone: timeZone)
             insertToday(todayItems, until: now, plan: todayPlan)
+        case .night:
+            // 前の夜に振り返りの「明日の計画」で入れておいた今日の下書き（区切りから朝に確定するまでは、これが今日の計画、PLN-11）
+            let evening = boundary.day(-1, from: today).date
+            let reading = Item(hour: 22, minute: 30, minutes: 60, category: 2)
+            let english = Item(hour: 9, minute: 0, minutes: 60, category: 0, project: "英語")
+            let draft = PlanDraft(blocks: [
+                PlanBlockDraft(start: boundary.wallClock(evening, minutes: 22 * 60 + 30), minutes: reading.minutes,
+                               category: categories[reading.category]),
+                .unblock(start: boundary.wallClock(evening, minutes: 23 * 60 + 30)),
+                PlanBlockDraft(start: time(todayStart, english), minutes: english.minutes, category: categories[english.category],
+                               project: projects["英語"]),
+            ])
+            try store.saveDraft(draft, dayKey: todayKey, timeZone: timeZone)
         case .missed:
             var plan = todayPlan
             plan.blocks.append(PlanBlockDraft(start: time(todayStart, Item(hour: 10, minute: 30, minutes: 30, category: 2)),
@@ -246,7 +290,8 @@ enum DemoData {
             insertSession(Item(hour: 0, minute: 0, minutes: 60, category: 0), start: start, end: nil, plannedDurationSec: 60 * 60)
         case .forgot:
             let start = now.addingTimeInterval(-5 * 3600)
-            if DayBoundary.dayKey(containing: start, calendar: calendar) == todayKey {
+            // 今日の朝4:00より後に始めたときだけ今日の計画を確定しておく（前の夜に始めた止め忘れなら、終えたあと朝の計画が出る。台本 J）
+            if boundary.dayKey(containing: start) == todayKey, boundary.isMorning(start) {
                 try store.confirm(todayPlan, dayKey: todayKey, timeZone: timeZone)
                 insertToday(todayItems, until: start, plan: todayPlan)
             }

@@ -184,14 +184,15 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(shown, 90)
     }
 
-    /// 下のタブ・設定・夜の振り返りのつながり（NAV-01、CAT-04、REV-01）
+    /// 下のタブ・設定・夜の振り返りのつながり（NAV-01、CAT-04、REV-01）。
+    /// 区切り（22:00）の後は新しい日で、計画のタブは前の夜に入れた今日の下書き、振り返りは終わったばかりの日（PLN-11、GHO-17）
     func testTabsSettingsAndReview() {
-        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T22:30:00+09:00"])
-        // 計画のタブで今日の計画が見える
+        let app = launch(["-seedDemoData", "night", "-fixedNow", "2026-10-19T22:30:00+09:00"])
+        // 計画のタブで今日の計画（前の夜の下書き）が見える
         let planTab = app.tabBars.buttons["計画"]
         XCTAssertTrue(planTab.waitForExistence(timeout: timeout))
         planTab.tap()
-        XCTAssertTrue(planBlock(app, "卒論").waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "英語").waitForExistence(timeout: timeout))
         XCTAssertTrue(app.buttons["addBlockButton"].exists)
 
         // ホームの歯車から設定を開き、カテゴリを足す
@@ -225,6 +226,61 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["ゼミ準備"].exists)
         app.buttons["planTomorrowButton"].tap()
         XCTAssertTrue(app.navigationBars["明日の計画"].waitForExistence(timeout: timeout))
+    }
+
+    /// 設定で一日の区切りを 23:00 に変えると、次の日（25時間）から効く。次の日の 22:30 にはホームに「今日を振り返る」が出ず、
+    /// 23:00 から出る（GHO-17・REV-02、1b-75）
+    func testChangeBoundaryMovesReviewNextDay() {
+        var app = launch(store("ui-boundary", at: "15:00:00", reset: true))
+        let skip = app.buttons["skipPlanButton"]
+        XCTAssertTrue(skip.waitForExistence(timeout: timeout))
+        skip.tap()
+        app.buttons["settingsButton"].tap()
+        let picker = app.buttons["dayBoundaryPicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: timeout))
+        XCTAssertTrue(picker.label.contains("22:00"), picker.label)
+        picker.tap()
+        for choice in ["20:00", "翌0:00", "翌4:00"] {
+            XCTAssertTrue(app.buttons[choice].waitForExistence(timeout: timeout), choice)
+        }
+        app.buttons["23:00"].tap()
+        XCTAssertTrue(picker.waitForExistence(timeout: timeout))
+        XCTAssertTrue(picker.label.contains("23:00"), picker.label)
+        let pending = app.descendants(matching: .any)["dayBoundaryPending"]
+        XCTAssertTrue(pending.waitForExistence(timeout: timeout))
+        XCTAssertTrue(pending.label.contains("明日から 23:00 で区切ります"), pending.label)
+        XCTAssertTrue(pending.label.contains("明日は25時間です"), pending.label)
+
+        // 次の日の 22:30：まだ今日（25時間の日）なので出さない
+        app.terminate()
+        app = launch(["-storeName", "ui-boundary", "-fixedNow", "2026-10-20T22:30:00+09:00"])
+        let skipNextDay = app.buttons["skipPlanButton"]
+        XCTAssertTrue(skipNextDay.waitForExistence(timeout: timeout))
+        skipNextDay.tap()
+        XCTAssertTrue(app.staticTexts["計画なし"].waitForExistence(timeout: timeout))
+        XCTAssertFalse(app.buttons["reviewButton"].exists)
+
+        // 23:00 から出る
+        app.terminate()
+        app = launch(["-storeName", "ui-boundary", "-fixedNow", "2026-10-20T23:00:30+09:00"])
+        XCTAssertTrue(app.buttons["reviewButton"].waitForExistence(timeout: timeout))
+    }
+
+    /// 区切り（22:00）の直後は新しい日：前の夜に入れた予定がホームの「次」に出て、朝の計画は出ない。
+    /// 朝4:00以降に開くと朝の計画が出て、格子は起きた時刻から（前の夜の分は格子に出さない）（PLN-01・PLN-11・GHO-17、1b-71・1b-73・1b-74）
+    func testPreviousNightPlanAndMorningPlanFromFour() {
+        var app = launch(["-seedDemoData", "night", "-fixedNow", "2026-10-19T22:05:00+09:00"])
+        let line = app.descendants(matching: .any)["planLine"].firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: timeout))
+        XCTAssertTrue(line.label.contains("読書"), line.label)
+        XCTAssertTrue(app.buttons["reviewButton"].exists)
+        XCTAssertFalse(app.buttons["confirmPlanButton"].exists)
+        app.terminate()
+
+        app = launch(["-seedDemoData", "night", "-fixedNow", "2026-10-20T07:10:00+09:00"])
+        XCTAssertTrue(app.buttons["confirmPlanButton"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(planBlock(app, "英語").waitForExistence(timeout: timeout))
+        XCTAssertFalse(planBlock(app, "読書").exists)
     }
 
     /// デトックスのカテゴリを作るときにグループを一覧から選べ、設定の一覧の右に出る（CAT-04、DTX-03、BD-26）
@@ -359,7 +415,7 @@ final class RecordingFlowUITests: XCTestCase {
 
     /// 夜（「今日を振り返る」が出る時刻）に裏返すと、カードはそのボタンのすぐ上まで（ボタンは残る、1b-60）
     func testFlippedCardStopsAboveTheReviewButton() {
-        let app = launch(["-seedDemoData", "day", "-fixedNow", "2026-10-19T22:10:00+09:00"])
+        let app = launch(["-seedDemoData", "night", "-fixedNow", "2026-10-19T22:10:00+09:00"])
         let review = app.buttons["reviewButton"]
         XCTAssertTrue(review.waitForExistence(timeout: timeout))
         app.descendants(matching: .any)["todayFocus"].tap()
@@ -509,13 +565,13 @@ final class RecordingFlowUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["この日たまったポイントのグラフ"].exists)
         XCTAssertTrue(app.staticTexts["10月18日(日)"].exists)
 
-        // 戻って、一覧から今日の振り返りを開く（通知の 22:00 の前でも開ける）
+        // 戻って、一覧から今日の振り返りを開く（区切りの 22:00 の前でも開ける。区切りの前は「今のところ」、2026-10-21 から確定は区切り）
         app.navigationBars.buttons.firstMatch.tap()
         app.navigationBars.buttons.firstMatch.tap()
         let review = app.buttons["analysisReviewRow"]
         XCTAssertTrue(review.waitForExistence(timeout: timeout))
         review.tap()
-        XCTAssertTrue(app.staticTexts["今のところ・確定は朝4:00"].waitForExistence(timeout: timeout))
+        XCTAssertTrue(app.staticTexts["今のところ・確定は22:00"].waitForExistence(timeout: timeout))
     }
 
     /// テンプレートの読み込み：確認なしで置き換わり、「元に戻す」で戻る（PLN-07、1a-17）

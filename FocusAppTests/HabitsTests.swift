@@ -289,10 +289,10 @@ struct HabitsModelTests {
         m.saveHabits(habits(c))
         // 今日の計画（下書き）は変わらない
         #expect(m.morningPlan?.draft.blocks.isEmpty == true)
-        // 明日の計画
+        // 明日の計画（今日の朝の計画を決めた後なので、明日は次の日。決める前は終わったばかりの日を振り返っているので今日、review.md）
+        m.skipPlan()
         #expect(m.tomorrowPlan().draft.sortedBlocks.map(\.start) == [jst("2026-10-20T07:00"), jst("2026-10-20T20:00")])
         // 計画なし日にあとから作る計画
-        m.skipPlan()
         m.openPlanOnNoPlanDay()
         #expect(m.morningPlan?.draft.sortedBlocks.map(\.start) == [jst("2026-10-19T07:00"), jst("2026-10-19T20:00")])
         // 次の朝

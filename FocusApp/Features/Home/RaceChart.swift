@@ -603,7 +603,7 @@ struct RaceChart: View {
                 let elapsed = began.duration(to: clock.now) / .seconds(1)
                 if elapsed >= seconds { break }
                 let head = replay.frame(elapsed / seconds).head
-                let passed = Laps.passedBoundary(dayStart: replay.layout.dayStart, head: head)
+                let passed = Laps.passedBoundary(dayStart: replay.layout.dayStart, dayEnd: replay.layout.dayEnd, head: head)
                 if passed != replayHead {
                     // 足す行はふわっと出す（視差効果を減らす設定なら動きなし）
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { replayHead = passed }

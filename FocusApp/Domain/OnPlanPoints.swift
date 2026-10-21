@@ -17,13 +17,16 @@ enum OnPlanPoints {
     /// 自分の点が付いた時刻（`now` まで、早い順に1日3つまで）。
     /// - morningBlockIds: 朝の計画の写しのブロック（いつも対象）
     /// - addedAt: ブロックを計画に足した時刻（朝の計画にないブロックは、始める1時間以上前に足したものだけ対象）
+    /// - morningSince: 朝の計画を確定した時刻。これより前に始めた記録（前の夜の予定、PLN-11）は、写しにあっても足した時刻で決める
+    ///   （朝に確定したときに、前の夜の点が後から増えないように。「1時間以上前から」は明日の計画で保存した時刻から数える、Q49）
     static func awards(blocks: [PlanBlockDraft], sessions: [FocusSession], morningBlockIds: Set<UUID>,
-                       addedAt: [UUID: Date], now: Date) -> [Award] {
+                       addedAt: [UUID: Date], morningSince: Date? = nil, now: Date) -> [Award] {
         let found = blocks.compactMap { block -> Award? in
             guard isTarget(block) else { return nil }
             let mine = sessions.filter { $0.planBlockId == block.id && !$0.isDeclared }.sorted { $0.startAt < $1.startAt }
             guard let first = mine.first, abs(first.startAt.timeIntervalSince(block.start)) <= window else { return nil }
-            if !morningBlockIds.contains(block.id) {
+            let inMorningPlan = morningBlockIds.contains(block.id) && morningSince.map { first.startAt >= $0 } ?? true
+            if !inMorningPlan {
                 guard let added = addedAt[block.id], added <= first.startAt.addingTimeInterval(-window) else { return nil }
             }
             let length = Double(first.plannedDurationSec ?? block.minutes * 60)

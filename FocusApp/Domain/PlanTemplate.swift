@@ -17,23 +17,42 @@ struct PlanTemplate: Identifiable, Hashable {
     static let maxCount = 7
 
     /// 時刻順（朝4:00から）
-    var sortedBlocks: [Block] {
-        blocks.sorted { ($0.hour - DayBoundary.hour + 24) % 24 * 60 + $0.minute < ($1.hour - DayBoundary.hour + 24) % 24 * 60 + $1.minute }
+    var sortedBlocks: [Block] { sortedBlocks(fromMinutes: DayBoundary.morningHour * 60) }
+
+    /// 時刻順（`fromMinutes`（0:00 からの分。一日の始まりの時刻）から）
+    func sortedBlocks(fromMinutes origin: Int) -> [Block] {
+        func key(_ block: Block) -> Int { ((block.hour * 60 + block.minute - origin) % 1440 + 1440) % 1440 }
+        return blocks.sorted { key($0) < key($1) }
     }
 
     var focusSeconds: Int { blocks.filter(\.category.countsAsFocus).reduce(0) { $0 + $1.minutes * 60 } }
     /// ゲーム・SNS の時間（BLK-10）は入れない
     var detoxSeconds: Int { blocks.filter(\.category.countsAsDetox).reduce(0) { $0 + $1.minutes * 60 } }
 
-    /// `dayStart`（その日の4:00）の日に当てはめた計画。0:00〜3:59 は翌日の暦の日付になる（朝4:00区切り）。
+    /// その日（`dayStart`〜`dayEnd`）に当てはめた計画。時:分は、日の名前の日に当てはめた時刻がその日の中にあればそれ、
+    /// なければ前の日・次の日の同じ時刻のうちその日の中にあるもの（区切りが夜なら区切り以降は前の夜、
+    /// 区切りが夜中なら区切りより前は翌日の夜中。2026-10-21、Claude 補足、Q49）。
+    /// その日の区切りをまたぐブロック（区切りの設定を変えてまたぐようになったもの）は入れない。
     /// 今より前の時間帯のブロックも読み込む（2026-10-01 決定）。
-    /// 暦の日付に時:分を当てはめるので、夏時間の切り替えの日も同じ時刻になる（4:00 から分を足すと1時間ずれる）
-    func draft(dayStart: Date, calendar: Calendar) -> PlanDraft {
-        PlanDraft(blocks: blocks.map { block in
-            let day = calendar.date(byAdding: .day, value: block.hour < DayBoundary.hour ? 1 : 0, to: dayStart) ?? dayStart
-            let start = calendar.date(bySettingHour: block.hour, minute: block.minute, second: 0, of: day) ?? day
+    /// 暦の日付に時:分を当てはめるので、夏時間の切り替えの日も同じ時刻になる
+    /// - dayEnd: nil なら24時間後。dayDate: 日の名前の日の 0:00（nil なら dayStart の暦の日）
+    func draft(dayStart: Date, dayEnd: Date? = nil, dayDate: Date? = nil, calendar: Calendar) -> PlanDraft {
+        let dayEnd = dayEnd ?? calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
+        let dayDate = dayDate ?? calendar.startOfDay(for: dayStart)
+        return PlanDraft(blocks: blocks.compactMap { block in
+            let starts = [0, -1, 1].compactMap { offset -> Date? in
+                guard let day = calendar.date(byAdding: .day, value: offset, to: dayDate) else { return nil }
+                return calendar.date(bySettingHour: block.hour, minute: block.minute, second: 0, of: day)
+            }
+            guard let start = starts.first(where: { $0 >= dayStart && $0 < dayEnd }),
+                  start.addingTimeInterval(Double(block.minutes * 60)) <= dayEnd else { return nil }
             return PlanBlockDraft(start: start, minutes: block.minutes, category: block.category, project: block.project)
         })
+    }
+
+    /// その日に当てはめた計画
+    func draft(day: BoundaryDay, calendar: Calendar) -> PlanDraft {
+        draft(dayStart: day.start, dayEnd: day.end, dayDate: day.date, calendar: calendar)
     }
 
     /// 今の計画から作る（「この計画をテンプレートとして保存」）。

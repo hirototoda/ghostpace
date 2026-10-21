@@ -10,12 +10,33 @@ enum ManualSaveResult: Equatable {
     case failed
 }
 
-/// 朝の計画を出すときの値。開いた時点の日を持ち続ける（編集中に4:00を過ぎても、その日の計画として保存する）。
+/// 朝の計画・明日の計画を出すときの値。開いた時点の日を持ち続ける（編集中にその日の区切りを過ぎても、その日の計画として保存する）。
 struct MorningPlan: Identifiable, Hashable {
-    var dayKey: String
-    var dayStart: Date
+    var day: BoundaryDay
     var draft: PlanDraft
+    /// 格子の始まり（朝の計画は起きた時刻、明日の計画は一日の始まり。PLN-11、Q49）
+    var gridStart: Date
+
+    init(day: BoundaryDay, draft: PlanDraft, gridStart: Date? = nil) {
+        self.day = day
+        self.draft = draft
+        self.gridStart = gridStart ?? day.start
+    }
+
+    var dayKey: String { day.key }
+    var dayStart: Date { day.start }
+    var dayEnd: Date { day.end }
     var id: String { dayKey }
+}
+
+/// 区切りを変えたときの、設定の行の下の知らせ（settings.md、Q48）
+struct PendingBoundaryChange: Hashable {
+    /// 今日の区切り（日の名前の日の 0:00 からの分）
+    var todayEndMinutes: Int
+    /// 明日の区切り
+    var tomorrowEndMinutes: Int
+    /// 明日の長さ（時間）
+    var tomorrowHours: Double
 }
 
 /// 止め忘れの疑いがあるときに「いつやめましたか？」を聞くための値。
@@ -55,7 +76,8 @@ final class AppModel {
     private(set) var isPlanConfirmed = false
     /// 確定したときの睡眠の読み直し（テストで待つ）
     private(set) var confirmSleepTask: Task<Void, Never>?
-    /// 今日の確定した計画のゲーム・SNS の時間（BLK-10）。下書き・計画なし日は空
+    /// いつものブロックを外すゲーム・SNS の時間（BLK-10）：今日の計画（確定、または区切りから朝に確定するまでの下書き）のものと、
+    /// 次の日の前の夜の分（区切り〜設定の睡眠の起きる時刻。次の日の下書き、なければ習慣。PLN-11、Q49）。計画なし日は空
     private(set) var confirmedUnblocks: [PlanBlockDraft] = []
     /// この起動でゲーム・SNS の時間のスケジュールを iPhone に登録したか（登録に失敗した・消えたときに備え、起動のたびに登録し直す）
     var registeredUnblockSchedules = false
@@ -102,8 +124,8 @@ final class AppModel {
     var errorMessage: String?
     /// ホームの円で比べる相手（GHO-10）。端末の設定に覚えておく
     private(set) var opponent: Opponent
-    /// 振り返りの通知の時刻（0:00 からの分、REV-02）
-    private(set) var reviewMinutes: Int
+    /// 一日の区切りの履歴（GHO-17、data-model.md「DayBoundaryChange」）。読み直すたびに読む
+    private(set) var boundaryChanges: [DayBoundaryChange] = []
     private(set) var plannedEndNotifications: Bool
     /// 計画ブロックの前の通知（TMR-12）。何分前か（0 はちょうど、nil はオフ）
     private(set) var blockNoticeMinutes: Int?
@@ -177,13 +199,17 @@ final class AppModel {
         self.blockLog = blockLog
         blockingAuthorization = blocking.authorization()
         opponent = settings.opponent
-        reviewMinutes = settings.reviewMinutes
         sleepSettings = (settings.sleepStartMinutes, settings.sleepEndMinutes)
         plannedEndNotifications = settings.plannedEndNotifications
         blockNoticeMinutes = settings.blockNoticeMinutes
         let now = clock.now()
+        // 読み直す前の仮の表示。区切りは保存した履歴から（読めなければ空の履歴＝朝4:00区切り、data-model.md の決まりどおり）
+        let initialBoundary = (try? store.dayBoundary(timeZone: timeZone())) ?? DayBoundary(calendar: .app(timeZone: timeZone()))
+        let initialDay = initialBoundary.day(containing: now)
         snapshot = HomeSnapshot.make(now: now, calendar: .app(timeZone: timeZone()), todaySessions: [], plan: PlanDraft(),
-                                     lastWeekSessions: [])
+                                     lastWeekSessions: [], day: initialDay, lastWeekDay: initialBoundary.day(-7, from: initialDay))
+        // 区切りの履歴より前に、移す端末か新しく入れた端末かを決める（カテゴリなどを入れる前の記録で）
+        let hasRecord = (try? store.hasAnyRecord()) ?? true
         // カテゴリが1つもない＝初めて使う端末（習慣の最初の案内を出すか決める、PLN-08）
         let isFreshInstall = (try? store.allCategories().isEmpty) ?? false
         perform { try store.seedDefaultsIfNeeded() }
@@ -196,6 +222,7 @@ final class AppModel {
         if !settings.didSeedTemplates, perform({ _ = try store.seedTemplatesIfNeeded() }) {
             settings.didSeedTemplates = true
         }
+        setUpBoundary(hasRecord: hasRecord)
         setUpHabits(isFreshInstall: isFreshInstall, offersIntro: offersHabitIntro)
         reload()
         // 終了していた状態から開いたときも、シールドの「開く」から2分以内なら長押しの画面を出す（BLK-08）
@@ -203,6 +230,34 @@ final class AppModel {
     }
 
     var calendar: Calendar { .app(timeZone: timeZone()) }
+
+    /// 一日の区切り（GHO-17）。区切りの履歴と、そのときの端末のタイムゾーンで決める
+    var boundary: DayBoundary { DayBoundary(calendar: calendar, changes: boundaryChanges) }
+
+    /// 区切りの履歴が1行もなければ足す（data-model.md「第5版から移すとき」、Q48）。
+    /// タイマーの記録か1日の計画がある端末は、今の日（朝4:00区切り）までそのままで、次の日から 22:00。
+    /// 新しく入れた端末は、その時点の日（22:00 区切り）から 22:00（その日が前の夜 22:00 から始まるよう、前の日を fromDayKey にする）。
+    /// 読めない・書けないときは足さず（すべての日を朝4:00区切りで数える）、次の起動でやり直す
+    private func setUpBoundary(hasRecord: Bool) {
+        perform(reportsError: false) {
+            var changes = try store.boundaryChanges()
+            if changes.isEmpty {
+                let now = clock.now()
+                let from: String
+                if hasRecord {
+                    let legacy = DayBoundary(calendar: calendar)
+                    from = legacy.day(1, from: legacy.day(containing: now)).key
+                } else {
+                    let evening = DayBoundary(calendar: calendar,
+                                              changes: [DayBoundaryChange(fromDayKey: "0000-01-01", endMinutes: DayBoundary.defaultEndMinutes)])
+                    from = evening.day(-1, from: evening.day(containing: now)).key
+                }
+                try store.setBoundary(endMinutes: DayBoundary.defaultEndMinutes, fromDayKey: from, timeZone: timeZone())
+                changes = try store.boundaryChanges()
+            }
+            boundaryChanges = changes
+        }
+    }
 
     /// 睡眠の記録（AppModel+Sleep から使う）
     var sleepStore: any SleepRepository { store }
@@ -243,35 +298,53 @@ final class AppModel {
         perform(reportsError: !quietly) {
             let now = clock.now()
             let calendar = self.calendar
-            let dayStart = DayBoundary.dayStart(containing: now, calendar: calendar)
-            let dayKey = DayBoundary.dayKey(containing: now, calendar: calendar)
+            boundaryChanges = try store.boundaryChanges()
+            let boundary = self.boundary
+            let today = boundary.day(containing: now)
+            let dayKey = today.key
             categories = try store.categories()
             projects = try store.projects()
             templates = try store.templates()
             habits = storedHabits()
 
-            let stored = try store.plan(dayKey: dayKey)
+            var stored = try store.plan(dayKey: dayKey)
+            // 下書きがなければ、区切りより後に最初に読み直したときに習慣で作る（前の夜のゲーム・SNS の時間などに使う。PLN-11、Q49）
+            if stored == nil, !today.isLegacy, !showsHabitIntro {
+                let draft = newDraft(day: today)
+                if !draft.blocks.isEmpty {
+                    try store.saveDraft(draft, dayKey: dayKey, timeZone: timeZone())
+                    stored = try store.plan(dayKey: dayKey)
+                }
+            }
             plan = stored?.status == .skipped ? nil : (stored?.draft ?? PlanDraft())
             let isConfirmed = stored?.status == .confirmed || stored?.status == .unknown
             isPlanConfirmed = isConfirmed
-            confirmedUnblocks = isConfirmed ? (stored?.draft.blocks.filter(\.isUnblock) ?? []) : []
+            // 区切りから朝の計画を確定するまでは、下書きをふつうの計画と同じに使う（PLN-11、2026-10-21 オーナー決定）
+            let usesDraft = !today.isLegacy && stored?.status == .draft
+            let next = boundary.day(1, from: today)
+            confirmedUnblocks = (isConfirmed || usesDraft ? (plan?.blocks.filter(\.isUnblock) ?? []) : [])
+                + (try nightBlocks(of: next, includingHabits: true).blocks.filter(\.isUnblock))
             let todaySessions = try store.sessions(dayKey: dayKey)
-            noticeBlocks = isConfirmed ? (plan?.summaries ?? []) : []
+            // 計画の前の通知：確定した今日の計画と、前の夜の予定（今日の下書きの前の夜の分・次の日の下書きの前の夜の分）
+            noticeBlocks = (isConfirmed ? (plan?.summaries ?? []) : usesDraft ? nightPart(plan, of: today).summaries : [])
+                + (try nightBlocks(of: next, includingHabits: false).summaries)
             startedBlockIds = Set(todaySessions.compactMap(\.planBlockId))
 
-            let detox = try detoxDays(now: now, dayStart: dayStart, calendar: calendar)
+            let detox = try detoxDays(now: now, day: today)
             snapshot = HomeSnapshot.make(now: now, calendar: calendar,
-                                         todaySessions: todaySessions + (try carriedOver(into: dayStart, calendar: calendar)),
-                                         plan: plan, lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
-                                         reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
+                                         todaySessions: todaySessions + (try carriedOver(into: today)),
+                                         plan: plan, lastWeekSessions: try lastWeekSessions(of: today),
+                                         noPlanGoalSeconds: stored?.draft.goalSeconds,
                                          detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps,
-                                         onPlan: try onPlanContext(dayStart: dayStart, today: stored, calendar: calendar))
+                                         awakeSleep: detox.awake, day: today, lastWeekDay: boundary.day(-7, from: today),
+                                         onPlan: try onPlanContext(day: today, today: stored))
+            snapshot.showsReviewEntry = showsReviewEntry(today: today, stored: stored, now: now)
 
-            try addHistory(to: &snapshot, calendar: calendar)
-            snapshot.awake = awakeRange(dayStart: dayStart)
+            try addHistory(to: &snapshot)
+            snapshot.awake = awakeRange(day: today)
 
             if let session = try store.runningSession() {
-                running = try runningTimer(session, calendar: calendar)
+                running = try runningTimer(session, today: today, now: now)
                 // タイマーの画面の「前の分を足す」（TMR-13）。読めなければ出さない
                 previousPart = (try? addablePreviousPart(of: session)) ?? nil
             } else {
@@ -279,24 +352,65 @@ final class AppModel {
                 endTimeCheck = nil
                 previousPart = nil
             }
-            widgets.publish(widgetSnapshot(now: now, isConfirmed: isConfirmed))
+            widgets.publish(widgetSnapshot(now: now, isConfirmed: isConfirmed || usesDraft))
             syncAmbient()
             // ロック画面と画面上部のタイマー（TMR-06）。開き直したときも、実行中なら出し直す
             liveActivity.show(running.map { TimerActivity.make($0.session, now: now, timeZone: calendar.timeZone) })
             refreshNotifications()
             refreshBlocking(now: now)
             // 睡眠は付随の機能なので、読み書きに失敗しても朝の計画などは続ける
-            do { try ensureSleep(dayStart: dayStart, calendar: calendar) } catch { sleep = nil }
+            do { try ensureSleep(today: today, now: now) } catch { sleep = nil }
 
-            // 実行中のタイマーがあればタイマーを優先し、終了後に出す。開いている朝の計画は置き換えない
+            // 実行中のタイマーがあればタイマーを優先し、終了後に出す。開いている朝の計画は置き換えない。
+            // 朝の計画は朝4:00以降に出す（その日の区切り〜3:59 は出さない、PLN-01）
             let needsPlan = stored == nil || stored?.status == .draft
             // 初めて使う端末は、習慣を決めてから朝の計画を出す（PLN-08）
-            if running == nil, needsPlan, morningPlan == nil, !showsHabitIntro {
-                let draft = stored?.draft ?? newDraft(dayStart: dayStart)
-                morningPlan = MorningPlan(dayKey: dayKey, dayStart: dayStart, draft: draft)
+            if running == nil, needsPlan, morningPlan == nil, !showsHabitIntro, boundary.isMorning(now) {
+                let draft = stored?.draft ?? newDraft(day: today)
+                morningPlan = MorningPlan(day: today, draft: draft, gridStart: morningGridStart(day: today))
             }
             announceNotices(dayKey: dayKey)
         }
+    }
+
+    /// 次の日の前の夜の分（その日の始まり〜設定の睡眠の起きる時刻）のブロック。下書きがあればそのブロック、
+    /// なければ `includingHabits` のとき習慣（ゲーム・SNS の時間でいつものブロックを外す予定を先に登録するため、Q49）。
+    /// 確定した・計画しない日は空（次の日はまだ来ていないので、ふつうは下書きか、まだない）
+    private func nightBlocks(of day: BoundaryDay, includingHabits: Bool) throws -> PlanDraft {
+        guard !day.isLegacy else { return PlanDraft() }
+        let stored = try store.plan(dayKey: day.key)
+        if let stored {
+            return stored.status == .draft ? nightPart(stored.draft, of: day) : PlanDraft()
+        }
+        return includingHabits ? nightPart(newDraft(day: day), of: day) : PlanDraft()
+    }
+
+    /// 前の夜の分：その日の始まり〜設定の睡眠の起きる時刻に始まるブロック（起きた時刻はまだ分からないので設定の時刻。Q49）
+    private func nightPart(_ plan: PlanDraft?, of day: BoundaryDay) -> PlanDraft {
+        let wake = SleepLine.fromSetting(startMinutes: sleepSettings.start, endMinutes: sleepSettings.end, dayStart: day.date,
+                                         calendar: calendar).end
+        return PlanDraft(blocks: (plan?.blocks ?? []).filter { $0.start >= day.start && $0.start < wake })
+    }
+
+    /// 朝の計画の格子の始まり：起きた時刻（:00・:30 に切り下げ）。分からなければ朝4:00（PLN-11、Q49）
+    func morningGridStart(day: BoundaryDay) -> Date {
+        let morning = boundary.morningStart(of: day)
+        guard let wake = sleepLine(day: day)?.end, wake > day.start, wake < day.end else { return morning }
+        let step = Double(PlanGridLayout.snapMinutes * 60)
+        let floored = Date(timeIntervalSinceReferenceDate: (wake.timeIntervalSinceReferenceDate / step).rounded(.down) * step)
+        return max(floored, day.start)
+    }
+
+    /// ホームに「今日を振り返る」を出すか（REV-02）。その日の区切りから、次の朝の計画を確定する（「今日は計画しない」を含む）まで。
+    /// 遅くとも次の区切りまで（その日のうちだけ見る）。区切りの履歴より前の日（移した日）は今までどおり 22:00 から朝4:00まで（Q48・Q49）
+    private func showsReviewEntry(today: BoundaryDay, stored: StoredPlan?, now: Date) -> Bool {
+        if today.isLegacy { return now >= boundary.wallClock(today.date, minutes: DayBoundary.defaultEndMinutes) }
+        return isReviewingFinishedDay(today: today, stored: stored)
+    }
+
+    /// 終わったばかりの日を振り返る時間か：今の日の朝の計画をまだ確定していない（計画しないも含めて決めていない）
+    private func isReviewingFinishedDay(today: BoundaryDay, stored: StoredPlan?) -> Bool {
+        !today.isLegacy && (stored == nil || stored?.status == .draft)
     }
 
     /// ホームの帯（計画どおりの点・ラップ・中間地点）を出す。計画どおりの点はタイマー中も（タイマーの画面に）知らせ、
@@ -308,33 +422,38 @@ final class AppModel {
     }
 
     /// 下のタブでタイマーのタブが見えているか（ContentView が切り替えるたびに入れる）。
-    /// 戻ったときに、出していない帯を出す。戻る前に朝4:00 を過ぎていたら読み直して新しい日の分だけ（前の日の分は出さない）
+    /// 戻ったときに、出していない帯を出す。戻る前にその日の区切りを過ぎていたら読み直して新しい日の分だけ（前の日の分は出さない）
     func setTimerTabVisible(_ visible: Bool) {
         isTimerTabVisible = visible
         guard visible else { return }
-        let now = clock.now()
-        if DayBoundary.dayStart(containing: now, calendar: calendar) != snapshot.dayStart {
+        let today = boundary.day(containing: clock.now())
+        if today.start != snapshot.dayStart {
             reload(quietly: true)
         } else {
-            announceNotices(dayKey: DayBoundary.dayKey(containing: now, calendar: calendar))
+            announceNotices(dayKey: today.key)
         }
     }
 
-    private func runningTimer(_ session: FocusSession, calendar: Calendar) throws -> RunningTimer {
-        let sameDay = try store.sessions(dayKey: session.dayKey).filter { $0.id != session.id }
-        let dayStart = DayBoundary.dayStart(containing: session.startAt, calendar: calendar)
-        let stored = try store.plan(dayKey: session.dayKey)
+    /// 動いているタイマー。差は今の日（区切りを過ぎたら新しい日の0から）で比べる（focus-timer.md、Q49）
+    private func runningTimer(_ session: FocusSession, today: BoundaryDay, now: Date) throws -> RunningTimer {
+        let others = (try store.sessions(dayKey: today.key) + carriedOver(into: today)).filter { $0.id != session.id }
+        let countsFrom = max(session.startAt, today.start)
+        let stored = try store.plan(dayKey: today.key)
         let plan = stored?.status == .skipped ? nil : stored?.draft
+        let sleep = try daySleep(today)
+        let isConfirmed = stored?.status == .confirmed || stored?.status == .unknown
+        let usesDraft = !today.isLegacy && stored?.status == .draft
         return RunningTimer(
             session: session,
-            focusSecondsBefore: sameDay.flatMap { $0.activeSegments(now: session.startAt) }.focusSeconds(until: session.startAt),
-            ghost: GhostSummary(lastWeek: try lastWeekSessions(of: dayStart, calendar: calendar),
-                                lastWeekStart: DayBoundary.sameDayLastWeek(dayStart, calendar: calendar), todayStart: dayStart),
-            goal: GoalGhost(plan: plan, goalSeconds: stored?.draft.goalSeconds,
-                            sleep: try sleepLines(dayStart: dayStart, calendar: calendar).map(\.interval),
-                            dayStart: dayStart, calendar: calendar).nonEmpty,
-            // 切り替え・計画の時刻の通知は確定した計画だけ（下書きのブロックでは知らせない）
-            planBlocks: stored?.status == .confirmed || stored?.status == .unknown ? (plan?.summaries ?? []) : [])
+            focusSecondsBefore: others.flatMap { $0.activeSegments(now: countsFrom) }.compactMap { $0.starting(at: today.start) }
+                .focusSeconds(until: countsFrom),
+            ghost: GhostSummary(lastWeek: try lastWeekSessions(of: today), lastWeekDay: boundary.day(-7, from: today).interval,
+                                shift: today.date.timeIntervalSince(boundary.day(-7, from: today).date)),
+            goal: GoalGhost(plan: plan, goalSeconds: stored?.draft.goalSeconds, sleep: sleep.awake.map(\.interval),
+                            dayStart: today.start, dayEnd: today.end, dayDate: today.date, calendar: calendar).nonEmpty,
+            // 切り替え・計画の時刻の通知は確定した今日の計画だけ。下書きは前の夜の予定の分だけ（ふつうの計画と同じに動く、PLN-11）
+            planBlocks: isConfirmed ? (plan?.summaries ?? []) : usesDraft ? nightPart(plan, of: today).summaries : [],
+            countsFrom: countsFrom > session.startAt ? countsFrom : nil)
     }
 
     // MARK: 対戦相手（GHO-10）
@@ -346,80 +465,87 @@ final class AppModel {
 
     // MARK: 夜の振り返り（REV-01）
 
-    /// 今日（朝4:00区切り）の振り返り。読めなければ nil
+    /// 振り返る日（REV-01、review.md「どの日を振り返るか」）。その日の区切りから次の朝の計画を確定するまでは、
+    /// 終わったばかりの日（確定した日）。それ以外は今の日（「今のところ」）
+    func reviewDay(now: Date? = nil) -> BoundaryDay {
+        let now = now ?? clock.now()
+        let today = boundary.day(containing: now)
+        let stored = try? store.plan(dayKey: today.key)
+        return isReviewingFinishedDay(today: today, stored: stored ?? nil) ? boundary.day(-1, from: today) : today
+    }
+
+    /// 振り返り（終わったばかりの日、または今の日の今まで）。読めなければ nil
     func reviewContent() -> ReviewContent? {
         // 日付・合計・相手の値を同じ時刻から作る（ホームの表示は最大1分古いことがある）
         let now = clock.now()
-        let calendar = self.calendar
-        let dayStart = DayBoundary.dayStart(containing: now, calendar: calendar)
-        let dayKey = DayBoundary.dayKey(containing: now, calendar: calendar)
+        let day = reviewDay(now: now)
         var content: ReviewContent?
         perform(reportsError: false) {
-            let stored = try store.plan(dayKey: dayKey)
-            let sessions = try store.sessions(dayKey: dayKey)
-            let detox = try detoxDays(now: now, dayStart: dayStart, calendar: calendar)
-            var home = HomeSnapshot.make(now: now, calendar: calendar,
-                                         todaySessions: sessions + (try carriedOver(into: dayStart, calendar: calendar)),
-                                         plan: stored?.status == .skipped ? nil : (stored?.draft ?? PlanDraft()),
-                                         lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
-                                         reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
-                                         detox: detox.today, lastWeekDetox: detox.lastWeek, sleep: detox.sleep, sleepCaps: detox.sleepCaps,
-                                         onPlan: try onPlanContext(dayStart: dayStart, today: stored, calendar: calendar))
-            try addHistory(to: &home, calendar: calendar)
+            let stored = try store.plan(dayKey: day.key)
+            let sessions = try store.sessions(dayKey: day.key)
+            var home = try daySnapshot(day: day, now: now, events: (try? blockLog.all()) ?? [])
+            try addHistory(to: &home)
             // 確定した日だけ朝の計画と比べる。下書きのまま・計画なし日は計画なしとして扱う
             let confirmed = stored?.status == .confirmed || stored?.status == .unknown
             content = ReviewContent.make(home: home, sessions: sessions,
-                                         snapshot: confirmed ? (try store.snapshot(dayKey: dayKey) ?? []) : nil)
+                                         snapshot: confirmed ? (try store.snapshot(dayKey: day.key) ?? []) : nil)
+            content?.isFinal = day.end <= now
+            content?.finalLabel = day.isLegacy ? nil : BoundaryText.time(day.endMinutes)
         }
         return content
     }
 
-    /// 「明日の計画を立てる」で開く計画。明日（朝4:00区切りで今日の次の日）の下書きがあれば続きから
+    /// 「明日の計画を立てる」で開く計画。明日は振り返っている日の次の日（区切りの後に開いたら、もう始まっている今の日。
+    /// 0:00 を過ぎて開いても同じ日。review.md）。下書きがあれば続きから
     func tomorrowPlan() -> MorningPlan {
-        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86400)
-        let dayKey = DayBoundary.dayKey(containing: tomorrow, calendar: calendar)
+        let tomorrow = boundary.day(1, from: reviewDay())
         var draft = PlanDraft()
         perform(reportsError: false) {
-            if let stored = try store.plan(dayKey: dayKey) {
+            if let stored = try store.plan(dayKey: tomorrow.key) {
                 if stored.status == .draft { draft = stored.draft }
             } else {
-                draft = newDraft(dayStart: tomorrow)
+                draft = newDraft(day: tomorrow)
             }
         }
-        return MorningPlan(dayKey: dayKey, dayStart: tomorrow, draft: draft)
+        return MorningPlan(day: tomorrow, draft: draft)
     }
 
     /// 新しく作る下書き。習慣のブロックが最初から入る（PLN-08、2026-10-05 に前の日からの引き継ぎから変更）
-    private func newDraft(dayStart: Date) -> PlanDraft {
-        habits.draft(dayStart: dayStart, calendar: calendar)
+    private func newDraft(day: BoundaryDay) -> PlanDraft {
+        habits.draft(day: day, calendar: calendar)
     }
 
     /// それまでの「前の日から引き継ぐ」ゲーム・SNS の時間（BLK-10、2026-10-02）。すでに使っている端末の最初の習慣に使う。
     /// 前の日に確定した計画がなければ、7日前までさかのぼって最後に確定した日から。その日に1つもなければ、なし
-    private func carriedDraft(dayStart: Date, calendar: Calendar) throws -> PlanDraft {
+    private func carriedDraft(today: BoundaryDay) throws -> PlanDraft {
         for offset in 1...7 {
-            guard let previousStart = calendar.date(byAdding: .day, value: -offset, to: dayStart) else { break }
-            let stored = try store.plan(dayKey: DayBoundary.dayKey(containing: previousStart, calendar: calendar))
+            let previous = boundary.day(-offset, from: today)
+            let stored = try store.plan(dayKey: previous.key)
             guard let stored, stored.status == .confirmed || stored.status == .unknown else { continue }
-            return PlanDraft(blocks: PlanDraft.carriedUnblocks(stored.draft.blocks, previousDayStart: previousStart,
-                                                               dayStart: dayStart, calendar: calendar))
+            return PlanDraft(blocks: PlanDraft.carriedUnblocks(stored.draft.blocks, previousDayStart: previous.date,
+                                                               dayStart: today.date, calendar: calendar))
         }
         return PlanDraft()
     }
 
-    /// 明日の計画の下書きを保存する。翌朝の朝の計画に出る
+    /// 明日の計画の下書きを保存する。翌朝の朝の計画に出る。区切りより後の予定（前の夜の予定）の通知と、
+    /// ゲーム・SNS の時間のブロックを外す予定も、ここで登録し直す（アプリを開かなくても動くように、PLN-11）
+    /// `reloads` は「保存」を押したとき（下書きが変わるたびには読み直さない）
     @discardableResult
-    func saveTomorrowDraft(_ draft: PlanDraft, for plan: MorningPlan) -> Bool {
-        perform { try store.saveDraft(draft, dayKey: plan.dayKey, timeZone: timeZone()) }
+    func saveTomorrowDraft(_ draft: PlanDraft, for plan: MorningPlan, reloads: Bool = false) -> Bool {
+        let saved = perform { try store.saveDraft(draft, dayKey: plan.dayKey, timeZone: timeZone()) }
+        if saved, reloads { reload(quietly: true) }
+        return saved
     }
 
     // MARK: 通知（TMR-05、REV-02）
 
     /// 予約をいまの状態にそろえる（予定の時間・計画ブロックの前・振り返り）。許可がなければ何もしない
     func refreshNotifications() {
-        let plan = NotificationPlan.make(running: running?.session, now: clock.now(),
-                                         plannedEndEnabled: plannedEndNotifications, reviewMinutes: reviewMinutes,
+        let now = clock.now()
+        let plan = NotificationPlan.make(running: running?.session, now: now,
+                                         plannedEndEnabled: plannedEndNotifications,
+                                         review: ReviewSchedule.make(boundary: boundary, now: now),
                                          calendar: calendar, planBlocks: running?.planBlocks ?? [],
                                          blockNotice: BlockNotice(leadMinutes: blockNoticeMinutes, blocks: noticeBlocks,
                                                                   startedBlockIds: startedBlockIds))
@@ -459,10 +585,34 @@ final class AppModel {
         refreshNotifications()
     }
 
-    func setReviewMinutes(_ minutes: Int) {
-        reviewMinutes = ((minutes % 1440) + 1440) % 1440
-        settings.reviewMinutes = reviewMinutes
+    // MARK: 一日の区切り（GHO-17）
+
+    /// 設定の画面に出す区切り（一番新しい行）
+    var boundaryEndMinutes: Int { boundary.latestEndMinutes }
+
+    /// 今日の区切り（日の名前の日の 0:00 からの分）
+    var todayEndMinutes: Int { boundary.day(containing: clock.now()).endMinutes }
+
+    /// 区切りを変えたときの、行の下の知らせ（settings.md、Q48）。次の日の区切りが今日と同じなら nil
+    var pendingBoundaryChange: PendingBoundaryChange? {
+        let today = boundary.day(containing: clock.now())
+        let next = boundary.day(1, from: today)
+        guard next.endMinutes != today.endMinutes else { return nil }
+        return PendingBoundaryChange(todayEndMinutes: today.endMinutes, tomorrowEndMinutes: next.endMinutes,
+                                     tomorrowHours: next.duration / 3600)
+    }
+
+    /// 一日の区切りを変える（20:00〜翌4:00、30分きざみ）。次の日から効く（今日は今の区切りで確定する。2026-10-21 オーナー決定）。
+    /// 同じ日に何度変えても、最後に選んだものが次の日から効く。使い始めた行は書き換えない
+    @discardableResult
+    func setBoundary(endMinutes: Int) -> Bool {
+        let minutes = DayBoundary.normalized(endMinutes)
+        let today = boundary.day(containing: clock.now())
+        let next = boundary.day(1, from: today)
+        guard next.endMinutes != minutes else { return true }
+        let saved = perform { try store.setBoundary(endMinutes: minutes, fromDayKey: next.key, timeZone: timeZone()) }
         reload(quietly: true)
+        return saved
     }
 
     // MARK: 目標・テンプレート（GHO-10、PLN-07）
@@ -470,7 +620,7 @@ final class AppModel {
     /// 計画なし日の目標（GHO-10、Q13）。nil で目標なし
     @discardableResult
     func setNoPlanGoal(_ seconds: Int?) -> Bool {
-        let dayKey = DayBoundary.dayKey(containing: clock.now(), calendar: calendar)
+        let dayKey = boundary.dayKey(containing: clock.now())
         let saved = perform { try store.setGoal(seconds.flatMap { $0 > 0 ? $0 : nil }, dayKey: dayKey) }
         reload()
         return saved
@@ -583,126 +733,132 @@ final class AppModel {
     // MARK: デジタルデトックス（DTX-01・03）
 
     /// 今日（今まで）と、先週の同じ曜日（1日分）のデトックスと、今日の睡眠と手で長くした所（目標のゴーストに使う）
-    private func detoxDays(now: Date, dayStart: Date, calendar: Calendar) throws
-        -> (today: DetoxDay, lastWeek: DetoxDay, sleep: [DateInterval], sleepCaps: [DateInterval]) {
+    private func detoxDays(now: Date, day: BoundaryDay) throws
+        -> (today: DetoxDay, lastWeek: DetoxDay, sleep: [DateInterval], sleepCaps: [DateInterval], awake: [DateInterval]) {
         // 記録のファイルが読めなくても、ほかの表示は続ける（デトックスが0になるだけ）
         let events = (try? blockLog.all()) ?? []
-        let lastWeekStart = DayBoundary.sameDayLastWeek(dayStart, calendar: calendar)
-        let sleep = try sleepLines(dayStart: dayStart, calendar: calendar)
-        return (try detoxDay(dayStart: dayStart, until: now, events: events, calendar: calendar),
-                try detoxDay(dayStart: lastWeekStart, until: .distantFuture, events: events, calendar: calendar),
-                sleep.map(\.interval), sleep.compactMap(\.extendedPart))
+        let sleep = try daySleep(day)
+        return (try detoxDay(day, until: now, events: events),
+                try detoxDay(boundary.day(-7, from: day), until: .distantFuture, events: events),
+                sleep.points.map(\.interval), sleep.points.compactMap(\.extendedPart), sleep.awake.map(\.interval))
     }
 
     /// 1日分の材料を集めて数える（digital-detox.md「数え方」）
-    private func detoxDay(dayStart: Date, until: Date, events: [BlockEvent], calendar: Calendar) throws -> DetoxDay {
-        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
-        let previousStart = calendar.date(byAdding: .day, value: -1, to: dayStart) ?? dayStart.addingTimeInterval(-86400)
-        let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
-        // 前の日に始めて4:00をまたいだタイマーも入れる
-        let sessions = try store.sessions(dayKey: key)
-            + store.sessions(dayKey: DayBoundary.dayKey(containing: previousStart, calendar: calendar))
+    private func detoxDay(_ day: BoundaryDay, until: Date, events: [BlockEvent]) throws -> DetoxDay {
+        // 前の日に始めて区切りをまたいだタイマーも入れる
+        let sessions = try store.sessions(dayKey: day.key) + store.sessions(dayKey: boundary.day(-1, from: day).key)
         let segments = sessions.flatMap { $0.activeSegments(now: min(until, clock.now())) }
-        let plan = try store.plan(dayKey: key)
-        let confirmed = plan?.status == .confirmed || plan?.status == .unknown
-        let sleep = try sleepLines(dayStart: dayStart, calendar: calendar)
+        let plan = try store.plan(dayKey: day.key)
+        let sleep = try daySleep(day).points
         return DetoxDay.make(DetoxDay.Inputs(
-            dayStart: dayStart, dayEnd: dayEnd, until: until, events: events,
+            dayStart: day.start, dayEnd: day.end, until: until, events: events,
             focus: segments.filter(\.countsAsFocus).map { DateInterval(start: $0.start, end: max($0.start, $0.end)) },
             detoxTimers: segments.filter { !$0.countsAsFocus }.map {
                 DetoxTimer(interval: DateInterval(start: $0.start, end: max($0.start, $0.end)), group: $0.detoxGroup,
                            isDeclared: $0.isDeclared)
             },
-            // その日の朝に終わった睡眠と、その夜の睡眠（翌朝決まるまでは設定の時刻で仮に数える）
+            // その日の朝に終わった睡眠（一晩分まとめて起きた日に。区切りより前に寝始めた分は寝た日に残る、Q50）。
+            // 区切りの履歴より前の日は、今までどおりその夜の睡眠も（翌朝決まるまでは設定の時刻で仮に数える）
             sleep: sleep.map(\.interval),
-            gameWindows: confirmed ? (plan?.draft.blocks.filter(\.isUnblock).map { DateInterval(start: $0.start, end: $0.end) } ?? []) : [],
+            gameWindows: gameWindows(plan, of: day),
             // 手で直す前より長くした所は、0.5pt と睡眠の点の低いほう（DTX-03）
             sleepCaps: sleep.compactMap(\.extendedPart)))
     }
 
-    /// その日の朝に終わった睡眠と、その夜の睡眠（翌朝決まるまでは設定の時刻で仮に数える）
-    private func sleepLines(dayStart: Date, calendar: Calendar) throws -> [SleepLine] {
-        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
-        return try [dayStart, dayEnd].map { try sleepLine(dayStart: $0, calendar: calendar) }
+    /// その日の予定のゲーム・SNS の時間。区切りの履歴より前の日は確定した計画だけ（今までの数え方）。
+    /// それより後の日は、下書き（区切りから朝に確定するまで、PLN-11）と計画しない日に残した前の夜の分も
+    private func gameWindows(_ plan: StoredPlan?, of day: BoundaryDay) -> [DateInterval] {
+        guard let plan else { return [] }
+        let confirmed = plan.status == .confirmed || plan.status == .unknown
+        guard confirmed || !day.isLegacy else { return [] }
+        return plan.draft.blocks.filter(\.isUnblock).map { DateInterval(start: $0.start, end: $0.end) }
+    }
+
+    /// その日の睡眠。`points` は点を付ける睡眠（その日の朝に終わった睡眠。区切りの履歴より前の日はその夜の睡眠も）、
+    /// `awake` は起きている時間に使う [その朝の睡眠, その夜の睡眠]（その夜は設定の時刻。区切りの履歴より前の日はその夜の記録）
+    func daySleep(_ day: BoundaryDay) throws -> (points: [SleepLine], awake: [SleepLine]) {
+        let morning = try sleepLine(storedFor: day)
+        let next = boundary.day(1, from: day)
+        if day.isLegacy {
+            let night = try sleepLine(storedFor: next)
+            return ([morning, night], [morning, night])
+        }
+        let tonight = SleepLine.fromSetting(startMinutes: sleepSettings.start, endMinutes: sleepSettings.end, dayStart: next.date,
+                                            calendar: calendar)
+        return ([morning], [morning, tonight])
     }
 
     /// その日の朝に終わった睡眠。保存していなければ設定の時刻
-    private func sleepLine(dayStart: Date, calendar: Calendar) throws -> SleepLine {
-        try store.sleep(dayKey: DayBoundary.dayKey(containing: dayStart, calendar: calendar))
-            ?? .fromSetting(startMinutes: sleepSettings.start, endMinutes: sleepSettings.end, dayStart: dayStart, calendar: calendar)
+    private func sleepLine(storedFor day: BoundaryDay) throws -> SleepLine {
+        try store.sleep(dayKey: day.key)
+            ?? .fromSetting(startMinutes: sleepSettings.start, endMinutes: sleepSettings.end, dayStart: day.date, calendar: calendar)
     }
 
-    /// 先週の同じ曜日のセッション（GHO-02）。前の日に始めて4:00をまたいだものも入れる
-    private func lastWeekSessions(of dayStart: Date, calendar: Calendar) throws -> [FocusSession] {
-        let lastWeekStart = DayBoundary.sameDayLastWeek(dayStart, calendar: calendar)
-        return try store.sessions(dayKey: DayBoundary.dayKey(containing: lastWeekStart, calendar: calendar))
-            + (try carriedOver(into: lastWeekStart, calendar: calendar))
+    /// 先週の同じ曜日のセッション（GHO-02）。前の日に始めて区切りをまたいだものも入れる
+    private func lastWeekSessions(of day: BoundaryDay) throws -> [FocusSession] {
+        let lastWeek = boundary.day(-7, from: day)
+        return try store.sessions(dayKey: lastWeek.key) + (try carriedOver(into: lastWeek))
     }
 
-    /// 前の日に始めて `dayStart`（4:00）をまたいだセッション。4:00より後の分はその日の集中に入れる（GHO-14、2026-10-03）
-    private func carriedOver(into dayStart: Date, calendar: Calendar) throws -> [FocusSession] {
-        let previousStart = calendar.date(byAdding: .day, value: -1, to: dayStart) ?? dayStart.addingTimeInterval(-86400)
+    /// 前の日に始めてその日の始まり（前の日の区切り）をまたいだセッション。区切りより後の分はその日の集中に入れる（GHO-14、2026-10-03）
+    private func carriedOver(into day: BoundaryDay) throws -> [FocusSession] {
         let now = clock.now()
-        return try store.sessions(dayKey: DayBoundary.dayKey(containing: previousStart, calendar: calendar))
-            .filter { ($0.endAt ?? now) > dayStart }
+        return try store.sessions(dayKey: boundary.day(-1, from: day).key).filter { ($0.endAt ?? now) > day.start }
     }
 
     // MARK: 分析（ANA-04・05）：過去の日のポイント。ホームと同じ計算をその日の記録でやり直す
 
-    /// `daysAgo` 日前（今日は0）の1日分の数字。今日は今まで、過ぎた日は翌4:00まで。未来・読めないときは nil
+    /// `daysAgo` 日前（今日は0）の1日分の数字。今日は今まで、過ぎた日はその日の区切りまで。未来・読めないときは nil
     func daySnapshot(daysAgo: Int) -> HomeSnapshot? {
-        let now = clock.now()
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
-        guard daysAgo >= 0, let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { return nil }
-        return daySnapshot(of: dayStart)
+        guard daysAgo >= 0 else { return nil }
+        let today = boundary.day(containing: clock.now())
+        return daySnapshot(of: boundary.day(-daysAgo, from: today).start)
     }
 
-    /// `dayStart`（その日の 4:00）の1日分の数字。分析で押した日を、開いたまま4:00をまたいでも取り違えないよう日付で開く
+    /// `dayStart`（その日の始まり）の1日分の数字。分析で押した日を、開いたまま区切りをまたいでも取り違えないよう日付で開く
     func daySnapshot(of dayStart: Date) -> HomeSnapshot? {
         let now = clock.now()
-        let calendar = self.calendar
-        guard dayStart <= DayBoundary.dayStart(containing: now, calendar: calendar) else { return nil }
+        let boundary = self.boundary
+        guard dayStart <= boundary.dayStart(containing: now) else { return nil }
         var snapshot: HomeSnapshot?
         perform(reportsError: false) {
-            snapshot = try daySnapshot(dayStart: dayStart, now: now, events: (try? blockLog.all()) ?? [], calendar: calendar)
+            snapshot = try daySnapshot(day: boundary.day(containing: dayStart), now: now, events: (try? blockLog.all()) ?? [])
         }
         return snapshot
     }
 
     /// 自己ベストから開いたその日のグラフ（ANA-05、2026-10-11）：相手を今日にする。
-    /// 今日の数字は 4:00 からの経過で揃えて持たせる。押した日が今日なら今までどおり（相手は今日にしない）
+    /// 今日の数字は同じ時刻でそろえて持たせる（GHO-02）。押した日が今日なら今までどおり（相手は今日にしない）
     func daySnapshot(of dayStart: Date, versusToday: Bool) -> HomeSnapshot? {
         guard var snapshot = daySnapshot(of: dayStart) else { return nil }
-        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        let today = boundary.dayStart(containing: clock.now())
         guard versusToday, dayStart < today, let mine = daySnapshot(of: today) else { return snapshot }
-        snapshot.todayRival = TodayRival(today: mine, alignedTo: dayStart)
+        snapshot.todayRival = TodayRival(today: mine, alignedTo: snapshot.dayDate)
         return snapshot
     }
 
     /// `days` 日（古い日が先）のポイントと、先週の同じ曜日のポイント。`page` は0が今日を右の端にした期間で、
     /// 1つ増えるごとに `days` 日ずつ前へさかのぼる（ANA-04）
     func pointsHistory(days: Int, page: Int = 0) -> [DayPoints] {
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        let boundary = self.boundary
+        let today = boundary.day(containing: clock.now())
         let last = max(page, 0) * days
-        return pointsHistory(dayStarts: (last..<last + max(days, 0)).reversed().compactMap {
-            calendar.date(byAdding: .day, value: -$0, to: today)
-        })
+        return pointsHistory(dayStarts: (last..<last + max(days, 0)).reversed().map { boundary.day(-$0, from: today).start })
     }
 
     /// ‹ でもう1期間前へ行けるか：今見ている期間より前に、一番古いタイマーの記録の日がある
     func canGoBack(days: Int, page: Int) -> Bool {
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
-        guard let oldest = oldestRecordDay(calendar: calendar),
-              let first = calendar.date(byAdding: .day, value: -(max(page, 0) * days + days - 1), to: today) else { return false }
+        let boundary = self.boundary
+        let today = boundary.day(containing: clock.now())
+        guard let oldest = oldestRecordDay() else { return false }
+        let first = boundary.day(-(max(page, 0) * days + days - 1), from: today).start
         return oldest < first
     }
 
-    /// 一番古いタイマーの記録の日の 4:00
-    private func oldestRecordDay(calendar: Calendar) -> Date? {
-        (try? store.allSessions())?.first.map { DayBoundary.dayStart(containing: $0.startAt, calendar: calendar) }
+    /// 一番古いタイマーの記録の日の始まり
+    private func oldestRecordDay() -> Date? {
+        let boundary = self.boundary
+        return (try? store.allSessions())?.first.map { boundary.dayStart(containing: $0.startAt) }
     }
 
     /// 覚えた過ぎた日の数字が今も使えるか確かめ、使えなければ空にする。
@@ -714,69 +870,67 @@ final class AppModel {
         }
     }
 
-    /// 指定した日（その日の 4:00、古い日が先）のポイントと、先週の同じ曜日のポイント
+    /// 指定した日（その日の始まり、古い日が先）のポイントと、先週の同じ曜日のポイント
     private func pointsHistory(dayStarts: [Date], events: [BlockEvent]? = nil) -> [DayPoints] {
         let now = clock.now()
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
+        let boundary = self.boundary
+        let today = boundary.dayStart(containing: now)
         // ブロックの記録は1回だけ読む
         let events = events ?? (try? blockLog.all()) ?? []
         refreshPastCache(today: today, events: events.count)
         // 途中の1日が読めなくても全体は欠かさず、その日だけ記録なしにする
         return dayStarts.filter { $0 <= today }.map { dayStart -> DayPoints in
             let isToday = dayStart == today
+            let day = boundary.day(containing: dayStart)
             if !isToday, let cached = pastCache?.days[dayStart] { return cached }
             do {
-                let (day, snapshot) = try dayPoints(dayStart: dayStart, isToday: isToday, now: now, events: events, calendar: calendar)
+                let (points, snapshot) = try dayPoints(day: day, isToday: isToday, now: now, events: events)
                 if !isToday {
-                    pastCache?.days[dayStart] = day
-                    if day.points != nil { pastCache?.recordDays[dayStart] = snapshot.recordDay }
+                    pastCache?.days[dayStart] = points
+                    if points.points != nil { pastCache?.recordDays[dayStart] = snapshot.recordDay }
                 }
-                return day
+                return points
             } catch {
                 // 読めなかった日は覚えず、次に開いたときに読み直す
-                return DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday)
+                return DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday, date: day.date)
             }
         }
     }
 
-    private func dayPoints(dayStart: Date, isToday: Bool, now: Date, events: [BlockEvent],
-                           calendar: Calendar) throws -> (DayPoints, HomeSnapshot) {
-        let snapshot = try daySnapshot(dayStart: dayStart, now: now, events: events, calendar: calendar)
-        guard try isToday || hasRecord(dayStart: dayStart, snapshot: snapshot, calendar: calendar) else {
-            return (DayPoints(dayStart: dayStart, points: nil, lastWeek: nil, isToday: isToday), snapshot)
+    private func dayPoints(day: BoundaryDay, isToday: Bool, now: Date, events: [BlockEvent]) throws -> (DayPoints, HomeSnapshot) {
+        let snapshot = try daySnapshot(day: day, now: now, events: events)
+        guard try isToday || hasRecord(day: day, snapshot: snapshot) else {
+            return (DayPoints(dayStart: day.start, points: nil, lastWeek: nil, isToday: isToday, date: day.date), snapshot)
         }
-        return (DayPoints(dayStart: dayStart, points: snapshot.points,
-                          lastWeek: snapshot.opponentPoints(.lastWeek, at: snapshot.now), isToday: isToday), snapshot)
+        return (DayPoints(dayStart: day.start, points: snapshot.points,
+                          lastWeek: snapshot.opponentPoints(.lastWeek, at: snapshot.now), isToday: isToday, date: day.date), snapshot)
     }
 
     /// その日に何か記録があるか：タイマーの記録・計画（下書き・確定・計画なし）・ブロックが効いていた時間のどれか。
     /// ない日は使い始める前などで、設定の睡眠の時刻だけで点が付いてしまうので数えない。
     /// 睡眠は開くたびに直近7日分を保存するので、使っていた印にはならない
-    private func hasRecord(dayStart: Date, snapshot: HomeSnapshot, calendar: Calendar) throws -> Bool {
-        let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
+    private func hasRecord(day: BoundaryDay, snapshot: HomeSnapshot) throws -> Bool {
         // ブロックが一度も効いていない日は開けた時間が nil（DTX-05 の「出さない日」と同じ判定）
-        return try !store.sessions(dayKey: key).isEmpty || store.plan(dayKey: key) != nil || snapshot.opened != nil
+        try !store.sessions(dayKey: day.key).isEmpty || store.plan(dayKey: day.key) != nil || snapshot.opened != nil
     }
 
-    /// その日の4:00から（今日は今まで、過ぎた日は翌4:00まで）の、ホームと同じ数字
-    private func daySnapshot(dayStart: Date, now: Date, events: [BlockEvent], calendar: Calendar) throws -> HomeSnapshot {
-        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
-        let until = min(now, dayEnd)
-        let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
-        let stored = try store.plan(dayKey: key)
-        let sleep = try sleepLines(dayStart: dayStart, calendar: calendar)
+    /// その日の始まりから（今日は今まで、過ぎた日はその日の区切りまで）の、ホームと同じ数字
+    private func daySnapshot(day: BoundaryDay, now: Date, events: [BlockEvent]) throws -> HomeSnapshot {
+        let until = min(now, day.end)
+        let stored = try store.plan(dayKey: day.key)
+        let sleep = try daySleep(day)
+        let lastWeek = boundary.day(-7, from: day)
         return HomeSnapshot.make(
             now: until, calendar: calendar,
-            todaySessions: try store.sessions(dayKey: key) + carriedOver(into: dayStart, calendar: calendar),
+            todaySessions: try store.sessions(dayKey: day.key) + carriedOver(into: day),
             plan: stored?.status == .skipped ? nil : (stored?.draft ?? PlanDraft()),
-            lastWeekSessions: try lastWeekSessions(of: dayStart, calendar: calendar),
-            reviewMinutes: reviewMinutes, noPlanGoalSeconds: stored?.draft.goalSeconds,
-            detox: try detoxDay(dayStart: dayStart, until: until, events: events, calendar: calendar),
-            lastWeekDetox: try detoxDay(dayStart: DayBoundary.sameDayLastWeek(dayStart, calendar: calendar),
-                                        until: .distantFuture, events: events, calendar: calendar),
-            sleep: sleep.map(\.interval), sleepCaps: sleep.compactMap(\.extendedPart), dayStart: dayStart,
-            onPlan: try onPlanContext(dayStart: dayStart, today: stored, calendar: calendar))
+            lastWeekSessions: try lastWeekSessions(of: day),
+            noPlanGoalSeconds: stored?.draft.goalSeconds,
+            detox: try detoxDay(day, until: until, events: events),
+            lastWeekDetox: try detoxDay(lastWeek, until: .distantFuture, events: events),
+            sleep: sleep.points.map(\.interval), sleepCaps: sleep.points.compactMap(\.extendedPart),
+            awakeSleep: sleep.awake.map(\.interval), day: day, lastWeekDay: lastWeek,
+            onPlan: try onPlanContext(day: day, today: stored))
     }
 
     // MARK: タイムライン
@@ -784,33 +938,32 @@ final class AppModel {
     /// タイムラインの1日分。`daysAgo` は今日を0として何日前か（未来は見られない、TML-02）。
     func timelineDay(daysAgo: Int) -> TimelineDay? {
         let now = clock.now()
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
-        guard daysAgo >= 0, let dayStart = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { return nil }
-        let dayKey = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
-        var day: TimelineDay?
+        guard daysAgo >= 0 else { return nil }
+        let boundary = self.boundary
+        let day = boundary.day(-daysAgo, from: boundary.day(containing: now))
+        var result: TimelineDay?
         perform(reportsError: false) {
-            let stored = try store.plan(dayKey: dayKey)
+            let stored = try store.plan(dayKey: day.key)
             // 開けた時間（TML-05）：今日は今まで、過ぎた日は1日分。数えられなくても、ほかの表示は続ける（開けた時間を出さないだけ）
-            let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
-            let until = min(now, dayEnd)
-            let detox = try? detoxDay(dayStart: dayStart, until: until, events: (try? blockLog.all()) ?? [], calendar: calendar)
-            day = TimelineDay(
-                dayKey: dayKey, dayStart: dayStart, now: now, isToday: daysAgo == 0,
-                planBlocks: stored?.status == .skipped ? [] : (stored?.draft.summaries ?? []),
+            let until = min(now, day.end)
+            let detox = try? detoxDay(day, until: until, events: (try? blockLog.all()) ?? [])
+            result = TimelineDay(
+                dayKey: day.key, dayStart: day.start, now: now, isToday: daysAgo == 0,
+                // 計画しない日も、残した前の夜の予定は出す（PLN-11）
+                planBlocks: stored?.draft.summaries ?? [],
                 isNoPlanDay: stored == nil || stored?.status == .skipped,
-                sessions: try store.sessions(dayKey: dayKey),
-                editableDayKeys: editableDayKeys(now: now, calendar: calendar),
-                opened: detox?.opened(until: until))
+                sessions: try store.sessions(dayKey: day.key),
+                editableDayKeys: editableDayKeys(now: now),
+                opened: detox?.opened(until: until), dayDate: day.date)
         }
-        return day
+        return result
     }
 
-    /// 終了時刻を直せる日（今日と昨日、朝4:00区切り）
-    private func editableDayKeys(now: Date, calendar: Calendar) -> Set<String> {
-        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
-        return [DayBoundary.dayKey(containing: today, calendar: calendar), DayBoundary.dayKey(containing: yesterday, calendar: calendar)]
+    /// 終了時刻を直せる日（今日と昨日、その日の区切りで分けた日）
+    private func editableDayKeys(now: Date) -> Set<String> {
+        let boundary = self.boundary
+        let today = boundary.day(containing: now)
+        return [today.key, boundary.day(-1, from: today).key]
     }
 
     /// 開始と終了で日付（暦の日）が変わるか。時刻の選択で日付も出すかを決める
@@ -821,7 +974,7 @@ final class AppModel {
     /// 終わった記録の終了時刻を早める（TML-04）。保存する瞬間にも「今日・昨日の記録か」を確かめる。成功なら true
     @discardableResult
     func shortenEnd(_ session: FocusSession, to newEnd: Date) -> Bool {
-        guard TimelineDay.canEdit(session, editableDayKeys: editableDayKeys(now: clock.now(), calendar: calendar)) else {
+        guard TimelineDay.canEdit(session, editableDayKeys: editableDayKeys(now: clock.now())) else {
             errorMessage = Self.cannotEditMessage
             return false
         }
@@ -852,17 +1005,25 @@ final class AppModel {
 
     // MARK: 計画どおりの点（GHO-16）
 
-    /// その日と先週の同じ曜日の、計画どおりの点の材料（確定した計画だけ）。その日の計画は読み済みのものを渡す
-    private func onPlanContext(dayStart: Date, today stored: StoredPlan?, calendar: Calendar) throws -> OnPlanContext {
-        func confirmed(_ start: Date, _ loaded: StoredPlan?? = nil) throws -> (plan: StoredPlan, morning: Set<UUID>)? {
-            let key = DayBoundary.dayKey(containing: start, calendar: calendar)
+    /// その日と先週の同じ曜日の、計画どおりの点の材料。その日の計画は読み済みのものを渡す。
+    /// 確定した計画は朝の計画の写しで決める。区切りの履歴より後の日は、下書き（区切りから朝に確定するまで）と
+    /// 計画しない日に残した前の夜の分も、足した時刻で決める（PLN-11、2026-10-21 オーナー決定）
+    private func onPlanContext(day: BoundaryDay, today stored: StoredPlan?) throws -> OnPlanContext {
+        func confirmed(_ key: String, _ loaded: StoredPlan?? = nil) throws -> (plan: StoredPlan, morning: Set<UUID>)? {
             guard let plan = try loaded ?? store.plan(dayKey: key), plan.status == .confirmed || plan.status == .unknown else { return nil }
             return (plan, Set((try store.snapshot(dayKey: key) ?? []).map(\.blockId)))
         }
-        let today = try confirmed(dayStart, .some(stored))
-        let lastWeek = try confirmed(DayBoundary.sameDayLastWeek(dayStart, calendar: calendar))
-        return OnPlanContext(morningBlockIds: today?.morning ?? [], addedAt: today?.plan.addedAt ?? [:],
-                             lastWeekPlan: lastWeek?.plan, lastWeekMorningBlockIds: lastWeek?.morning ?? [])
+        let lastWeek = try confirmed(boundary.day(-7, from: day).key)
+        var context = OnPlanContext(lastWeekPlan: lastWeek?.plan, lastWeekMorningBlockIds: lastWeek?.morning ?? [])
+        if let today = try confirmed(day.key, .some(stored)) {
+            context.morningBlockIds = today.morning
+            context.addedAt = today.plan.addedAt
+            context.confirmedAt = day.isLegacy ? nil : today.plan.confirmedAt
+        } else if let stored, !day.isLegacy, stored.status == .draft || stored.status == .skipped {
+            context.addedAt = stored.addedAt
+            context.blocks = stored.draft.blocks
+        }
+        return context
     }
 
     // MARK: 環境音（TMR-14）
@@ -911,19 +1072,19 @@ final class AppModel {
     // MARK: 自己ベスト・休み明け・ラップの帯（GHO-06・15、ANA-06）
 
     /// 自己ベスト（今日より前）と、先週より前に記録があるか（休み明け）をホームの数字に入れる
-    private func addHistory(to snapshot: inout HomeSnapshot, calendar: Calendar) throws {
-        let byDay = try focusByDay(calendar: calendar, today: snapshot.dayStart)
+    private func addHistory(to snapshot: inout HomeSnapshot) throws {
+        let byDay = try focusByDay(today: snapshot.dayStart)
         snapshot.personalBest = DailyFocus.best(byDay, before: snapshot.dayStart)
-        let lastWeekStart = DayBoundary.sameDayLastWeek(snapshot.dayStart, calendar: calendar)
+        let lastWeekStart = boundary.sameDayLastWeek(snapshot.dayStart)
         snapshot.hasOlderHistory = byDay.keys.contains { $0 < lastWeekStart }
     }
 
     /// 日ごとの集中。保存したとき・日が変わったときだけ読み直す（毎分の読み直しで全件を読まない）。
     /// タイマーが動いている間は今の分が毎分変わるので、覚えない
-    private func focusByDay(calendar: Calendar, today: Date) throws -> [Date: Int] {
+    private func focusByDay(today: Date) throws -> [Date: Int] {
         if let cache = historyCache, cache.revision == store.revision, cache.today == today { return cache.byDay }
         let sessions = try store.allSessions()
-        let byDay = DailyFocus.byDay(sessions.flatMap { $0.activeSegments(now: clock.now()) }, calendar: calendar)
+        let byDay = DailyFocus.byDay(sessions.flatMap { $0.activeSegments(now: clock.now()) }, boundary: boundary)
         if sessions.allSatisfy({ !$0.isRunning }) { historyCache = (store.revision, today, byDay) }
         return byDay
     }
@@ -931,15 +1092,15 @@ final class AppModel {
     /// 自己ベスト（ANA-06）：全期間・今月・今週の、一番多い1日のポイントと集中した時間。今日は入れない。
     /// 記録のある日がない期間は入らない。全期間は使い始めの日から全部。過ぎた日のポイントは覚えるので、重いのは最初に開いたときだけ
     func periodBests() -> [BestPeriod: PeriodBest] {
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        let boundary = self.boundary
+        let today = boundary.dayStart(containing: clock.now())
         let history = recordedDays(.all)
         guard !history.isEmpty else { return [:] }
-        let byDay = (try? focusByDay(calendar: calendar, today: today)) ?? [:]
+        let byDay = (try? focusByDay(today: today)) ?? [:]
         var result: [BestPeriod: PeriodBest] = [:]
         for period in BestPeriod.allCases {
             // 今週（今月）に記録のある日がなければ先週（先月）の日で（2026-10-11）
-            let range = BestPeriods.range(period, today: today, calendar: calendar, recordDays: history.map(\.dayStart))
+            let range = BestPeriods.range(period, today: today, boundary: boundary, recordDays: history.map(\.dayStart))
             // 同じ値なら新しい日（集中した時間のベストと同じ決まり）
             guard let best = LapTargets.ranked(history.filter { range.contains($0.dayStart) }).first, let points = best.points else { continue }
             result[period] = PeriodBest(points: points, pointsDay: best.dayStart,
@@ -952,33 +1113,37 @@ final class AppModel {
     /// 期間の記録のある日（今日は入れない。古い日が先）。全期間は使い始めの日から。
     /// 今週（今月）に記録のある日がなければ先週（先月）の日（2026-10-11、`BestPeriods.range`）
     private func recordedDays(_ period: BestPeriod, events: [BlockEvent]? = nil) -> [DayPoints] {
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
-        guard let first = oldestRecordDay(calendar: calendar), first < today else { return [] }
-        let count = calendar.dateComponents([.day], from: first, to: today).day ?? 0
-        guard count > 0 else { return [] }
-        let all = pointsHistory(dayStarts: (1...count).reversed().compactMap {
-            calendar.date(byAdding: .day, value: -$0, to: today)
-        }, events: events).filter { $0.points != nil }
+        let boundary = self.boundary
+        let today = boundary.day(containing: clock.now())
+        guard let first = oldestRecordDay(), first < today.start else { return [] }
+        var dayStarts: [Date] = []
+        var day = boundary.day(-1, from: today)
+        while day.start >= first {
+            dayStarts.append(day.start)
+            day = boundary.day(-1, from: day)
+        }
+        let all = pointsHistory(dayStarts: dayStarts.reversed(), events: events).filter { $0.points != nil }
         guard period != .all else { return all }
-        let range = BestPeriods.range(period, today: today, calendar: calendar, recordDays: all.map(\.dayStart))
+        let range = BestPeriods.range(period, today: today.start, boundary: boundary, recordDays: all.map(\.dayStart))
         return all.filter { range.contains($0.dayStart) }
     }
 
     /// 期間の記録・理論ベスト・ベスト10（ANA-06・09・11）。期間・記録・日付・ブロックの記録・睡眠の設定が変わったときだけ作る
     private func periodRecords(_ period: BestPeriod) -> PeriodRecords {
         let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        let today = boundary.day(containing: clock.now())
         let events = (try? blockLog.all()) ?? []
-        refreshPastCache(today: today, events: events.count)
+        refreshPastCache(today: today.start, events: events.count)
         if let cached = pastCache?.periods[period] { return cached }
         let days = recordedDays(period, events: events).compactMap { points -> (points: DayPoints, day: RecordDay)? in
             // 覚えた材料がなければ（読めなかった日など）読み直す
             guard let day = pastCache?.recordDays[points.dayStart] ?? daySnapshot(of: points.dayStart)?.recordDay else { return nil }
             return (points, day)
         }
+        // 区間は今日と同じ時刻の区間（今日の一日の始まりから2時間ごと。同じ時刻でそろえる、Q48）
         let records = PeriodRecords(days: days, sleepSections: LapTargets.sleepSections(
-            startMinutes: sleepSettings.start, endMinutes: sleepSettings.end, dayStart: today, calendar: calendar))
+            startMinutes: sleepSettings.start, endMinutes: sleepSettings.end, day: today, calendar: calendar),
+            sections: LapSection.of(dayStart: today.start, dayEnd: today.end, origin: today.date))
         pastCache?.periods[period] = records
         return records
     }
@@ -987,12 +1152,13 @@ final class AppModel {
     /// 期間に記録のある日がなければ nil（切り替えも表も出さない）。★の区間ベストは相手が何でも入れる。
     /// 期間の材料は覚えておくので、相手を切り替えたときに作り直すのは今日とラップ表だけ
     func lapComparison(target: LapTarget, period: BestPeriod) -> BestComparison? {
-        let calendar = self.calendar
         let records = periodRecords(period)
         guard let theirs = records.curve(target),
-              let mine = daySnapshot(of: DayBoundary.dayStart(containing: clock.now(), calendar: calendar)) else { return nil }
-        return BestComparison(today: mine.points, theirsAtSameTime: theirs(mine.now.timeIntervalSince(mine.dayStart)),
-                              rows: BestLaps.make(today: mine.myPoints(until:), todayStart: mine.dayStart, now: mine.now,
+              let mine = daySnapshot(of: boundary.dayStart(containing: clock.now())) else { return nil }
+        // 同じ時刻でそろえる（日の名前の日の 0:00 からの経過、GHO-02）
+        return BestComparison(today: mine.points, theirsAtSameTime: theirs(mine.now.timeIntervalSince(mine.dayDate)),
+                              rows: BestLaps.make(today: mine.myPoints(until:), todayStart: mine.dayStart, todayEnd: mine.dayEnd,
+                                                  origin: mine.dayDate, now: mine.now,
                                                   theirs: theirs, records: records.records.map(\.value)),
                               days: records.days.count)
     }
@@ -1010,13 +1176,13 @@ final class AppModel {
 
     /// 時間帯の地図（ANA-07）：直近4週の曜日×2時間の集中の平均
     func timeMap() -> TimeMap {
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+        let boundary = self.boundary
+        let today = boundary.day(containing: clock.now())
         // 今日は入れないので、保存したとき・日が変わったときだけ数え直す
-        if let cache = timeMapCache, cache.revision == store.revision, cache.today == today { return cache.map }
+        if let cache = timeMapCache, cache.revision == store.revision, cache.today == today.start { return cache.map }
         let segments = ((try? store.allSessions()) ?? []).flatMap { $0.activeSegments(now: clock.now()) }
-        let map = TimeMap.make(segments, today: today, calendar: calendar)
-        timeMapCache = (store.revision, today, map)
+        let map = TimeMap.make(segments, today: today, boundary: boundary)
+        timeMapCache = (store.revision, today.start, map)
         return map
     }
 
@@ -1065,13 +1231,13 @@ final class AppModel {
         return ManualRecord.problem(start: start, end: end, excluding: id, context: context)
     }
 
-    /// 手動で記録できる時刻の範囲：昨日の 4:00〜今（分に切り捨て）
+    /// 手動で記録できる時刻の範囲：昨日の始まり（区切りの日の始まり）〜今（分に切り捨て）
     func manualRange() -> ClosedRange<Date> {
         let yesterday = yesterdayStart(now: clock.now())
         return yesterday...max(yesterday, ManualRecord.floorToMinute(clock.now()))
     }
 
-    /// 「手動の記録を直す」で選べる時刻：昨日の 4:00〜今（分に切り捨て）。前の分を足した記録の終わりは秒つきなので、
+    /// 「手動の記録を直す」で選べる時刻：昨日の始まり〜今（分に切り捨て）。前の分を足した記録の終わりは秒つきなので、
     /// それより前に切り捨てないよう、記録の終わりまでは選べるようにする
     func manualEditRange(for session: FocusSession) -> ClosedRange<Date> {
         let range = manualRange()
@@ -1079,18 +1245,17 @@ final class AppModel {
     }
 
     /// タイムラインの「＋ 手動で記録」の初めの時刻。今日は今の30分前〜今、
-    /// 昨日は昨日の 4:00〜今日の 4:00 の中の最後の記録の終わりから30分（4:00 をまたぐ記録は今日の 4:00 で切る。
+    /// 昨日は昨日の一日の中の最後の記録の終わりから30分（区切りをまたぐ記録は今日の始まりで切る。
     /// 記録がなければ起きた時刻から30分）
     func manualInitial(daysAgo: Int) -> DateInterval {
         let now = ManualRecord.floorToMinute(clock.now())
         let length: TimeInterval = 30 * 60
         guard daysAgo == 1 else { return DateInterval(start: now.addingTimeInterval(-length), end: now) }
-        let calendar = self.calendar
         let yesterday = yesterdayStart(now: now)
-        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
+        let today = boundary.dayStart(containing: now)
         let lastEnd = (try? manualContext())?.sessions.filter { $0.startAt < today }.compactMap(\.endAt)
             .map { min($0, today) }.filter { $0 > yesterday }.max()
-        let wake = (try? sleepLine(dayStart: yesterday, calendar: calendar))?.end
+        let wake = (try? sleepLine(storedFor: boundary.day(containing: yesterday)))?.end
         let start = min(ManualRecord.ceilToMinute(max(lastEnd ?? wake ?? yesterday, yesterday)), now)
         return DateInterval(start: start, end: min(start.addingTimeInterval(length), now))
     }
@@ -1148,7 +1313,7 @@ final class AppModel {
             errorMessage = Self.saveErrorMessage
             return .failed
         }
-        guard TimelineDay.canEdit(session, editableDayKeys: editableDayKeys(now: clock.now(), calendar: calendar)) else {
+        guard TimelineDay.canEdit(session, editableDayKeys: editableDayKeys(now: clock.now())) else {
             errorMessage = Self.cannotEditMessage
             return .refused(.outOfRange)
         }
@@ -1166,7 +1331,7 @@ final class AppModel {
     @discardableResult
     func deleteManual(_ session: FocusSession) -> Bool {
         guard session.isDeclared else { return false }
-        guard TimelineDay.canEdit(session, editableDayKeys: editableDayKeys(now: clock.now(), calendar: calendar)) else {
+        guard TimelineDay.canEdit(session, editableDayKeys: editableDayKeys(now: clock.now())) else {
             errorMessage = Self.cannotEditMessage
             return false
         }
@@ -1201,32 +1366,28 @@ final class AppModel {
                                          timerStart: session.startAt, context: try manualContext())
     }
 
-    /// 手動の記録の判定の材料：一昨日〜今日の記録（4:00 をまたいで昨日に入る記録も見る）、ブロックの記録、
-    /// 確定した計画のゲーム・SNS の時間、昨日・今日の朝の睡眠と今夜の睡眠（翌朝決まるまでは設定の時刻、DTX-02）
+    /// 手動の記録の判定の材料：一昨日〜今日の記録（区切りをまたいで昨日に入る記録も見る）、ブロックの記録、
+    /// 予定のゲーム・SNS の時間、昨日・今日の朝の睡眠と今夜の睡眠（まだなければ設定の時刻、DTX-02）
     private func manualContext() throws -> ManualRecord.Context {
         let now = clock.now()
-        let calendar = self.calendar
-        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
+        let boundary = self.boundary
+        let today = boundary.day(containing: now)
         var sessions: [FocusSession] = []
         var games: [DateInterval] = []
         for offset in -2...0 {
-            guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
-            let key = DayBoundary.dayKey(containing: day, calendar: calendar)
-            sessions += try store.sessions(dayKey: key)
-            if let plan = try store.plan(dayKey: key), plan.status == .confirmed || plan.status == .unknown {
-                games += plan.draft.blocks.filter(\.isUnblock).map { DateInterval(start: $0.start, end: $0.end) }
-            }
+            let day = boundary.day(offset, from: today)
+            sessions += try store.sessions(dayKey: day.key)
+            games += gameWindows(try store.plan(dayKey: day.key), of: day)
         }
-        let sleep = try (-1...1).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
-            .map { try sleepLine(dayStart: $0, calendar: calendar).interval }
+        let sleep = try (-1...1).map { try sleepLine(storedFor: boundary.day($0, from: today)).interval }
         // ブロックの記録が読めなければ、効いていたか分からないので記録できない（ブロックが効いていない）
-        return ManualRecord.Context(now: now, dayKeys: editableDayKeys(now: now, calendar: calendar), calendar: calendar,
-                                    events: (try? blockLog.all()) ?? [], gameWindows: games, sessions: sessions, sleep: sleep)
+        return ManualRecord.Context(now: now, dayKeys: editableDayKeys(now: now), calendar: calendar,
+                                    events: (try? blockLog.all()) ?? [], gameWindows: games, sessions: sessions, sleep: sleep,
+                                    boundary: boundary)
     }
 
     private func yesterdayStart(now: Date) -> Date {
-        let today = DayBoundary.dayStart(containing: now, calendar: calendar)
-        return calendar.date(byAdding: .day, value: -1, to: today) ?? today.addingTimeInterval(-86400)
+        boundary.dayStart(-1, from: boundary.dayStart(containing: now))
     }
 
     // MARK: 遅れ開始（TMR-15）
@@ -1319,9 +1480,19 @@ final class AppModel {
     }
 
     /// 今日は計画しない。朝の計画で目標を決めていれば、計画なし日の目標として残す（GHO-10、Q13）
+    /// 残すのは前の夜の分（その日の始まり〜設定の睡眠の起きる時刻に始まった、もう始まったブロック）だけで、朝から先は外す
+    /// （PLN-11、2026-10-21 オーナー決定）。区切りの履歴より前の日は今までどおり全部外す
     func skipPlan(goalSeconds: Int? = nil) {
-        let dayKey = morningPlan?.dayKey ?? DayBoundary.dayKey(containing: clock.now(), calendar: calendar)
-        if perform({ try store.skip(dayKey: dayKey, timeZone: timeZone(), goalSeconds: goalSeconds) }) {
+        let now = clock.now()
+        let day = morningPlan?.day ?? boundary.day(containing: now)
+        let dayKey = day.key
+        let skipped = perform {
+            let stored = try store.plan(dayKey: dayKey)
+            let keeping = day.isLegacy || stored?.status != .draft ? [] :
+                Set(nightPart(stored?.draft, of: day).blocks.filter { $0.start <= now }.map(\.id))
+            try store.skip(dayKey: dayKey, timeZone: timeZone(), goalSeconds: goalSeconds, keeping: keeping)
+        }
+        if skipped {
             morningPlan = nil
         }
         reload()
@@ -1329,21 +1500,31 @@ final class AppModel {
 
     /// 計画なし日にあとから計画を作る（2026-09-30 決定）。朝の計画画面を開き、閉じれば計画なしのまま。
     func openPlanOnNoPlanDay() {
-        let now = clock.now()
-        let calendar = self.calendar
-        let dayStart = DayBoundary.dayStart(containing: now, calendar: calendar)
-        // 計画なし日に決めた目標は、作る計画に引き継ぐ（GHO-10）。習慣のブロックが最初から入る（PLN-08）
-        var draft = newDraft(dayStart: dayStart)
+        let today = boundary.day(containing: clock.now())
+        // 計画なし日に決めた目標は、作る計画に引き継ぐ（GHO-10）。習慣のブロックが最初から入る（PLN-08）。
+        // 計画しない日に残した前の夜の予定も入れる（PLN-11）
+        var draft = newDraft(day: today)
+        if let kept = try? store.plan(dayKey: today.key)?.draft.blocks {
+            draft.blocks = kept + draft.blocks.filter { block in !kept.contains { $0.overlaps(block) || $0.matches(block) } }
+        }
         draft.goalSeconds = noPlanGoalSeconds
-        morningPlan = MorningPlan(dayKey: DayBoundary.dayKey(containing: now, calendar: calendar),
-                                  dayStart: dayStart, draft: draft)
+        morningPlan = MorningPlan(day: today, draft: draft, gridStart: morningGridStart(day: today))
     }
 
     /// 日中の計画の変更（PLN-04）。朝のスナップショットは変わらない。
     @discardableResult
+    /// 区切りから朝の計画を確定するまでは下書きを直す（すぐ保存、PLN-11・Q49）。まだ下書きもなければ下書きを作る
     func savePlanChanges(_ draft: PlanDraft) -> Bool {
-        let dayKey = DayBoundary.dayKey(containing: clock.now(), calendar: calendar)
-        let saved = perform { try store.saveChanges(draft, dayKey: dayKey) }
+        let dayKey = boundary.dayKey(containing: clock.now())
+        let saved = perform {
+            let status = try store.plan(dayKey: dayKey)?.status
+            // まだ計画がない夜（区切り〜朝の計画）に計画のタブで足したときも下書きとして保存する
+            if status == nil || status == .draft {
+                try store.saveDraft(draft, dayKey: dayKey, timeZone: timeZone())
+            } else {
+                try store.saveChanges(draft, dayKey: dayKey)
+            }
+        }
         reload()
         return saved
     }
@@ -1377,16 +1558,19 @@ final class AppModel {
     /// `excludingEnded`（計画のタブ）なら終わった時間のものを出さない。アーカイブしたカテゴリ・ブロック名のものは出さない
     func candidates(for plan: PlanDraft, dayStart: Date, excludingEnded: Bool) -> [PlanCandidate] {
         let calendar = self.calendar
+        let boundary = self.boundary
+        let day = boundary.day(containing: dayStart)
         var result: [PlanCandidate] = []
         perform(reportsError: false) {
             var sources: [PlanCandidates.SourcePlan] = []
             for (source, offset) in [(PlanCandidate.Source.yesterday, -1), (.lastWeek, -7)] {
-                guard let start = calendar.date(byAdding: .day, value: offset, to: dayStart),
-                      let stored = try store.plan(dayKey: DayBoundary.dayKey(containing: start, calendar: calendar)),
+                let other = boundary.day(offset, from: day)
+                guard let stored = try store.plan(dayKey: other.key),
                       stored.status == .confirmed || stored.status == .unknown else { continue }
-                sources.append(.init(source: source, plan: stored.draft, dayStart: start))
+                sources.append(.init(source: source, plan: stored.draft, dayStart: other.date))
             }
-            result = PlanCandidates.make(plan: plan, dayStart: dayStart, calendar: calendar, sources: sources, templates: templates,
+            result = PlanCandidates.make(plan: plan, dayStart: day.start, dayEnd: day.end, dayDate: day.date, calendar: calendar,
+                                         sources: sources, templates: templates,
                                          notEndedBy: excludingEnded ? clock.now() : nil)
                 .filter { isActive($0.block.category, $0.block.project) }
         }
@@ -1401,10 +1585,10 @@ final class AppModel {
                 settings.habitsJSON = TemplateBlockValue.encode([])
             } else {
                 let calendar = self.calendar
-                let dayStart = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
+                let today = boundary.day(containing: clock.now())
                 // 読めなければ覚えず、次の起動でやり直す
                 perform(reportsError: false) {
-                    let carried = try carriedDraft(dayStart: dayStart, calendar: calendar)
+                    let carried = try carriedDraft(today: today)
                     settings.habitsJSON = TemplateBlockValue.encode(PlanHabits(plan: carried, calendar: calendar).blocks
                         .map(TemplateBlockValue.init))
                 }

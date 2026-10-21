@@ -11,6 +11,74 @@ func jst(_ text: String) -> Date { LaunchOptions.parseDate(text, timeZone: tokyo
 
 var tokyoCalendar: Calendar { Calendar.app(timeZone: tokyo) }
 
+/// 区切りの履歴がないとき（朝4:00区切り、2026-10-21 の版より前の日の数え方）の日。今までのテストの見本の記録に使う
+extension DayBoundary {
+    static func dayKey(containing date: Date, calendar: Calendar) -> String { DayBoundary(calendar: calendar).dayKey(containing: date) }
+    static func dayStart(containing date: Date, calendar: Calendar) -> Date { DayBoundary(calendar: calendar).dayStart(containing: date) }
+}
+
+// MARK: 区切りの履歴がない日（朝4:00区切り）で数える、今までのテスト用の形
+// 本番のコードは区切りの履歴（DayBoundary）を必ず渡す。履歴を渡し忘れて朝4:00区切りに落ちないよう、この形はテストにだけ置く
+
+extension BestPeriods {
+    static func start(_ period: BestPeriod, today: Date, calendar: Calendar) -> Date? {
+        start(period, today: today, boundary: DayBoundary(calendar: calendar))
+    }
+
+    static func range(_ period: BestPeriod, today: Date, calendar: Calendar, recordDays: [Date]) -> BestRange {
+        range(period, today: today, boundary: DayBoundary(calendar: calendar), recordDays: recordDays)
+    }
+}
+
+extension DailyFocus {
+    static func byDay(_ segments: [TimeSegment], calendar: Calendar) -> [Date: Int] {
+        byDay(segments, boundary: DayBoundary(calendar: calendar))
+    }
+}
+
+extension TimeMap {
+    /// `today` は今日の 4:00
+    static func make(_ segments: [TimeSegment], today: Date, calendar: Calendar) -> TimeMap {
+        let boundary = DayBoundary(calendar: calendar)
+        return make(segments, today: boundary.day(containing: today), boundary: boundary)
+    }
+}
+
+extension LapTargets {
+    static func sleepSections(startMinutes: Int, endMinutes: Int, dayStart: Date, calendar: Calendar) -> Set<Int> {
+        sleepSections(startMinutes: startMinutes, endMinutes: endMinutes,
+                      day: DayBoundary(calendar: calendar).day(containing: dayStart), calendar: calendar)
+    }
+}
+
+extension GhostSummary {
+    /// 区切りが同じ週：日の始まりからの経過で揃え、24時間を超える部分は切る
+    init?(lastWeek sessions: [FocusSession], lastWeekStart: Date, todayStart: Date) {
+        self.init(lastWeek: sessions, lastWeekDay: DateInterval(start: lastWeekStart, duration: 24 * 3600),
+                  shift: todayStart.timeIntervalSince(lastWeekStart))
+    }
+}
+
+extension HomeSnapshot {
+    /// 区切りの履歴がないときの日（`dayStart`、なければ `now` の日）と、その7日前で作る
+    static func make(now: Date, calendar: Calendar, todaySessions: [FocusSession], plan: PlanDraft?,
+                     lastWeekSessions: [FocusSession], noPlanGoalSeconds: Int? = nil, detox: DetoxDay? = nil,
+                     lastWeekDetox: DetoxDay? = nil, sleep: [DateInterval] = [], sleepCaps: [DateInterval] = [],
+                     awakeSleep: [DateInterval]? = nil, dayStart: Date? = nil,
+                     onPlan: OnPlanContext = OnPlanContext()) -> HomeSnapshot {
+        let legacy = DayBoundary(calendar: calendar)
+        let day = legacy.day(containing: dayStart ?? now)
+        return make(now: now, calendar: calendar, todaySessions: todaySessions, plan: plan, lastWeekSessions: lastWeekSessions,
+                    noPlanGoalSeconds: noPlanGoalSeconds, detox: detox, lastWeekDetox: lastWeekDetox, sleep: sleep,
+                    sleepCaps: sleepCaps, awakeSleep: awakeSleep, day: day, lastWeekDay: legacy.day(-7, from: day), onPlan: onPlan)
+    }
+}
+
+/// 区切りの履歴（`[(fromDayKey, endMinutes)]`）からの区切り
+func boundary(_ rows: [(String, Int)]) -> DayBoundary {
+    DayBoundary(calendar: tokyoCalendar, changes: rows.map { DayBoundaryChange(fromDayKey: $0.0, endMinutes: $0.1) })
+}
+
 /// 途中で進められる時計。
 final class MutableClock: AppClock {
     private let date: Mutex<Date>

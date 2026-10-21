@@ -107,12 +107,7 @@ struct HomeSnapshotTests {
         #expect(snapshot("2026-10-19T11:20").plannedFocusSeconds == Int(7.5 * 3600))
     }
 
-    @Test func reviewEntryAppearsFrom22() {
-        #expect(!snapshot("2026-10-19T21:59").showsReviewEntry)
-        #expect(snapshot("2026-10-19T22:00").showsReviewEntry)
-        // 日付が変わっても 4:00 までは同じ日の夜
-        #expect(snapshot("2026-10-20T01:00", sessions: [], lastWeek: []).showsReviewEntry)
-    }
+    // 「今日を振り返る」を出すかは AppModel が区切りと朝の計画から決める（2026-10-21。AppModelSettingsTests の reviewEntry…）
 
     @Test func skippedPlanIsNoPlanDay() {
         let s = snapshot("2026-10-19T11:20", plan: .some(nil))

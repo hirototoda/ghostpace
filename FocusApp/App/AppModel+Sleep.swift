@@ -7,40 +7,47 @@ extension AppModel {
     var sleepEndMinutes: Int { sleepSettings.end }
 
     /// 朝の計画・計画のタブに出す睡眠（その日のもの。なければ nil）
-    func sleepLine(dayStart: Date) -> SleepLine? {
-        guard let sleep, sleep.dayKey == DayBoundary.dayKey(containing: dayStart, calendar: calendar) else { return nil }
+    func sleepLine(day: BoundaryDay) -> SleepLine? {
+        guard let sleep, sleep.dayKey == day.key else { return nil }
         return sleep.line
     }
 
+    /// `dayStart` の日の睡眠（画面から使う）
+    func sleepLine(dayStart: Date) -> SleepLine? { sleepLine(day: boundary.day(containing: dayStart)) }
+
     /// 起きている時間（時間の格子で寝ている時間を灰色にする、PLN-10）。起きた時刻はその日の睡眠（なければ設定の時刻）、
-    /// 寝る時刻は設定の時刻をその夜に当てはめる
-    func awakeRange(dayStart: Date) -> ClosedRange<Date> {
+    /// 寝る時刻は設定の時刻をその夜に当てはめる（区切りより後なら区切りまで）
+    func awakeRange(day: BoundaryDay) -> ClosedRange<Date> {
         let calendar = self.calendar
         let settings = sleepSettings
-        let morning = sleepLine(dayStart: dayStart)
-            ?? SleepLine.fromSetting(startMinutes: settings.start, endMinutes: settings.end, dayStart: dayStart, calendar: calendar)
-        let next = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
-        let tonight = SleepLine.fromSetting(startMinutes: settings.start, endMinutes: settings.end, dayStart: next, calendar: calendar)
-        return PlanGridLayout.awake(wake: morning.end, bed: tonight.start, dayStart: dayStart)
+        let morning = sleepLine(day: day)
+            ?? SleepLine.fromSetting(startMinutes: settings.start, endMinutes: settings.end, dayStart: day.date, calendar: calendar)
+        let next = boundary.day(1, from: day)
+        let tonight = SleepLine.fromSetting(startMinutes: settings.start, endMinutes: settings.end, dayStart: next.date, calendar: calendar)
+        return PlanGridLayout.awake(wake: morning.end, bed: tonight.start, dayStart: day.start, dayEnd: day.end)
     }
+
+    /// `dayStart` の日の起きている時間（画面から使う）
+    func awakeRange(dayStart: Date) -> ClosedRange<Date> { awakeRange(day: boundary.day(containing: dayStart)) }
 
     /// その日と、その前の6日のうち、まだ睡眠を保存していない日に設定の時刻で保存する（開かなかった日も、次に開いたとき）。
-    /// そのあとで設定を変えても、保存した日は変わらない
-    func ensureSleep(dayStart: Date, calendar: Calendar) throws {
+    /// 今の日の分は朝4:00以降だけ（区切り〜3:59 はまだ寝ていないため、Q50）。そのあとで設定を変えても、保存した日は変わらない
+    func ensureSleep(today: BoundaryDay, now: Date) throws {
+        let calendar = self.calendar
         let settings = sleepSettings
+        let boundary = self.boundary
         for offset in 0..<7 {
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: dayStart) else { continue }
-            let key = DayBoundary.dayKey(containing: day, calendar: calendar)
-            if try sleepStore.sleep(dayKey: key) == nil {
-                try sleepStore.saveSleep(.fromSetting(startMinutes: settings.start, endMinutes: settings.end, dayStart: day,
-                                                      calendar: calendar), dayKey: key, timeZone: calendar.timeZone)
+            if offset == 0, !boundary.isMorning(now) { continue }
+            let day = boundary.day(-offset, from: today)
+            if try sleepStore.sleep(dayKey: day.key) == nil {
+                try sleepStore.saveSleep(.fromSetting(startMinutes: settings.start, endMinutes: settings.end, dayStart: day.date,
+                                                      calendar: calendar), dayKey: day.key, timeZone: calendar.timeZone)
             }
         }
-        let key = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
-        sleep = try sleepStore.sleep(dayKey: key).map { (key, $0) }
+        sleep = try sleepStore.sleep(dayKey: today.key).map { (today.key, $0) }
     }
 
-    /// ヘルスケアを読み直す（起動・前面に来たとき・1分ごと・朝の計画を確定したとき）。その日のうち（翌朝4:00まで）だけ、
+    /// ヘルスケアを読み直す（起動・前面に来たとき・1分ごと・朝の計画を確定したとき）。その日のうち（その日の区切りまで）だけ、
     /// 手で直していなければ置き換える。今日の計画を確定した後は、ヘルスケアの値で決まっていれば置き換えない（2026-10-03）。
     /// `onlyIfSetting` なら、まだ設定の時刻のときだけ読む（1分ごとの読み直し用）。`confirming` は確定した瞬間の読み直し
     func refreshSleep(onlyIfSetting: Bool = false, confirming: Bool = false) async {
@@ -49,11 +56,11 @@ extension AppModel {
         if !confirming, isSleepSettled { return }
         guard sleepSource.isAvailable, let current = sleep, current.line.source != .manual else { return }
         let calendar = self.calendar
-        let dayStart = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
-        guard current.dayKey == DayBoundary.dayKey(containing: dayStart, calendar: calendar) else { return }
-        let (from, to) = SleepPicker.searchRange(dayStart: dayStart, calendar: calendar)
+        let today = boundary.day(containing: clock.now())
+        guard current.dayKey == today.key else { return }
+        let (from, to) = SleepPicker.searchRange(dayStart: today.date, calendar: calendar)
         let intervals = await sleepSource.sleepIntervals(from: from, to: to)
-        guard let picked = SleepPicker.pick(intervals, dayStart: dayStart, calendar: calendar) else { return }
+        guard let picked = SleepPicker.pick(intervals, dayStart: today.date, calendar: calendar) else { return }
         // 読んでいる間に手で直した・日が変わった・確定してヘルスケアの値で決まったときは置き換えない
         guard let latest = sleep, latest.dayKey == current.dayKey, latest.line.source != .manual,
               confirming || !isSleepSettled else { return }
@@ -81,7 +88,7 @@ extension AppModel {
         case replaced
         /// ヘルスケアに記録がなかった（今のまま）
         case noRecord
-        /// 置き換えなかった：保存に失敗した（エラーを出す）、またはシートを開いたまま4:00を過ぎた（新しい日を出す）
+        /// 置き換えなかった：保存に失敗した（エラーを出す）、またはシートを開いたままその日の区切りを過ぎた
         case notReplaced
     }
 
@@ -92,16 +99,16 @@ extension AppModel {
         healthNeedsRequest = await sleepSource.shouldRequestAuthorization()
         guard sleepSource.isAvailable else { return .noRecord }
         let calendar = self.calendar
-        let dayStart = DayBoundary.dayStart(containing: clock.now(), calendar: calendar)
-        let dayKey = DayBoundary.dayKey(containing: dayStart, calendar: calendar)
-        let (from, to) = SleepPicker.searchRange(dayStart: dayStart, calendar: calendar)
+        let today = boundary.day(containing: clock.now())
+        let dayKey = today.key
+        let (from, to) = SleepPicker.searchRange(dayStart: today.date, calendar: calendar)
         let intervals = await sleepSource.sleepIntervals(from: from, to: to)
-        // 画面に出ている睡眠の日（開いたまま4:00を過ぎたら、その日のものではないので置き換えない）
+        // 画面に出ている睡眠の日（開いたままその日の区切りを過ぎたら、その日のものではないので置き換えない）
         guard sleep?.dayKey == dayKey else {
             reload(quietly: true)
             return .notReplaced
         }
-        guard let picked = SleepPicker.pick(intervals, dayStart: dayStart, calendar: calendar) else { return .noRecord }
+        guard let picked = SleepPicker.pick(intervals, dayStart: today.date, calendar: calendar) else { return .noRecord }
         let line = SleepLine(start: picked.start, end: picked.end, source: .health)
         do {
             try sleepStore.saveSleep(line, dayKey: dayKey, timeZone: calendar.timeZone)

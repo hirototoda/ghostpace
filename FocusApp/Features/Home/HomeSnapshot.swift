@@ -16,9 +16,16 @@ struct PlanBlockSummary: Identifiable, Hashable {
 /// ホーム画面の表示内容。記録から `make` で作る。
 struct HomeSnapshot {
     var now: Date
+    /// 一日の始まり（前の日の区切り）
     var dayStart: Date
-    /// 翌日の4:00（グラフの右端）
+    /// その日の区切り（グラフの右端）
     var dayEnd: Date
+    /// 日の名前（GHO-17、glossary.md「日の名前」）
+    var dayKey: String
+    /// 日の名前の日の 0:00（表示の日付と、ほかの日と同じ時刻でそろえる基準）
+    var dayDate: Date
+    /// 区切りの履歴より前の日（朝4:00区切りの今までの数え方。確定は朝4:00）
+    var isLegacyDay = false
     var sessions: [TimeSegment]
     var planBlocks: [PlanBlockSummary]
     var isNoPlanDay: Bool
@@ -26,8 +33,8 @@ struct HomeSnapshot {
     var ghost: GhostSummary?
     /// 目標のゴースト（GHO-10）。目標が0なら nil
     var goal: GoalGhost? = nil
-    /// 振り返りの通知時刻（初期値 22:00、REV-02）
-    var reviewTime: Date
+    /// ホームに「今日を振り返る」を出すか（REV-02。その日の区切りから次の朝の計画を確定するまで）。AppModel が入れる
+    var showsReviewEntry = false
     /// 今日のデジタルデトックス（DTX-01・03）。ブロックの記録から数える
     var detox: DetoxDay? = nil
     /// 先週の同じ曜日のデトックス（今日に揃えたもの）。丸1日分の記録がない日は nil（「先週のデトックスはなし」）
@@ -76,7 +83,6 @@ struct HomeSnapshot {
     var ghostFocusSeconds: Int? { ghost?.focusSeconds(at: now) }
     /// 先週の自分との差（プラスならリード）
     var ghostDiffSeconds: Int? { ghostFocusSeconds.map { focusSeconds - $0 } }
-    var showsReviewEntry: Bool { now >= reviewTime }
 
     /// 相手がこの時刻までに集中した時間。相手がいなければ nil
     func opponentFocusSeconds(_ opponent: Opponent) -> Int? {
@@ -114,7 +120,7 @@ struct HomeSnapshot {
     func laps(_ opponent: Opponent) -> [Lap] {
         guard let focus = opponentFocus(opponent), opponentPoints(opponent, at: dayStart) != nil else { return [] }
         return Laps.make(mine: sessions, opponent: focus, minePoints: myPoints(until:),
-                         opponentPoints: { opponentPoints(opponent, at: $0) ?? 0 }, dayStart: dayStart, now: now)
+                         opponentPoints: { opponentPoints(opponent, at: $0) ?? 0 }, dayStart: dayStart, dayEnd: dayEnd, now: now)
     }
 
     /// 中間地点：相手の1日分のポイントの半分に、自分のポイントが届いた時刻（2026-10-12 からポイントで。それまでは集中した時間）
@@ -144,56 +150,64 @@ struct OnPlanContext {
     var addedAt: [UUID: Date] = [:]
     var lastWeekPlan: StoredPlan?
     var lastWeekMorningBlockIds: Set<UUID> = []
+    /// 朝の計画を確定した時刻。これより前に始めた記録（前の夜の予定、PLN-11）は、写しにあっても「足した時刻」で決める
+    var confirmedAt: Date? = nil
+    /// 点を数えるブロック。nil なら今の計画のブロック（計画しない日も、残した前の夜の分で数える。PLN-11）
+    var blocks: [PlanBlockDraft]? = nil
 }
 
 extension HomeSnapshot {
     /// 記録からホームの表示を作る。
-    /// - todaySessions: 今日の dayKey のセッション（実行中を含む）と、前の日に始めて4:00をまたいだセッション
+    /// - todaySessions: 今日の dayKey のセッション（実行中を含む）と、前の日に始めて区切りをまたいだセッション
     /// - plan: nil なら計画なし日（スキップ）
     /// - lastWeekSessions: 7日前の dayKey のセッション。0件なら対戦なし（GHO-03）
     /// - noPlanGoalSeconds: 計画なし日に決めた目標
-    /// - reviewMinutes: 振り返りの通知の時刻（0:00 からの分、REV-02）。0:00〜3:59 ならその日の夜中（翌日の暦）
     /// - detox / lastWeekDetox: 今日と先週の同じ曜日のデトックス（DTX-01）。先週は丸1日分あるときだけ使う
-    /// - sleep: 今日の睡眠（その朝とその夜）。目標のゴーストの起きている時間とデトックスに使う
-    /// - dayStart: その日の 4:00。過ぎた日（分析、ANA-05）は `now` を翌4:00 にするので、日を取り違えないよう渡す。nil なら `now` の日
+    /// - sleep: 今日の睡眠（点を付ける睡眠）。目標のゴーストのデトックスに使う
+    /// - awakeSleep: [その朝の睡眠, その夜の睡眠]。目標のゴーストの起きている時間・開ける時刻に使う。nil なら `sleep`
+    /// - day: その日（始まり・終わり・日の名前。区切りの履歴から作る）。過ぎた日（分析、ANA-05）は `now` をその日の区切りにする
+    /// - lastWeekDay: 先週の同じ曜日（先週の区切りで数えたまま）
     static func make(now: Date, calendar: Calendar, todaySessions: [FocusSession], plan: PlanDraft?,
-                     lastWeekSessions: [FocusSession], reviewMinutes: Int = SettingsDefaults.reviewMinutes,
-                     noPlanGoalSeconds: Int? = nil, detox: DetoxDay? = nil, lastWeekDetox: DetoxDay? = nil,
-                     sleep: [DateInterval] = [], sleepCaps: [DateInterval] = [], dayStart: Date? = nil,
+                     lastWeekSessions: [FocusSession], noPlanGoalSeconds: Int? = nil, detox: DetoxDay? = nil,
+                     lastWeekDetox: DetoxDay? = nil, sleep: [DateInterval] = [], sleepCaps: [DateInterval] = [],
+                     awakeSleep: [DateInterval]? = nil, day: BoundaryDay, lastWeekDay: BoundaryDay,
                      onPlan: OnPlanContext = OnPlanContext()) -> HomeSnapshot {
-        let dayStart = dayStart ?? DayBoundary.dayStart(containing: now, calendar: calendar)
-        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86400)
-        let lastWeekStart = DayBoundary.sameDayLastWeek(dayStart, calendar: calendar)
+        let dayStart = day.start, dayEnd = day.end
+        // 先週の日を今日に重ねるずれ（同じ時刻でそろえる、GHO-02）
+        let shift = day.date.timeIntervalSince(lastWeekDay.date)
         // 計画なし日は目標時間だけ（GHO-10、Q13）
-        let goal = GoalGhost(plan: plan, goalSeconds: plan == nil ? noPlanGoalSeconds : plan?.goalSeconds, sleep: sleep,
-                             dayStart: dayStart, calendar: calendar).nonEmpty
+        let goal = GoalGhost(plan: plan, goalSeconds: plan == nil ? noPlanGoalSeconds : plan?.goalSeconds, sleep: awakeSleep ?? sleep,
+                             dayStart: dayStart, dayEnd: dayEnd, dayDate: day.date, calendar: calendar).nonEmpty
         var snapshot = HomeSnapshot(
             now: now,
             dayStart: dayStart,
             dayEnd: dayEnd,
-            // 前の日に始めて4:00をまたいだタイマーは、4:00より後の分だけ（2026-10-03）
+            dayKey: day.key,
+            dayDate: day.date,
+            isLegacyDay: day.isLegacy,
+            // 前の日に始めて区切りをまたいだタイマーは、区切りより後の分だけ（2026-10-03）
             sessions: todaySessions.flatMap { $0.activeSegments(now: now) }.compactMap { $0.starting(at: dayStart) },
             planBlocks: plan?.summaries ?? [],
             isNoPlanDay: plan == nil,
-            ghost: GhostSummary(lastWeek: lastWeekSessions, lastWeekStart: lastWeekStart, todayStart: dayStart),
+            ghost: GhostSummary(lastWeek: lastWeekSessions, lastWeekDay: lastWeekDay.interval, shift: shift),
             goal: goal,
-            reviewTime: calendar.date(byAdding: .minute, value: (reviewMinutes - DayBoundary.hour * 60 + 1440) % 1440, to: dayStart)
-                ?? dayStart,
             detox: detox,
-            ghostDetox: lastWeekDetox.flatMap { $0.isComplete ? $0.shifted(by: dayStart.timeIntervalSince(lastWeekStart)) : nil },
-            goalDetox: goal.map { idealDetox($0, plan: plan, sleep: sleep, sleepCaps: sleepCaps, dayStart: dayStart, dayEnd: dayEnd) }
+            ghostDetox: lastWeekDetox.flatMap { $0.isComplete ? $0.shifted(by: shift) : nil },
+            goalDetox: goal.map { idealDetox($0, plan: plan, sleep: sleep, awakeSleep: awakeSleep ?? sleep, sleepCaps: sleepCaps,
+                                             dayStart: dayStart, dayEnd: dayEnd) }
         )
         // 計画どおりの点（GHO-16）：自分、目標のゴースト、先週の自分（先週の計画と記録から同じ決まりで、今日に揃える）
-        snapshot.planAwards = plan.map {
-            OnPlanPoints.awards(blocks: $0.blocks, sessions: todaySessions, morningBlockIds: onPlan.morningBlockIds,
-                                addedAt: onPlan.addedAt, now: now)
+        let awardBlocks = onPlan.blocks ?? plan?.blocks
+        snapshot.planAwards = awardBlocks.map {
+            OnPlanPoints.awards(blocks: $0, sessions: todaySessions, morningBlockIds: onPlan.morningBlockIds,
+                                addedAt: onPlan.addedAt, morningSince: onPlan.confirmedAt, now: now)
         } ?? []
         snapshot.goalPlanAwards = goal == nil ? [] : OnPlanPoints.goalAwards(blocks: plan?.blocks ?? [])
         if let lastWeek = onPlan.lastWeekPlan {
-            let offset = dayStart.timeIntervalSince(lastWeekStart)
             snapshot.ghostPlanAwards = OnPlanPoints.awards(
                 blocks: lastWeek.draft.blocks, sessions: lastWeekSessions, morningBlockIds: onPlan.lastWeekMorningBlockIds,
-                addedAt: lastWeek.addedAt, now: dayEnd.addingTimeInterval(-offset)).map { $0.date.addingTimeInterval(offset) }
+                addedAt: lastWeek.addedAt, morningSince: lastWeek.confirmedAt, now: lastWeekDay.end)
+                .map { $0.date.addingTimeInterval(shift) }
         }
         snapshot.startedBlockIds = Set(todaySessions.compactMap(\.planBlockId))
         return snapshot
@@ -202,8 +216,8 @@ extension HomeSnapshot {
     /// 目標のゴーストのデトックス：計画どおりに進み、2回だけ（0分）開ける日（GHO-10、2026-10-03）。
     /// 目標どおりに集中する時間（速さ1の区間）は集中、空き時間に少しずつ集中する区間は残りの割合だけデトックス、
     /// 計画のデトックスのブロックはタイマー中（グループの上限まで）、寝ている間は自分と同じ睡眠で数える
-    private static func idealDetox(_ goal: GoalGhost, plan: PlanDraft?, sleep: [DateInterval], sleepCaps: [DateInterval],
-                                   dayStart: Date, dayEnd: Date) -> DetoxDay {
+    private static func idealDetox(_ goal: GoalGhost, plan: PlanDraft?, sleep: [DateInterval], awakeSleep: [DateInterval],
+                                   sleepCaps: [DateInterval], dayStart: Date, dayEnd: Date) -> DetoxDay {
         var day = DetoxDay.make(.init(
             dayStart: dayStart, dayEnd: dayEnd, until: dayEnd,
             events: [BlockEvent(occurredAt: .distantPast, timeZoneId: "UTC", kind: .started)],
@@ -216,7 +230,7 @@ extension HomeSnapshot {
                 PartialFocus(interval: DateInterval(start: $0.start, end: $0.end), share: $0.rate)
             },
             sleepCaps: sleepCaps))
-        day.unlockStarts = GoalGhost.openTimes(sleep: sleep, dayStart: dayStart, dayEnd: dayEnd)
+        day.unlockStarts = GoalGhost.openTimes(sleep: awakeSleep, dayStart: dayStart, dayEnd: dayEnd)
         return day
     }
 }

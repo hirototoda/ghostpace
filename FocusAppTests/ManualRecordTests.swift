@@ -27,7 +27,9 @@ struct ManualRecordTests {
             now: at(now), dayKeys: ["2026-10-18", "2026-10-19"], calendar: tokyoCalendar,
             events: events ?? [event(.started, "04:00", day: "2026-10-01")], gameWindows: games, sessions: sessions,
             sleep: sleep ?? [DateInterval(start: at("00:00"), end: at("07:00")),
-                             DateInterval(start: at("00:00", day: "2026-10-18"), end: at("07:00", day: "2026-10-18"))])
+                             DateInterval(start: at("00:00", day: "2026-10-18"), end: at("07:00", day: "2026-10-18"))],
+            // 区切りの履歴がない日（朝4:00区切り）の見本
+            boundary: DayBoundary(calendar: tokyoCalendar))
     }
 
     private func check(_ from: String, _ to: String, day: String = "2026-10-19", toDay: String? = nil,
@@ -421,14 +423,14 @@ struct ManualRecordModelTests {
         #expect(m.addManual(for: morning, start: jst("2026-10-19T08:10"), end: jst("2026-10-19T09:30")) == .refused(.gameTime))
     }
 
-    /// 日をまたぐブロック（23:30〜翌1:00）は 3:59 まで今日の計画のタブから記録でき、記録は始めた日の分
-    @Test func blockAcrossMidnightCanBeRecordedUntilFourAm() throws {
+    /// 夜のブロック（20:30〜21:50）はその日の区切り（22:00）の前まで今日の計画のタブから記録でき、記録はその日の分
+    /// （2026-10-21 に一日の区切りを朝4:00から夜に変えた）
+    @Test func lateBlockCanBeRecordedUntilTheBoundary() throws {
         let t = try TestStore(now: jst("2026-10-19T07:00"))
         let c = try t.seeded()
         let m = try raceModelWithBlocking(t)
-        m.setSleepSetting(startMinutes: 2 * 60, endMinutes: 7 * 60)
-        m.confirmPlan(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T23:30"), minutes: 90, category: c[0])]))
-        t.clock.set(jst("2026-10-20T01:59"))
+        m.confirmPlan(PlanDraft(blocks: [PlanBlockDraft(start: jst("2026-10-19T20:30"), minutes: 80, category: c[0])]))
+        t.clock.set(jst("2026-10-19T21:59"))
         m.reload()
         let late = try #require(m.plan?.sortedBlocks.first)
         #expect(m.manualStart(for: late) == DateInterval(start: late.start, end: late.end))
@@ -615,21 +617,20 @@ struct ManualRecordModelTests {
         let t = try TestStore(now: jst("2026-10-19T12:00"))
         let c = try t.seeded()
         let m = try raceModelWithBlocking(t)
-        // 今朝の睡眠を 5:00〜7:00 に直す（3:00〜4:30 は起きていた）
-        #expect(m.setSleepManually(start: jst("2026-10-19T05:00"), end: jst("2026-10-19T07:00")))
-        #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-19T03:00"), end: jst("2026-10-19T03:50")) == .saved)
+        // 昨日（10/18、区切り 22:00 の前）の記録
+        #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-18T21:00"), end: jst("2026-10-18T21:50")) == .saved)
         let record = try #require(try sessions(t, "2026-10-18").first)
-        // 開始を 4:00 より後に動かすと今日の記録になる
-        #expect(m.updateManual(record, start: jst("2026-10-19T03:50"), end: jst("2026-10-19T04:30")) == .saved)
-        #expect(try sessions(t, "2026-10-18").first?.startAt == jst("2026-10-19T03:50"))
+        // 開始を区切り（22:00）より後に動かすと今日の記録になる（2026-10-21 までは 4:00）
+        #expect(m.updateManual(record, start: jst("2026-10-18T21:50"), end: jst("2026-10-18T22:30")) == .saved)
+        #expect(try sessions(t, "2026-10-18").first?.startAt == jst("2026-10-18T21:50"))
         let moved = try #require(try sessions(t, "2026-10-18").first)
-        #expect(m.updateManual(moved, start: jst("2026-10-19T04:10"), end: jst("2026-10-19T04:30")) == .saved)
+        #expect(m.updateManual(moved, start: jst("2026-10-18T22:10"), end: jst("2026-10-18T22:30")) == .saved)
         #expect(try sessions(t, "2026-10-18").isEmpty)
         #expect(try sessions(t, "2026-10-19").count == 1)
         // 一昨日より前になった記録は直せない・消せない
         let today = try #require(try sessions(t, "2026-10-19").first)
         t.clock.set(jst("2026-10-21T04:00"))
-        #expect(m.updateManual(today, start: jst("2026-10-19T04:10"), end: jst("2026-10-19T04:20")) == .refused(.outOfRange))
+        #expect(m.updateManual(today, start: jst("2026-10-18T22:10"), end: jst("2026-10-18T22:20")) == .refused(.outOfRange))
         #expect(m.errorMessage == AppModel.cannotEditMessage)
         #expect(!m.deleteManual(today))
         #expect(try sessions(t, "2026-10-19").count == 1)
@@ -674,17 +675,15 @@ struct ManualRecordModelTests {
         #expect(m.running?.session.plannedEndAt == jst("2026-10-19T11:50"))
     }
 
-    /// 昨日の画面の初めの時刻は、昨日の 4:00〜今日の 4:00 の中の最後の記録の終わりから（4:00 をまたぐ記録は今日の 4:00 で切る）
-    @Test func yesterdayInitialClipsRecordsAtFourAm() throws {
+    /// 昨日の画面の初めの時刻は、昨日の一日の中の最後の記録の終わりから（区切りをまたぐ記録は今日の始まり 22:00 で切る）
+    @Test func yesterdayInitialClipsRecordsAtTheBoundary() throws {
         let t = try TestStore(now: jst("2026-10-19T12:00"))
         let c = try t.seeded()
         let m = try raceModelWithBlocking(t)
-        // 今朝の睡眠を 5:00〜7:00 に直す（夜中は起きていた）
-        #expect(m.setSleepManually(start: jst("2026-10-19T05:00"), end: jst("2026-10-19T07:00")))
-        #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-18T23:00"), end: jst("2026-10-19T04:30")) == .saved)
-        // 今日の記録（4:30 まで）は昨日の最後の記録ではない
+        #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-18T21:00"), end: jst("2026-10-18T22:30")) == .saved)
+        // 今日の記録は昨日の最後の記録ではない
         #expect(m.addManual(category: c[0], project: nil, start: jst("2026-10-19T08:00"), end: jst("2026-10-19T09:00")) == .saved)
-        #expect(m.manualInitial(daysAgo: 1) == DateInterval(start: jst("2026-10-19T04:00"), end: jst("2026-10-19T04:30")))
+        #expect(m.manualInitial(daysAgo: 1) == DateInterval(start: jst("2026-10-18T22:00"), end: jst("2026-10-18T22:30")))
     }
 
     /// 手動の記録を直す画面の選べる時刻は、秒つきの終わり（前の分を足した記録）も入る

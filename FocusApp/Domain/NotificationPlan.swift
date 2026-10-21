@@ -16,10 +16,49 @@ struct AppNotification: Hashable {
 
     static let plannedEndID = "plannedEnd"
     static let blockStartID = "blockStart"
+    /// 振り返り（REV-02）。毎日のものは `review`、1回ずつのものは `review-<日の名前>`
     static let reviewID = "review"
     /// 計画ブロックの前の通知（TMR-12）。ブロックごとに `blockNotice-<ブロックのID>`
     static let blockNoticePrefix = "blockNotice-"
     static func blockNoticeID(_ blockId: UUID) -> String { blockNoticePrefix + blockId.uuidString }
+
+    /// 押したときに何を開くかの種類（振り返りの1回ずつの予約も振り返り）
+    static func kind(of id: String) -> String { id.hasPrefix(reviewID) ? reviewID : id }
+
+    /// iPhone が一度に予約できる通知の数
+    static let systemLimit = 64
+}
+
+/// 振り返りの通知の予約（REV-02、review.md「通知」）。その日の区切りの時刻に出す。
+/// 区切りが変わらない間は毎日の予約1つ。区切りを変えた・移した日など、日によって時刻や文面が変わる間は、
+/// これから7日分を1回ずつ予約する（毎日の予約は日ごとに変えられないため）。次に開いたときに毎日の予約に戻る
+enum ReviewSchedule: Hashable {
+    /// 毎日その時刻（0:00 からの分）に「今日の結果が確定しました」
+    case daily(minutes: Int)
+    /// 1回ずつ
+    case shots([Shot])
+
+    struct Shot: Hashable {
+        var dayKey: String
+        var at: Date
+        /// 区切りの履歴より前の日（移した日）。確定は朝4:00なので今までの文面
+        var isLegacy: Bool
+    }
+
+    /// 1回ずつ予約する日数
+    static let shotDays = 7
+
+    static func make(boundary: DayBoundary, now: Date) -> ReviewSchedule {
+        let today = boundary.day(containing: now)
+        let days = (0..<shotDays).map { boundary.day($0, from: today) }
+        let latest = boundary.latestEndMinutes
+        if days.allSatisfy({ !$0.isLegacy && $0.endMinutes == latest }) { return .daily(minutes: latest % 1440) }
+        return .shots(days.compactMap { day in
+            // 移した日は今までの初期値の 22:00 に（Q48）
+            let at = day.isLegacy ? boundary.wallClock(day.date, minutes: DayBoundary.defaultEndMinutes) : day.end
+            return at > now ? Shot(dayKey: day.key, at: at, isLegacy: day.isLegacy) : nil
+        })
+    }
 }
 
 /// 計画ブロックの前の通知（TMR-12）の材料。
@@ -42,7 +81,8 @@ struct BlockNotice: Hashable {
 enum NotificationPlan {
     /// - planBlocks: その日の計画ブロック。計画外のタイマー中に次のブロックの時刻が来たら知らせる（TMR-11）
     /// - blockNotice: 計画ブロックの前の通知（TMR-12）
-    static func make(running: FocusSession?, now: Date, plannedEndEnabled: Bool, reviewMinutes: Int,
+    /// - review: 振り返りの通知（REV-02、その日の区切りの時刻）
+    static func make(running: FocusSession?, now: Date, plannedEndEnabled: Bool, review: ReviewSchedule,
                      calendar: Calendar, planBlocks: [PlanBlockSummary] = [], blockNotice: BlockNotice? = nil) -> [AppNotification] {
         var result: [AppNotification] = []
         var formatted = Date.FormatStyle.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)
@@ -64,10 +104,27 @@ enum NotificationPlan {
         if let blockNotice {
             result += notices(blockNotice, running: running, now: now, formatted: formatted, taken: result)
         }
-        result.append(AppNotification(id: AppNotification.reviewID, title: "今日を振り返りましょう",
-                                      body: "今日の集中と、朝の計画とのズレを見返して、明日の計画を立てましょう。",
-                                      trigger: .daily(minutes: reviewMinutes)))
+        switch review {
+        case .daily(let minutes):
+            result.append(reviewNotification(id: AppNotification.reviewID, isLegacy: false, trigger: .daily(minutes: minutes)))
+        case .shots(let shots):
+            // 予約の上限（64件）に収まる分だけ（近い日から）
+            let room = max(1, AppNotification.systemLimit - result.count)
+            result += shots.prefix(room).map {
+                reviewNotification(id: "\(AppNotification.reviewID)-\($0.dayKey)", isLegacy: $0.isLegacy, trigger: .at($0.at))
+            }
+        }
         return result
+    }
+
+    /// 振り返りの通知の文面。区切りの後は「今日の結果が確定しました」（2026-10-21 オーナー決定、本文は Claude 補足 Q49）。
+    /// 移した日（確定は朝4:00のまま）は今までの文面（Q48）
+    private static func reviewNotification(id: String, isLegacy: Bool, trigger: AppNotification.Trigger) -> AppNotification {
+        isLegacy
+            ? AppNotification(id: id, title: String(localized: "今日を振り返りましょう"),
+                              body: String(localized: "今日の集中と、朝の計画とのズレを見返して、明日の計画を立てましょう。"), trigger: trigger)
+            : AppNotification(id: id, title: String(localized: "今日の結果が確定しました"),
+                              body: String(localized: "先週の自分との勝ち負けを見て、明日の計画を立てましょう。"), trigger: trigger)
     }
 }
 

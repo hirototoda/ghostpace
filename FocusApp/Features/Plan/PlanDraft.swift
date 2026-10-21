@@ -53,15 +53,17 @@ struct PlanDraft: Hashable {
     }
 
     /// 保存できない理由。保存できるなら nil。
-    func problem(with block: PlanBlockDraft, dayStart: Date) -> String? {
+    /// - dayStart・dayEnd: その日の始まりと終わり（dayEnd が nil なら24時間後）
+    /// - boundaryLabel: 区切りの時刻の表示（例「22:00」）。nil なら「朝4:00」
+    func problem(with block: PlanBlockDraft, dayStart: Date, dayEnd: Date? = nil, boundaryLabel: String? = nil) -> String? {
         if block.isUnblock, blocks.filter({ $0.isUnblock && $0.id != block.id }).count >= Self.unblockLimit {
             return "ゲーム・SNS の時間は1日\(Self.unblockLimit)つまでです"
         }
         if let other = blocks.first(where: block.overlaps) {
             return "\(timeRange(other.start, other.end)) の\(other.title)と重なっています"
         }
-        if block.start < dayStart || block.end > dayStart.addingTimeInterval(24 * 3600) {
-            return "1日の区切り（朝4:00）をまたいでいます"
+        if block.start < dayStart || block.end > (dayEnd ?? dayStart.addingTimeInterval(24 * 3600)) {
+            return String(localized: "1日の区切り（\(boundaryLabel ?? String(localized: "朝4:00"))）をまたいでいます")
         }
         return nil
     }

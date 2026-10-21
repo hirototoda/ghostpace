@@ -7,6 +7,8 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 
 主な読者は Claude。オーナー向けの要点は冒頭のみ。
 
+2026-10-21 に一日の区切りを朝4:00から夜（初期 22:00、設定で変えられる）に変えた（[ADR-0023](../decisions/0023-day-boundary-evening.md)、GHO-17）。この文書の区切りに関わる所は新しい決まりに直した（テスト名は今の実装のまま。区切りの例は 22:00）。
+
 ## 要点（オーナー向け）
 - これまでのホーム・タイマー・朝の計画は見本の数字を出していただけで、何も保存していなかった。この作業で**端末に保存**し、毎日使えるようにする
 - 保存するのは「カテゴリ」「ブロック名」「1日の計画」「計画ブロック」「タイマーの記録」の5種類。項目は [data-model.md](../design/data-model.md)
@@ -15,7 +17,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 - 決定（2026-09-30）
   - 一時停止中、計画ブロックから始めたカウントダウンはブロックの終わりに合わせて減り続ける。計画外で長さを決めたものは止まる
   - 一時停止を除いて1分未満のセッションは記録しない（「1分未満なので記録しませんでした」と出す）
-  - 止め忘れの救済：終了を押したとき、予定を30分以上超過／ストップウォッチで3時間超／朝4:00をまたいだ のどれかなら「実際にやめた時刻」を聞く
+  - 止め忘れの救済：終了を押したとき、予定を30分以上超過／ストップウォッチで3時間超／朝4:00をまたいだ のどれかなら「実際にやめた時刻」を聞く（2026-10-21 に一日の区切りを夜にしても、ここは「始めた後の最初の朝4:00」のまま。[focus-timer.md](../product/features/focus-timer.md)）
 
 ## 背景・目的
 - ロードマップ段階1a（記録MVP）の中心。「10/12頃から毎日使い始める」ための前提
@@ -45,7 +47,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | ShieldEvent のモデル | 段階2で追加する。DailyReview は作らない（夜の振り返りはメモを取らない、2026-10-01） |
 | iCloud 同期 | 段階4。今回は `cloudKitDatabase: .none` |
 | バックアップ（ファイル書き出し） | ADR-0002 のとおり段階3で検討。それまで端末故障で記録を失う可能性は残る |
-| 夏時間・旅行でタイムゾーンが変わる日の対戦の揃え | 既知の制限（日本では起きない）。日付は保存済みの dayKey で引くので記録自体は壊れない |
+| 夏時間・旅行でタイムゾーンが変わる日の対戦の揃え | 既知の制限（日本では起きない）。日付は保存済みの dayKey で引くので記録自体は壊れない。2026-10-21 からの一日の区切りも、端末の暦の壁時計の時刻で決め、同じ時刻でそろえるのも壁時計の時刻（[data-model.md](../design/data-model.md)「DayBoundaryChange」） |
 
 ## 変更内容
 
@@ -83,15 +85,15 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
   - `isPaused`、`pauseCount`（＝中断回数、TMR-03）、`isCountdown`
   - `plannedEnd(at:)`：`plannedEndAt` があればそれ。`plannedDurationSec` があれば「開始＋長さ＋一時停止の合計（進行中の停止は now まで）」。どちらもなければ nil
   - `remainingSeconds(at:)`：`plannedEnd(at:) − now`（マイナスは超過）
-  - `needsEndTimeCheck(at:calendar:)`：止め忘れの疑い。超過が30分以上／ストップウォッチで一時停止を除き3時間超／開始した日の翌日4:00を過ぎている、のどれか
+  - `needsEndTimeCheck(at:calendar:)`：止め忘れの疑い。超過が30分以上／ストップウォッチで一時停止を除き3時間超／始めた後の最初の朝4:00を過ぎている、のどれか（2026-10-21 に「開始した日の翌日4:00」から言い換えた。一日の区切りを夜にしたので、日ではなく時刻で決める。区切り 22:00 をまたいだだけでは聞かない）
   - `ending(at:reportedEnd:)`：終了した値を作る。`reportedEnd` は開始より後、now 以下でなければエラー（now ちょうどは可、開始ちょうどは不可）
     - `reportedEnd` が now より前なら `originalEndAt = now`（TMR-08）。now なら nil
     - **セッションは一時停止の途中では終わらない**：終わりが一時停止の中（停止中に今で終える場合を含む）なら、その停止の開始を終了にし、その停止は捨てる（中断に数えない）
     - 終了より後に始まった停止は捨てる
 - `RunningTimer` は `FocusSession` ＋ `focusSecondsBefore` ＋ `ghost` を持つ形にし、経過・残り・差の計算は `FocusSession` に任せる
 - `HomeSnapshot.make(now:calendar:todaySessions:plan:lastWeekSessions:categories:reviewTime:)`：実データからホームの表示を作る
-  - 今日＝`dayKey` が今日のセッション（4:00 をまたいだセッションは開始した日に入る。data-model.md のとおり）
-  - 先週＝`calendar.date(byAdding: .day, value: -7, to: dayStart)` の `dayKey` のセッション。`dayStart` からの経過時間で今日に揃える（GHO-02）。経過が24時間を超える部分は切る。0件なら `ghost = nil`（1重の円、GHO-03）
+  - 今日＝`dayKey` が今日のセッション（その日の区切りをまたいだセッションは開始した日に入る。data-model.md のとおり。円の集中は区切りで区切った時間で数える、2026-10-03）
+  - 先週＝7日前の日の名前（dayKey）のセッション。同じ時刻でそろえる（7日ずらして重ねる。GHO-02）。先週の日の始まりより前・終わりより後は切る（2026-10-21 に「`dayStart` からの経過時間で揃え、24時間を超える部分は切る」から変えた。区切りが同じ週は同じ結果）。0件なら `ghost = nil`（1重の円、GHO-03）
   - 計画ブロックは削除の印がないもの。計画がスキップなら `isNoPlanDay = true`
 
 ### 3. Repository（プロトコル `FocusApp/Data/Repositories/`、実装 `FocusApp/Data/SwiftData/`）
@@ -130,8 +132,8 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
   - 開けなかったとき：**ファイルを消さずに**「記録を開けませんでした」の画面を出す。内容は「記録は消していません」、エラーの要約、「もう一度試す」ボタン（NFR-02）
 - `AppModel`（`@Observable @MainActor`）：Repository・Clock・タイムゾーンの取得元（`() -> TimeZone`、既定は `TimeZone.current`。テストで差し替える）を持ち、画面が使う状態を作る
   - 状態：`snapshot: HomeSnapshot`、`running: RunningTimer?`、`plan: PlanDraft?`（nil＝計画なし日）、`morningPlan: MorningPlan?`（出すときだけ。dayKey と dayStart を持つ）、`projects`、`categories`、`notice: String?`（短い知らせ）、`errorMessage: String?`
-  - `reload()`：そのときの端末のタイムゾーンで Calendar を作り直し、今日の `dayKey` で読み直す。朝の計画を出すのは、今日の計画がない、または下書きのとき。ただし実行中のタイマーがあればタイマーを優先し、終了後に出す
-  - 朝の計画は開いた時点の `dayKey` と `dayStart` を持ち続ける。編集中に4:00を過ぎても、その日の計画として保存する（3:55 に開いた計画は前日のもの）。確定して閉じた後の `reload()` で、新しい日の計画がなければもう一度出る
+  - `reload()`：そのときの端末のタイムゾーンで Calendar を作り直し、今日の `dayKey`（区切りの履歴で決める、GHO-17）で読み直す。朝の計画を出すのは、朝4:00以降で、今日の計画がない、または下書きのとき（その日の区切り〜3:59 は出さない、PLN-01。2026-10-21）。ただし実行中のタイマーがあればタイマーを優先し、終了後に出す
+  - 朝の計画は開いた時点の `dayKey` と `dayStart` を持ち続ける。編集中にその日の区切りを過ぎても、その日の計画として保存する（21:55 に開いた計画は開いた日のもの）。確定して閉じた後の `reload()` で、朝4:00以降で新しい日の計画が確定していなければもう一度出る
   - 計画の変更はタイマー画面の裏になるので、実行中には開けない。実行中セッションの `planBlockId`・`plannedEndAt` は開始時の値のまま（ブロックを消しても `isRemoved` の行が残るので参照は切れない）
   - 操作：`startPlanned(block:)`、`startUnplanned(category:minutes:)`、`pause()`、`resume()`、`requestEnd()`、`end(reportedEnd:)`、`saveDraft(_:)`、`confirmPlan(_:)`、`skipPlan()`、`savePlanChanges(_:)`、`createProject(name:category:)`
   - `requestEnd()`：`needsEndTimeCheck` なら終了時刻の確認を出す。そうでなければすぐ `end`
@@ -160,6 +162,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | firstweek | なし | day と同じ（先週がないので1重の円） |
 
 - `-homeScene`・`-ghost` は廃止（実データで再現できるため）
+- 区切りの履歴（2026-10-21、GHO-17）：どの場面も、見本の一番古い日の前の日を fromDayKey にした 22:00 の1行を入れる（見本の日はすべて前の夜 22:00 から始まる 22:00 区切り。一番古い行の日は朝4:00に始まるため、前の日から。2026-10-21 実装時に書き方を直した）。区切りを変えた週・移した次の18時間の日を見る場面 `switchweek`（6日前までは朝4:00区切り、5日前が 4:00〜22:00 の18時間、その次から 22:00）を足す（Claude 補足、Q48（非公開の判断表）） 区切りの直後の前の夜の予定を見る場面 `night`（今日は前の夜に入れた下書きだけ）と、起動したら設定の区切りを変える起動引数 `-boundaryTomorrow <分>` も足した（撮影用、2026-10-21 実装時）
 - DEBUG の「見本 ▾」メニュー：`-seedDemoData` で起動したときだけ出す。場面を選ぶとメモリ内のストアを作り直して入れ直す。実データで使うときは出ない
 
 ### 変更ファイル一覧
@@ -239,8 +242,11 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 3. 「この時刻で終了」 → ホームに戻り、集中が 25分 増える → endAt=09:25、originalEndAt=14:00
 4. （2 でシートを閉じた場合）→ タイマー画面のまま → 変化なし
 
-### J. 実行中に4:00を過ぎる
-1. 3:30 に計画外「決めない」で開始し、4:10 に「終了」 → 4:00 をまたいだので「いつやめましたか？」。そのまま「この時刻で終了」（初期値＝今） → ホームに戻った直後に今日の朝の計画が全画面で出る → セッションは前日の dayKey
+### J. 実行中に朝4:00を過ぎる（区切り 22:00）
+1. 3:30 に計画外「決めない」で開始し、4:10 に「終了」 → 朝4:00 をまたいだので「いつやめましたか？」。そのまま「この時刻で終了」（初期値＝今） → ホームに戻った直後に今日の朝の計画が全画面で出る → セッションは今日の dayKey（前の夜 22:00 から今日なので。2026-10-21 までは前日の dayKey だった）
+
+### J2. 実行中にその日の区切りを過ぎる（区切り 22:00、2026-10-21）
+1. 21:30 に計画外「決めない」で開始し、22:10 に「終了」 → 聞かずに終わる（区切りをまたいだだけでは止め忘れとみなさない） → セッションは始めた日の dayKey（タイムライン）。22:00 より後の10分は新しい日の集中で、ホームの円は10分
 
 ### K. 保存できなかったとき
 1. （`-failSave` で起動）「終了」 → アラート「保存できませんでした」。閉じるとタイマー画面のまま → 変化なし
@@ -268,7 +274,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | endTimeCheckOvertimeBoundary | 超過 29分59秒 → false、30分ちょうど → true |
 | endTimeCheckOvertimeWhilePaused | 計画ブロックで停止中に超過30分 → true（止め忘れの一時停止も救う） |
 | endTimeCheckStopwatchBoundary | 停止を除いて3時間ちょうど → false、3時間1秒 → true。壁時計3時間30分・停止30分 → false |
-| endTimeCheckDayBoundary | 3:30開始：3:59:59 → false、4:00:00 → true。4:30開始：翌3:59 → false、翌4:00 → true |
+| endTimeCheckDayBoundary | 3:30開始：3:59:59 → false、4:00:00 → true。4:30開始：翌3:59 → false、翌4:00 → true。区切り 22:00 で 21:30開始：22:10 → false（区切りをまたいだだけでは聞かない、2026-10-21） |
 | endingAtNow | reportedEnd=now → endAt=now、originalEndAt=nil |
 | endingEarlierKeepsOriginal | 9:00開始、reportedEnd=9:25、now=14:00 → endAt=9:25、originalEndAt=14:00 |
 | endingInsidePauseUsesPauseStart | 9:10〜9:20停止、reportedEnd=9:15 → endAt=9:10、その停止は捨てる（中断0回） |
@@ -285,7 +291,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | ghostDiffComparesSameTimeOfDay | 7日前の同じ時刻のセッションから 65分・差 +25分（既存と同じ数値） |
 | ghostNilWhenNoSessionsLastWeek | 7日前が0件 → ghost=nil、差も nil（GHO-03） |
 | ghostExcludesPauses | 先週のセッションの停止中は先週の集中に入らない |
-| ghostClipsAt24Hours | 先週 3:30 に開始（前日の dayKey なので対象外）／先週 4:30 開始〜翌 5:00 終了 → 翌 4:00（24時間）で切れる |
+| ghostClipsAt24Hours | 区切り 22:00：先週の前の日 21:30〜22:30 の記録は、22:00 より後の30分だけ先週の日に入る（区切りをまたいだタイマーの決まり、2026-10-03）／先週の前の夜 22:30 開始〜翌 22:30 終了 → 先週の日の終わり（22:00）で切れる。区切りが違う先週（4:00 区切りの日）は、同じ時刻でそろえ、先週の日の始まり（4:00）より前は0（2026-10-21） |
 | currentAndNextBlock / plannedFocusExcludesDetoxBlocks / reviewEntryAppearsFrom22 | 既存どおり（計画は PlanDraft から） |
 | removedBlocksAreHidden | isRemoved のブロックは今／次に出ない |
 | skippedPlanIsNoPlanDay | skipped → isNoPlanDay |
@@ -328,7 +334,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | startPlannedSavesRunning | endAt=nil、dayKey、timeZoneId（渡したタイムゾーン）、planBlockId、plannedEndAt |
 | startUnplannedLengthAndStopwatch | plannedDurationSec=1500／どちらも nil |
 | startWhileRunningThrows | alreadyRunning、2件目はできない |
-| startDayKeyBoundary | 3:59:59 開始 → 前日、4:00:00 開始 → 当日 |
+| startDayKeyBoundary | 区切り 22:00：21:59:59 開始 → その日、22:00:00 開始 → 次の日（日の名前は次の暦の日）。区切りの履歴より前の日は 3:59:59 → 前日、4:00:00 → 当日（2026-10-21） |
 | pauseResumePersist | 停止・再開が保存され、読み直しても同じ |
 | pauseResumeAreIdempotent | 二重の停止・停止していない再開・終了済みへの停止／再開 → 何も変わらない |
 | endSaves | endAt が入り .saved、runningSession()=nil |
@@ -336,7 +342,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | endWithReportedEnd | reportedEnd=9:25 → endAt=9:25、originalEndAt=now。早めた結果が1分未満 → 消える |
 | endTwiceIsNoOp / endUnknownIdThrows | 終了済み → 変わらず .saved／ない id → notFound |
 | saveFailureKeepsRunning | saveHook が throw → end が throw し、runningSession() は終了前のまま。saveHook を外して再度 end → 保存できる |
-| sessionsByDayKey | その日のセッションだけ返る（4:00 をまたいだものは開始した日） |
+| sessionsByDayKey | その日のセッションだけ返る（その日の区切りをまたいだものは開始した日） |
 | runningSurvivesNewContainer | 一時ファイルに開始 → コンテナを作り直して runningSession() が同じ id・開始時刻（TMR-02） |
 | corruptPausesJSONReadsAsEmpty | 壊れた JSON でもセッションは読める |
 | duplicateRunningPicksLatest | 実行中2件 → startAt が新しい方 |
@@ -351,9 +357,9 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | テスト名 | 検証内容 |
 |---|---|
 | morningPlanShownWhenNoneOrDraft | 今日の計画なし・下書き → morningPlan あり。confirmed・skipped → なし |
-| morningPlanDayBoundary | 前日が確定済み：3:59 → 出ない、4:00 → 出る（1a-1） |
+| morningPlanDayBoundary | 区切り 22:00・前の日が確定済み：22:00〜3:59 → 出ない、4:00 → 出る（1a-1。2026-10-21 までは 3:59 → 出ない、4:00 → 出る） |
 | morningPlanWaitsForRunning | 実行中のセッションがあれば出さず、end の後の reload で出る |
-| morningPlanKeepsOpeningDayKey | MutableClock で 3:55 に開き 4:05 に確定 → 前日の dayKey に保存、その後 今日の朝の計画が出る |
+| morningPlanKeepsOpeningDayKey | 区切り 22:00：MutableClock で 21:55 に開き 22:05 に確定 → 開いた日の dayKey に保存。新しい日の朝の計画は 4:00 まで出ない（2026-10-21 までは 3:55 に開き 4:05 に確定 → 前日に保存、その後今日の朝の計画） |
 | reloadUsesProvidedTimeZone | タイムゾーンの取得元を東京→ニューヨークに変えて reload → dayKey がそのタイムゾーンで出る |
 | startPlannedUsesBlockEnd / startUnplannedUsesLength | plannedEndAt=ブロック終了／plannedDurationSec=分×60 |
 | requestEndAsksOnlyWhenForgot | 条件を満たすと終了時刻の確認、満たさないとすぐ終了 |
@@ -390,7 +396,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | F デトックス | 単体（focusExcludesDetox…）で確かめる。画面は day 場面のスクショで「デトックス」表示を見る | |
 | H 1分未満 | `-seedDemoData day` | 開始してすぐ終了 →「1分未満なので記録しませんでした」 |
 | I 止め忘れ | `-seedDemoData forgot -fixedNow …T14:00:00+09:00` | 「いつやめましたか？」、初期値＝予定の終了、「この時刻で終了」でホームに戻り集中が増える |
-| J 4:00 をまたぐ | `-seedDemoData forgot -fixedNow 2026-10-20T04:10:00+09:00` | 終了 → 確認 → ホームに戻った直後に朝の計画 |
+| J 朝4:00 をまたぐ | `-seedDemoData forgot -fixedNow 2026-10-20T04:10:00+09:00` | 終了 → 確認 → ホームに戻った直後に朝の計画 |
 | K 保存失敗 | `-seedDemoData running -failSave` | 「終了」→「保存できませんでした」、タイマー画面のまま |
 | 開けないとき | `-failStoreOpen` | 「記録を開けませんでした」「記録は消していません」「もう一度試す」 |
 | 見た目 | 各場面 | 前回と同じ（ライト・ダーク・文字サイズ最大）、「一時停止中」、終了時刻の確認シート、firstweek の1重の円 |
@@ -399,7 +405,7 @@ requirements: [PLN-01, PLN-02, PLN-03, PLN-04, PLN-05, CAT-01, CAT-02, CAT-03, T
 | 基準 | 確かめるもの |
 |---|---|
 | 1a-1 | morningPlanDayBoundary、testMorningPlanPersistsDraftAndConfirm |
-| 1a-2 | createProject*、planTransitionTable、testMorningPlanPersistsDraftAndConfirm（既存の PlanDraftTests で重なり・4:00） |
+| 1a-2 | createProject*、planTransitionTable、testMorningPlanPersistsDraftAndConfirm（既存の PlanDraftTests で重なり・その日の区切り） |
 | 1a-3 | saveChangesKeepsSnapshot、confirmTwiceKeepsFirstSnapshot、画面 C |
 | 1a-4 | startPlannedUsesBlockEnd、startUnplannedUsesLength、testRunningTimerSurvivesRelaunch、testPauseResumeEnd |
 | 1a-5 | runningSurvivesNewContainer、testRunningTimerSurvivesRelaunch（実機はオーナー） |

@@ -9,8 +9,12 @@ struct DayPoints: Identifiable, Hashable {
     /// 先週の同じ曜日（今日は同じ時刻まで）。丸1日分のブロックの記録がない日など、比べられない日は nil
     var lastWeek: Double?
     var isToday: Bool
+    /// 日の名前の日の 0:00（表示の日付・グラフの横）。nil ならその日の始まりの日
+    var date: Date? = nil
 
     var id: Date { dayStart }
+    /// 表示の日付
+    var displayDate: Date { date ?? dayStart }
 
     /// 先週の同じ曜日との差（自分−先週）。どちらかがない日は nil
     var gap: Double? {

@@ -332,7 +332,9 @@ extension AppModel {
         let home = snapshot
         let available = Opponent.allCases.filter { home.opponentFocusSeconds($0) != nil }
         let current = available.contains(opponent) ? opponent : available.first
-        let curve: [Int] = (0...96).compactMap { index in
+        // その日の始まりから15分ごと、その日の長さぶん（24時間なら97点、25時間なら101点）
+        let points = Int((home.dayEnd.timeIntervalSince(home.dayStart) / ShieldRaceSnapshot.step).rounded())
+        let curve: [Int] = (0...points).compactMap { index in
             let time = home.dayStart.addingTimeInterval(Double(index) * ShieldRaceSnapshot.step)
             switch current {
             case .lastWeek: return home.ghost?.focusSeconds(at: time)
@@ -341,8 +343,9 @@ extension AppModel {
             }
         }
         let isFocusRunning = running.map { !$0.session.isPaused && $0.countsAsFocus } ?? false
-        return ShieldRaceSnapshot(writtenAt: home.now, dayKey: DayBoundary.dayKey(containing: home.now, calendar: calendar),
-                                  dayStart: home.dayStart, focusSecAtWrite: home.focusSeconds, isFocusRunning: isFocusRunning,
+        return ShieldRaceSnapshot(writtenAt: home.now, dayKey: home.dayKey,
+                                  dayStart: home.dayStart, dayEnd: home.dayEnd, focusSecAtWrite: home.focusSeconds,
+                                  isFocusRunning: isFocusRunning,
                                   opponentPrefix: current?.diffPrefix ?? "", opponentCurve: curve)
     }
 }
