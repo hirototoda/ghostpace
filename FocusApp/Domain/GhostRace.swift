@@ -66,9 +66,4 @@ extension GhostSummary {
             }
     }
 
-    /// 区切りが同じ週（履歴がない日を含む）：日の始まりからの経過で揃え、24時間を超える部分は切る（今までと同じ）
-    init?(lastWeek sessions: [FocusSession], lastWeekStart: Date, todayStart: Date) {
-        self.init(lastWeek: sessions, lastWeekDay: DateInterval(start: lastWeekStart, duration: 24 * 3600),
-                  shift: todayStart.timeIntervalSince(lastWeekStart))
-    }
 }

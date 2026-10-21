@@ -371,7 +371,7 @@ struct PointsRulesTests {
                                                                                   group: $0.detoxGroup) },
             sleep: night, gameWindows: []))
         let s = HomeSnapshot.make(now: day.end, calendar: calendar, todaySessions: today, plan: plan, lastWeekSessions: [],
-                                  detox: mine, sleep: night, day: day,
+                                  detox: mine, sleep: night, day: day, lastWeekDay: boundary([("2026-10-01", 22 * 60)]).day(-7, from: day),
                                   onPlan: OnPlanContext(morningBlockIds: Set(plan.blocks.map(\.id))))
         #expect(s.myPoints(until: day.end).isApprox(97.5, tolerance: 0.01))
     }

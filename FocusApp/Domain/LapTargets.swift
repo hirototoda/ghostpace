@@ -103,12 +103,6 @@ enum LapTargets {
         return sleepSections(sleep, dayStart: day.start, dayEnd: day.end)
     }
 
-    /// 区切りの履歴がないとき（朝4:00区切り）
-    static func sleepSections(startMinutes: Int, endMinutes: Int, dayStart: Date, calendar: Calendar) -> Set<Int> {
-        sleepSections(startMinutes: startMinutes, endMinutes: endMinutes,
-                      day: DayBoundary(calendar: calendar).day(containing: dayStart), calendar: calendar)
-    }
-
     /// 睡眠の区間：`sleep` と半分以上（ちょうど半分も）重なる区間の番号
     static func sleepSections(_ sleep: [DateInterval], dayStart: Date, dayEnd: Date? = nil) -> Set<Int> {
         Set(Laps.sections(dayStart: dayStart, dayEnd: dayEnd).enumerated().compactMap { index, section in

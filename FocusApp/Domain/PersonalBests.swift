@@ -21,11 +21,6 @@ enum BestPeriods {
         return boundary.day(-back, from: day).start
     }
 
-    /// 区切りの履歴がないとき（朝4:00区切り）
-    static func start(_ period: BestPeriod, today: Date, calendar: Calendar) -> Date? {
-        start(period, today: today, boundary: DayBoundary(calendar: calendar))
-    }
-
     /// 期間の日の範囲（ANA-06）。`recordDays` は記録のある過ぎた日（その日の始まり）。
     /// 今週（今月）に記録のある日が1日もない間は、先週（先月）を期間にする（2026-10-11 オーナー決定）。
     /// 先週（先月）にも記録のある日がなければ今週（今月）のまま（「まだ記録なし」）。2週・2か月前まではさかのぼらない。
@@ -43,11 +38,6 @@ enum BestPeriods {
         guard let previousStart else { return current }
         let previous = BestRange(start: previousStart, end: start, isFallback: true)
         return recordDays.contains(where: previous.contains) ? previous : current
-    }
-
-    /// 区切りの履歴がないとき（朝4:00区切り）
-    static func range(_ period: BestPeriod, today: Date, calendar: Calendar, recordDays: [Date]) -> BestRange {
-        range(period, today: today, boundary: DayBoundary(calendar: calendar), recordDays: recordDays)
     }
 }
 

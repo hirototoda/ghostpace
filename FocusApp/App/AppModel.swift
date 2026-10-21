@@ -203,8 +203,11 @@ final class AppModel {
         plannedEndNotifications = settings.plannedEndNotifications
         blockNoticeMinutes = settings.blockNoticeMinutes
         let now = clock.now()
+        // 読み直す前の仮の表示。区切りは保存した履歴から（読めなければ空の履歴＝朝4:00区切り、data-model.md の決まりどおり）
+        let initialBoundary = (try? store.dayBoundary(timeZone: timeZone())) ?? DayBoundary(calendar: .app(timeZone: timeZone()))
+        let initialDay = initialBoundary.day(containing: now)
         snapshot = HomeSnapshot.make(now: now, calendar: .app(timeZone: timeZone()), todaySessions: [], plan: PlanDraft(),
-                                     lastWeekSessions: [])
+                                     lastWeekSessions: [], day: initialDay, lastWeekDay: initialBoundary.day(-7, from: initialDay))
         // 区切りの履歴より前に、移す端末か新しく入れた端末かを決める（カテゴリなどを入れる前の記録で）
         let hasRecord = (try? store.hasAnyRecord()) ?? true
         // カテゴリが1つもない＝初めて使う端末（習慣の最初の案内を出すか決める、PLN-08）
@@ -1477,9 +1480,19 @@ final class AppModel {
     }
 
     /// 今日は計画しない。朝の計画で目標を決めていれば、計画なし日の目標として残す（GHO-10、Q13）
+    /// 残すのは前の夜の分（その日の始まり〜設定の睡眠の起きる時刻に始まった、もう始まったブロック）だけで、朝から先は外す
+    /// （PLN-11、2026-10-21 オーナー決定）。区切りの履歴より前の日は今までどおり全部外す
     func skipPlan(goalSeconds: Int? = nil) {
-        let dayKey = morningPlan?.dayKey ?? boundary.dayKey(containing: clock.now())
-        if perform({ try store.skip(dayKey: dayKey, timeZone: timeZone(), goalSeconds: goalSeconds) }) {
+        let now = clock.now()
+        let day = morningPlan?.day ?? boundary.day(containing: now)
+        let dayKey = day.key
+        let skipped = perform {
+            let stored = try store.plan(dayKey: dayKey)
+            let keeping = day.isLegacy || stored?.status != .draft ? [] :
+                Set(nightPart(stored?.draft, of: day).blocks.filter { $0.start <= now }.map(\.id))
+            try store.skip(dayKey: dayKey, timeZone: timeZone(), goalSeconds: goalSeconds, keeping: keeping)
+        }
+        if skipped {
             morningPlan = nil
         }
         reload()

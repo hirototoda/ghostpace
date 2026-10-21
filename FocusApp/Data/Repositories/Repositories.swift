@@ -84,15 +84,17 @@ protocol PlanRepository {
     func saveDraft(_ draft: PlanDraft, dayKey: String, timeZone: TimeZone) throws
     func confirm(_ draft: PlanDraft, dayKey: String, timeZone: TimeZone) throws
     /// 計画なし日にする。goalSeconds は計画なし日の目標（nil なら目標なし）。すでに計画なし日なら何もしない
-    func skip(dayKey: String, timeZone: TimeZone, goalSeconds: Int?) throws
+    /// 計画なし日にする。下書きのブロックは `keeping` のものだけ残し、ほかは消す（前の夜の予定、PLN-11）
+    func skip(dayKey: String, timeZone: TimeZone, goalSeconds: Int?, keeping: Set<UUID>) throws
     func saveChanges(_ draft: PlanDraft, dayKey: String) throws
     /// 目標だけを変える（計画なし日の目標、GHO-10）。その日の計画（計画なしを含む）がなければ notFound
     func setGoal(_ seconds: Int?, dayKey: String) throws
 }
 
 extension PlanRepository {
+    /// 下書きのブロックを全部消して計画なし日にする
     func skip(dayKey: String, timeZone: TimeZone) throws {
-        try skip(dayKey: dayKey, timeZone: timeZone, goalSeconds: nil)
+        try skip(dayKey: dayKey, timeZone: timeZone, goalSeconds: nil, keeping: [])
     }
 }
 

@@ -278,6 +278,38 @@ struct DayBoundaryModelTests {
         #expect(m.snapshot.nextBlock?.start == jst("2026-10-20T22:30"))
     }
 
+    /// 「今日は計画しない」で残すのは前の夜の分（その日の始まり〜設定の睡眠の起きる時刻に始まった分）だけ。
+    /// 起きる時刻より後のブロックは、もう始まっていても外す（daily-plan.md「前の夜の予定」）
+    @Test func skipKeepsOnlyThePreviousNightPart() throws {
+        let t = try TestStore(now: jst("2026-10-20T09:00"))
+        let m = model(t)
+        m.skipPlan()
+        m.saveHabits(PlanHabits(blocks: [6 * 60 + 30, 7 * 60 + 30, 9 * 60 + 30].map {
+            PlanTemplate.Block(hour: $0 / 60, minute: $0 % 60, minutes: 30, category: m.categories[2])
+        }))
+        // 22:00 に習慣で下書きを作る（前の夜の予定）
+        t.clock.set(jst("2026-10-20T22:00"))
+        m.reload()
+        #expect(try t.store.plan(dayKey: "2026-10-21")?.draft.blocks.count == 3)
+        t.clock.set(jst("2026-10-21T09:00"))
+        m.reload()
+        m.skipPlan()
+        // 起きる時刻（設定の 7:00）より前に始まった 6:30 だけ残し、7:30（始まっていても朝の分）と 9:30 は外す
+        #expect(try t.store.plan(dayKey: "2026-10-21")?.draft.blocks.map(\.start) == [jst("2026-10-21T06:30")])
+    }
+
+    /// 区切りの履歴より前の日（移した日、朝4:00区切り）は、今までどおり計画しないと全部外す
+    @Test func skipOnALegacyDayRemovesEverything() throws {
+        let t = try TestStore(now: jst("2026-10-22T09:00"))
+        let categories = try t.seeded()
+        insertSession(t, "2026-10-21T10:00", "2026-10-21T11:00", category: categories[0])
+        let m = model(t)
+        #expect(m.snapshot.isLegacyDay)
+        m.saveDraft(PlanDraft(blocks: [block("2026-10-22T05:00", 180, categories[0])]))
+        m.skipPlan()
+        #expect(try t.store.plan(dayKey: "2026-10-22")?.draft.blocks.isEmpty == true)
+    }
+
     /// 下書きがない日は、区切りより後に最初に読み直したときに習慣で作る。区切りより前から次の日の前の夜の分を登録しておく
     @Test func habitDraftIsMadeAfterTheBoundary() throws {
         let t = try TestStore(now: jst("2026-10-20T09:00"))
@@ -335,6 +367,21 @@ struct DayBoundaryModelTests {
         m.setBoundary(endMinutes: 22 * 60)
         #expect(m.pendingBoundaryChange == nil)
         #expect(m.boundary.day(key: "2026-10-21")?.duration == TimeInterval(24 * 3600))
+    }
+
+    /// 範囲の外の値は近い30分きざみに丸めて範囲に収める。保存に失敗したら変えず「保存できませんでした」
+    @Test func setBoundaryNormalizesAndReportsSaveFailure() throws {
+        let t = try TestStore(now: jst("2026-10-20T15:00"))
+        let m = model(t)
+        #expect(m.setBoundary(endMinutes: 2000))
+        #expect(try t.store.boundaryChanges().first { $0.fromDayKey == "2026-10-21" }?.endMinutes == 28 * 60)
+        #expect(m.setBoundary(endMinutes: 600))
+        #expect(m.boundaryEndMinutes == 20 * 60)
+        t.store.saveHook = { throw TestFailure() }
+        #expect(!m.setBoundary(endMinutes: 23 * 60))
+        #expect(m.errorMessage == AppModel.saveErrorMessage)
+        t.store.saveHook = nil
+        #expect(m.boundaryEndMinutes == 20 * 60)
     }
 
     /// 22:00 に変えた（もう次の日に入った）ときは、その次の日から効く
@@ -527,6 +574,11 @@ struct DayBoundaryModelTests {
         #expect(sections([("2026-10-01", 1200), ("2026-10-22", 1680)], "2026-10-22").count == 16)
         #expect(sections([("2026-10-01", 1680), ("2026-10-22", 1200)], "2026-10-22").count == 8)
         #expect(sections([("2026-10-01", 1320)], "2026-10-22").count == 12)
+        // 移した日の次の18時間の日（4:00〜22:00）は9区間
+        let short = sections([("2026-10-23", 1320)], "2026-10-23")
+        #expect(short.count == 9)
+        #expect(short.first?.start == jst("2026-10-23T04:00"))
+        #expect(short.last?.end == jst("2026-10-23T22:00"))
         // 25時間の日の最後の区間の境目まで通過する
         let day = boundary([("2026-10-01", 1320), ("2026-10-22", 1380)]).day(key: "2026-10-22")!
         #expect(Laps.passedBoundary(dayStart: day.start, dayEnd: day.end, head: jst("2026-10-22T23:00")) == jst("2026-10-22T23:00"))
@@ -555,6 +607,63 @@ struct DayBoundaryModelTests {
         #expect(blockStore.raceSnapshot?.opponentCurve.count == 101)
         #expect(blockStore.raceSnapshot?.dayEnd == jst("2026-10-22T23:00"))
         #expect(widgets.published.last?.ghostCurve.last == 3600)
+    }
+
+    /// 16・22・24・32時間の日でも、ウィジェット（10分ごと）・シールド（15分ごと）の点の数は長さ÷間隔＋1。
+    /// 最後の点は先週の同じ時刻までの集中（1b-81）
+    @Test(arguments: [(1680, 1200, 16), (1320, 1200, 22), (1320, 1320, 24), (1200, 1680, 32)])
+    func ghostCurveLengthFollowsTheDay(before: Int, after: Int, hours: Int) throws {
+        let t = try TestStore(now: jst("2026-10-22T12:00"))
+        let categories = try t.seeded()
+        try t.store.setBoundary(endMinutes: before, fromDayKey: "2026-10-01", timeZone: tokyo)
+        try t.store.setBoundary(endMinutes: after, fromDayKey: "2026-10-22", timeZone: tokyo)
+        let lastWeek = FocusSessionRecord(dayKey: "2026-10-15", timeZoneId: "Asia/Tokyo", planBlockId: nil, categoryId: categories[0].id,
+                                          countsAsFocus: true, projectId: nil, startAt: jst("2026-10-15T10:00"), plannedEndAt: nil,
+                                          plannedDurationSec: nil, at: jst("2026-10-15T10:00"))
+        lastWeek.endAt = jst("2026-10-15T11:00")
+        t.context.insert(lastWeek)
+        try t.context.save()
+        let widgets = MemoryWidgetPublisher()
+        let blockStore = MemoryBlockStore()
+        let settings = MemorySettings()
+        settings.didShowBlockingIntro = true
+        let m = AppModel(store: t.store, clock: t.clock, timeZone: { tokyo }, settings: settings, blockStore: blockStore, widgets: widgets)
+        #expect(m.snapshot.dayEnd.timeIntervalSince(m.snapshot.dayStart) == TimeInterval(hours * 3600))
+        #expect(widgets.published.last?.ghostCurve.count == hours * 6 + 1)
+        #expect(blockStore.raceSnapshot?.opponentCurve.count == hours * 4 + 1)
+        #expect(widgets.published.last?.ghostCurve.last == 3600)
+        #expect(blockStore.raceSnapshot?.opponentCurve.last == 3600)
+    }
+
+    /// 区切りを変えた週のラップ表：先週（朝4:00区切り）と今日（22:00 区切り）を同じ時刻の区間で比べる。
+    /// 今日の前の夜 22:00〜0:00 は先週0、先週の 22:00 より後は比べない（1b-78）
+    @Test func lapTableAlignsWithLastWeekAcrossTheSwitch() {
+        // 先週の日（10/15、4:00〜翌4:00）：9:00 から 22:30 まで1時間に1pt
+        let theirStart = jst("2026-10-15T09:00"), theirStop = jst("2026-10-15T22:30")
+        let their = RecordDay(dayStart: jst("2026-10-15T04:00"), pieces: [],
+                              otherPoints: { max(0, min($0, theirStop).timeIntervalSince(theirStart)) / 3600 },
+                              dayEnd: jst("2026-10-16T04:00"), origin: jst("2026-10-15T00:00"))
+        let rows = BestLaps.make(today: { _ in 0 }, todayStart: jst("2026-10-21T22:00"), todayEnd: jst("2026-10-22T22:00"),
+                                 origin: jst("2026-10-22T00:00"), now: jst("2026-10-22T22:00"), theirs: their.points(at:))
+        // 前の夜 22:00〜0:00 は先週0（どちらも0の区間は出さない）
+        #expect(!rows.contains { $0.section.start == jst("2026-10-21T22:00") })
+        // 8:00〜10:00 の区間は先週の 9:00〜10:00 の1pt
+        #expect(rows.first { $0.section.start == jst("2026-10-22T08:00") }?.theirs.isApprox(1) == true)
+        // 区切りまでの累計は先週の 9:00〜22:00 の13pt（22:00〜22:30 は比べない）
+        #expect(rows.last?.section.end == jst("2026-10-22T22:00"))
+        #expect(rows.last?.theirsTotal.isApprox(13) == true)
+    }
+
+    /// 自己ベストの「今日と比べる」も同じ時刻でそろえる：今日（22:00 区切り）の 9:30 は、ベストの日（朝4:00区切り）の 9:30 まで（1b-78）
+    @Test func personalBestComparesAtTheSameTimeAcrossTheSwitch() throws {
+        let t = try TestStore(now: jst("2026-10-22T09:30"))
+        let categories = try t.seeded()
+        try t.store.setBoundary(endMinutes: 22 * 60, fromDayKey: "2026-10-21", timeZone: tokyo)
+        insertSession(t, "2026-10-15T09:00", "2026-10-15T10:00", category: categories[0])
+        let m = model(t)
+        let comparison = try #require(m.lapComparison(target: .bestDay, period: .all))
+        // 9:00〜9:30 の30分＝3pt（一日の始まりからの経過でそろえると、先週の 15:30 まで＝6pt になってしまう）
+        #expect(comparison.theirsAtSameTime.isApprox(3))
     }
 
     // MARK: 習慣の時刻の当てはめ（1b-80）

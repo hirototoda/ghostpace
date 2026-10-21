@@ -165,17 +165,13 @@ extension HomeSnapshot {
     /// - detox / lastWeekDetox: 今日と先週の同じ曜日のデトックス（DTX-01）。先週は丸1日分あるときだけ使う
     /// - sleep: 今日の睡眠（点を付ける睡眠）。目標のゴーストのデトックスに使う
     /// - awakeSleep: [その朝の睡眠, その夜の睡眠]。目標のゴーストの起きている時間・開ける時刻に使う。nil なら `sleep`
-    /// - day: その日（始まり・終わり・日の名前）。nil なら区切りの履歴がないとき（朝4:00区切り）の `dayStart`（なければ `now`）の日
-    /// - lastWeekDay: 先週の同じ曜日（先週の区切りで数えたまま）。nil なら `day` と同じ区切りの7日前
-    /// - dayStart: 過ぎた日（分析、ANA-05）は `now` をその日の区切りにするので、日を取り違えないよう渡す（`day` がないとき）
+    /// - day: その日（始まり・終わり・日の名前。区切りの履歴から作る）。過ぎた日（分析、ANA-05）は `now` をその日の区切りにする
+    /// - lastWeekDay: 先週の同じ曜日（先週の区切りで数えたまま）
     static func make(now: Date, calendar: Calendar, todaySessions: [FocusSession], plan: PlanDraft?,
                      lastWeekSessions: [FocusSession], noPlanGoalSeconds: Int? = nil, detox: DetoxDay? = nil,
                      lastWeekDetox: DetoxDay? = nil, sleep: [DateInterval] = [], sleepCaps: [DateInterval] = [],
-                     awakeSleep: [DateInterval]? = nil, day: BoundaryDay? = nil, lastWeekDay: BoundaryDay? = nil,
-                     dayStart: Date? = nil, onPlan: OnPlanContext = OnPlanContext()) -> HomeSnapshot {
-        let legacy = DayBoundary(calendar: calendar)
-        let day = day ?? legacy.day(containing: dayStart ?? now)
-        let lastWeekDay = lastWeekDay ?? legacy.day(-7, from: day)
+                     awakeSleep: [DateInterval]? = nil, day: BoundaryDay, lastWeekDay: BoundaryDay,
+                     onPlan: OnPlanContext = OnPlanContext()) -> HomeSnapshot {
         let dayStart = day.start, dayEnd = day.end
         // 先週の日を今日に重ねるずれ（同じ時刻でそろえる、GHO-02）
         let shift = day.date.timeIntervalSince(lastWeekDay.date)

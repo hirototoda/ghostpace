@@ -298,7 +298,7 @@ final class SwiftDataStore: RecordStore {
         }
     }
 
-    func skip(dayKey: String, timeZone: TimeZone, goalSeconds: Int?) throws {
+    func skip(dayKey: String, timeZone: TimeZone, goalSeconds: Int?, keeping: Set<UUID>) throws {
         try write {
             var goal = PlanDraft()
             goal.goalSeconds = goalSeconds.flatMap { $0 > 0 ? $0 : nil }
@@ -308,9 +308,8 @@ final class SwiftDataStore: RecordStore {
             case let existing?:
                 switch PlanStatus(raw: existing.statusRaw) {
                 case .draft:
-                    // 前の夜の予定（もう始まった・終わったブロック）は残し、まだ始まっていないブロックだけ外す（PLN-11、2026-10-21）
-                    let now = clock.now()
-                    try blockRecords(planId: existing.id).filter { $0.startAt > now }.forEach(context.delete)
+                    // 前の夜の予定（呼ぶ側が決めた `keeping`）は残し、ほかは外す（PLN-11、2026-10-21）
+                    try blockRecords(planId: existing.id).filter { !keeping.contains($0.id) }.forEach(context.delete)
                     existing.statusRaw = "skipped"
                     existing.updatedAt = clock.now()
                     // 下書きの目標は残さず、渡された目標にする

@@ -42,8 +42,7 @@ struct PlanRepositoryTests {
 
     @Test(arguments: Start.allCases, Operation.allCases)
     func planTransitionTable(start: Start, operation: Operation) throws {
-        // ブロックがまだ始まっていない時刻（計画しないで外れるのは、まだ始まっていないブロック、PLN-11）
-        let t = try TestStore(now: jst("2026-10-19T07:00"))
+        let t = try TestStore()
         let study = try t.seeded()[0]
         let first = block("2026-10-19T09:00", 60, study)
         let one = PlanDraft(blocks: [first])
@@ -138,15 +137,19 @@ struct PlanRepositoryTests {
         #expect(removed.isRemoved)
     }
 
-    /// 計画しないと、まだ始まっていないブロックは消す。もう始まった・終わったブロック（前の夜の予定）は残す（PLN-11、2026-10-21）
+    /// 計画しないと、残すと決めたブロック（前の夜の予定、PLN-11、2026-10-21）だけ残し、ほかは消す
     @Test func skipFromDraftDeletesBlocks() throws {
         let t = try TestStore()
         let study = try t.seeded()[0]
         let night = block("2026-10-18T22:30", 60, study)
         try t.store.saveDraft(PlanDraft(blocks: [night, block("2026-10-19T10:00", 60, study)]), dayKey: day, timeZone: tokyo)
-        try t.store.skip(dayKey: day, timeZone: tokyo)
+        try t.store.skip(dayKey: day, timeZone: tokyo, goalSeconds: nil, keeping: [night.id])
         #expect(try t.store.plan(dayKey: day)?.status == .skipped)
         #expect(try t.context.fetch(FetchDescriptor<PlanBlockRecord>()).map(\.id) == [night.id])
+        // 何も残さないなら全部消す
+        try t.store.saveDraft(PlanDraft(blocks: [block("2026-10-20T10:00", 60, study)]), dayKey: "2026-10-20", timeZone: tokyo)
+        try t.store.skip(dayKey: "2026-10-20", timeZone: tokyo)
+        #expect(try t.store.plan(dayKey: "2026-10-20")?.draft.blocks.isEmpty == true)
     }
 
     @Test func unknownStatusIsReadOnly() throws {

@@ -27,7 +27,9 @@ struct ManualRecordTests {
             now: at(now), dayKeys: ["2026-10-18", "2026-10-19"], calendar: tokyoCalendar,
             events: events ?? [event(.started, "04:00", day: "2026-10-01")], gameWindows: games, sessions: sessions,
             sleep: sleep ?? [DateInterval(start: at("00:00"), end: at("07:00")),
-                             DateInterval(start: at("00:00", day: "2026-10-18"), end: at("07:00", day: "2026-10-18"))])
+                             DateInterval(start: at("00:00", day: "2026-10-18"), end: at("07:00", day: "2026-10-18"))],
+            // 区切りの履歴がない日（朝4:00区切り）の見本
+            boundary: DayBoundary(calendar: tokyoCalendar))
     }
 
     private func check(_ from: String, _ to: String, day: String = "2026-10-19", toDay: String? = nil,

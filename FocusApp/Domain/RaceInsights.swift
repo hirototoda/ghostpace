@@ -169,10 +169,6 @@ enum DailyFocus {
         return result
     }
 
-    /// 区切りの履歴がないとき（朝4:00区切り）
-    static func byDay(_ segments: [TimeSegment], calendar: Calendar) -> [Date: Int] {
-        byDay(segments, boundary: DayBoundary(calendar: calendar))
-    }
 
     /// 自己ベスト（今日より前の日だけ）。記録がなければ nil
     static func best(_ byDay: [Date: Int], before today: Date) -> PersonalBest? {
@@ -241,12 +237,6 @@ struct TimeMap: Hashable {
             let count = days[weekday]?.count ?? 0
             return row.map { count > 0 ? $0 / count : 0 }
         }, originMinutes: origin)
-    }
-
-    /// 区切りの履歴がないとき（朝4:00区切り）。`today` は今日の 4:00
-    static func make(_ segments: [TimeSegment], today: Date, calendar: Calendar) -> TimeMap {
-        let boundary = DayBoundary(calendar: calendar)
-        return make(segments, today: boundary.day(containing: today), boundary: boundary)
     }
 
     /// 区間の始まりの時刻（0:00 からの分）：今日の一日の始まりの時刻

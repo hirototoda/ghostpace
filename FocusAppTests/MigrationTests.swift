@@ -123,4 +123,29 @@ struct MigrationTests {
         #expect(try store.boundaryChanges().count == 1)
         #expect(m.snapshot.dayStart == jst("2026-10-23T22:00"))
     }
+
+    /// 記録のない第5版のストア（入れただけで使っていない端末）を開くと、行は1つだけで最初の日から 22:00（前の日を fromDayKey、1b-79）
+    @Test func migrateEmptyV5StoreStartsAtTwentyTwoFromTheFirstDay() throws {
+        let url = temporaryStoreURL()
+        defer { removeStoreFiles(url) }
+        let now = jst("2026-10-22T15:00")
+        do {
+            let schema = Schema(versionedSchema: SchemaV5.self)
+            let container = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, url: url,
+                                                                                               cloudKitDatabase: .none))
+            let context = ModelContext(container)
+            context.insert(SchemaV5.CategoryRecord(name: "勉強", countsAsFocus: true, sortOrder: 0, at: now))
+            try context.save()
+        }
+        let clock = MutableClock(now)
+        let store = SwiftDataStore(container: try AppStore.makeContainer(url: url), clock: clock)
+        let settings = MemorySettings()
+        settings.didShowBlockingIntro = true
+        let m = AppModel(store: store, clock: clock, timeZone: { tokyo }, settings: settings)
+        #expect(try store.boundaryChanges().map(\.fromDayKey) == ["2026-10-21"])
+        #expect(try store.boundaryChanges().map(\.endMinutes) == [22 * 60])
+        #expect(m.snapshot.dayKey == "2026-10-22")
+        #expect(m.snapshot.dayStart == jst("2026-10-21T22:00"))
+        #expect(!m.snapshot.isLegacyDay)
+    }
 }
